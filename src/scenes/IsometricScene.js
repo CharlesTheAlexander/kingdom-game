@@ -60,7 +60,13 @@ const DAY_MS = 300000;   // one game day = 5 real minutes (scaled by game speed)
 
 export class IsometricScene extends GameScene {
   constructor() {
-    super('IsometricScene');
+    // NOTE: GameScene's constructor hardcodes super('GameScene') and ignores its
+    // argument, so super('IsometricScene') would NOT take — both scenes would end
+    // up keyed 'GameScene' and Phaser throws "duplicate key: GameScene" (black
+    // screen). The key is set on this.sys.settings (already created by super())
+    // before the SceneManager reads it, giving this scene its own unique key.
+    super();
+    this.sys.settings.key = 'IsometricScene';
   }
 
   // ---- Asset loading (iso terrain + buildings + Tiny Swords overlays) ------
