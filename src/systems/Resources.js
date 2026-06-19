@@ -1,10 +1,11 @@
 // Player economy (Phase 1 overhaul): Wood, Stone, Food, Gold, Workers cap, Soldiers.
 export class Resources {
   constructor() {
-    this.wood = 50;
-    this.stone = 30;
-    this.food = 50;
-    this.gold = 100;
+    // (Phase 3 rebalance) opening-pace starting values.
+    this.wood = 80;
+    this.stone = 20;
+    this.food = 60;
+    this.gold = 150;
     this.workersCap = 3; // population cap (raised by Houses); pawns spawn up to this
     this.soldiers = 0; // driven by the live warrior count (Phase 4)
   }

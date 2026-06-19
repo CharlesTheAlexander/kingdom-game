@@ -15,6 +15,8 @@ export class Building {
     this.prodTimer = 0; // seconds accumulated toward next production
     this.attackTimer = 0; // seconds accumulated toward next shot
     this.alive = true;
+    this.slots = []; // barracks training slots: [{ type, timeLeft, total }] (Bug 4)
+    this.workers = 0; // allocated workers (Phase 2)
 
     const { x, y } = scene.tileCenter(col, row);
     this.x = x;
@@ -32,8 +34,11 @@ export class Building {
     const src = this.rect.texture.getSourceImage();
     this.baseScale = 46 / Math.max(src.width, src.height);
     this.rect.setScale(this.baseScale);
-    // (Phase 4) Tiny random tilt so buildings don't look robotically aligned.
+    // Tiny random tilt + ±3px visual offset so buildings look hand-placed
+    // (logic position stays on the grid at this.x/this.y).
     this.rect.setAngle(Phaser.Math.FloatBetween(-2, 2));
+    this.rect.x += Phaser.Math.Between(-3, 3);
+    this.rect.y += Phaser.Math.Between(-3, 3);
     this.rect.on('pointerdown', (p, lx, ly, ev) => {
       if (!p.leftButtonDown()) return; // right-click is reserved for unit move commands
       ev.stopPropagation();
@@ -57,22 +62,35 @@ export class Building {
       })
       .setOrigin(1, 1)
       .setDepth(7);
+
+    // (Phase 2) Worker status indicator: red "!" if a production building has
+    // no workers, green check if it does. Hidden for non-production buildings.
+    if (this.type.maxWorkers > 0) {
+      this.workerIcon = scene.add
+        .text(x, y - 34, '!', { fontFamily: 'monospace', fontSize: '16px', fontStyle: 'bold', color: '#ff5252', stroke: '#000000', strokeThickness: 3 })
+        .setOrigin(0.5)
+        .setDepth(8);
+      this.refreshWorkerIcon();
+    }
+  }
+
+  refreshWorkerIcon() {
+    if (!this.workerIcon) return;
+    if (this.workers > 0) this.workerIcon.setText('✓').setColor('#5cff8a');
+    else this.workerIcon.setText('!').setColor('#ff5252');
   }
 
   // Whole-number production. Called once per second by the manager.
+  // (Bug 4) Soldiers are no longer auto-produced — the Barracks trains units
+  // manually via its training slots, so 'soldiers' is skipped here.
   produce(resources, scene) {
-    if (this.type.attack || !this.type.produces) return;
-    const mult = outputMultiplier(this.level);
+    if (this.type.attack || !this.type.produces || this.type.produces === 'soldiers') return;
     const interval = this.type.interval || 1;
     this.prodTimer += 1;
-    if (this.prodTimer >= interval) {
-      this.prodTimer = 0;
-      if (this.type.produces === 'soldiers') {
-        scene.onSoldierProduced(this); // spawns a visible warrior (Phase 4)
-      } else {
-        resources.add(this.type.produces, this.type.rate * mult);
-      }
-    }
+    if (this.prodTimer < interval) return;
+    this.prodTimer = 0;
+    const rate = this.currentOutput();
+    if (rate > 0) resources.add(this.type.produces, rate);
   }
 
   // Building upgrades cost GOLD only (see BuildingTypes.upgradeCost).
@@ -99,6 +117,11 @@ export class Building {
   currentOutput() {
     const mult = outputMultiplier(this.level);
     if (this.type.attack) return this.type.damage * mult;
+    // Production scales with allocated workers; non-worker producers (castle)
+    // use their flat base rate and are always on.
+    if (this.type.maxWorkers > 0 && this.type.workerRates) {
+      return (this.type.workerRates[this.workers] || 0) * mult;
+    }
     return (this.type.rate || 0) * mult;
   }
 
@@ -126,6 +149,7 @@ export class Building {
     this.hpBar.destroy();
     this.hpBarBg.destroy();
     this.levelText.destroy();
+    if (this.workerIcon) this.workerIcon.destroy();
   }
 }
 
@@ -153,9 +177,9 @@ export class BuildingManager {
     return this.buildings.filter((b) => b.typeKey !== 'castle').length;
   }
 
-  // Sum of workers consumed by operating buildings.
+  // Sum of workers ALLOCATED to buildings (Phase 2 manual allocation).
   workersUsed() {
-    return this.buildings.reduce((sum, b) => sum + (b.type.workerCost || 0), 0);
+    return this.buildings.reduce((sum, b) => sum + (b.workers || 0), 0);
   }
 
   availableWorkers(resources) {
@@ -166,7 +190,7 @@ export class BuildingManager {
   canPlace(typeKey, resources, maxBuildings) {
     const type = BuildingTypes[typeKey];
     if (this.placedCount() >= maxBuildings) {
-      return { ok: false, reason: `Building limit reached (${maxBuildings}) — upgrade your settlement` };
+      return { ok: false, reason: 'Upgrade your settlement to build more' };
     }
     if (type.maxCount && this.countOfType(typeKey) >= type.maxCount) {
       return { ok: false, reason: `Max ${type.maxCount} ${type.name}s reached` };
@@ -174,9 +198,8 @@ export class BuildingManager {
     if (!resources.canAfford(type.cost)) {
       return { ok: false, reason: 'Not enough resources' };
     }
-    if (type.workerCost > 0 && this.availableWorkers(resources) < type.workerCost) {
-      return { ok: false, reason: 'Need more workers — build a House' };
-    }
+    // (Phase 2) Buildings no longer require free workers to place — they are
+    // built idle, then the player assigns workers to activate them.
     return { ok: true };
   }
 
@@ -214,6 +237,7 @@ export class BuildingManager {
   updateTowers(dt, enemies) {
     for (const b of this.buildings) {
       if (!b.type.attack || !b.alive) continue;
+      if (b.workers <= 0) continue; // (Phase 2) a Tower needs a worker to fire
       b.attackTimer += dt;
       if (b.attackTimer < b.type.attackInterval) continue;
 

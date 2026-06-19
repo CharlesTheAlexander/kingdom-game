@@ -5,43 +5,46 @@
 // and `production: true` to mark them as places worker pawns visit (Phase 3).
 // Each building's sprite/texture key == its key (loaded in GameScene.preload()).
 
+// (Phase 2 — worker allocation) Production buildings define `maxWorkers` and a
+// `workerRates` table indexed by the number of allocated workers (rate per sec
+// for `produces`). 0 workers = 0 production. Workers are assigned manually.
 export const BuildingTypes = {
   castle: {
-    key: 'castle', name: 'Castle', cost: {}, workerCost: 0, hp: 200,
+    key: 'castle', name: 'Castle', cost: {}, maxWorkers: 0, hp: 200,
     produces: 'gold', rate: 2, placeable: false,
-    desc: 'The heart of your kingdom. Generates 2 gold/sec. Protect it!',
+    desc: 'The heart of your kingdom. Always generates 2 gold/sec. Protect it!',
   },
   house: {
-    key: 'house', name: 'House', cost: { wood: 30 }, workerCost: 0, hp: 80,
-    capIncrease: 1, maxCount: 3, placeable: true,
-    desc: 'Houses a worker. +1 Workers cap (max 3 houses).',
+    key: 'house', name: 'House', cost: { wood: 30 }, maxWorkers: 0, hp: 80,
+    capIncrease: 2, maxCount: 3, placeable: true,
+    desc: 'Houses workers. +2 Workers cap (max 3 houses = +6).',
   },
   lumberyard: {
-    key: 'lumberyard', name: 'Lumberyard', cost: { wood: 40 }, workerCost: 1, hp: 90,
-    produces: 'wood', rate: 2, production: true, placeable: true,
+    key: 'lumberyard', name: 'Lumberyard', cost: { wood: 40 }, maxWorkers: 3, hp: 90,
+    produces: 'wood', workerRates: [0, 2, 4, 7], production: true, placeable: true,
     // No dedicated lumberyard art in the free pack — Archery.png is a stand-in.
-    desc: 'Produces 2 wood/sec. Needs 1 worker.',
+    desc: 'Wood. Assign workers: 1→2, 2→4, 3→7 /sec.',
   },
   mine: {
-    key: 'mine', name: 'Mine', cost: { stone: 50 }, workerCost: 1, hp: 90,
-    produces: 'stone', rate: 1, production: true, placeable: true,
+    key: 'mine', name: 'Mine', cost: { stone: 50 }, maxWorkers: 3, hp: 90,
+    produces: 'stone', workerRates: [0, 1, 2, 4], production: true, placeable: true,
     // No dedicated mine art in the free pack — Monastery.png is a stand-in.
-    desc: 'Produces 1 stone/sec. Needs 1 worker.',
+    desc: 'Stone. Assign workers: 1→1, 2→2, 3→4 /sec.',
   },
   farm: {
-    key: 'farm', name: 'Farm', cost: { wood: 40 }, workerCost: 1, hp: 80,
-    produces: 'food', rate: 2, production: true, placeable: true,
-    desc: 'Produces 2 food/sec. Needs 1 worker.',
+    key: 'farm', name: 'Farm', cost: { wood: 40 }, maxWorkers: 3, hp: 80,
+    produces: 'food', workerRates: [0, 2, 4, 7], production: true, placeable: true,
+    desc: 'Food. Assign workers: 1→2, 2→4, 3→7 /sec.',
   },
   barracks: {
-    key: 'barracks', name: 'Barracks', cost: { gold: 80, wood: 40 }, workerCost: 2, hp: 120,
-    produces: 'soldiers', rate: 1, interval: 20, placeable: true,
-    desc: 'Trains 1 soldier every 20s. Needs 2 workers.',
+    key: 'barracks', name: 'Barracks', cost: { gold: 80, wood: 40 }, maxWorkers: 2, hp: 120,
+    placeable: true,
+    desc: 'Trains units. Assign workers to train: 2 workers = 1.5x speed.',
   },
   tower: {
-    key: 'tower', name: 'Tower', cost: { stone: 60, wood: 20 }, workerCost: 1, hp: 120,
+    key: 'tower', name: 'Tower', cost: { stone: 60, wood: 20 }, maxWorkers: 1, hp: 120,
     range: 3, damage: 10, attackInterval: 1, attack: true, placeable: true,
-    desc: 'Attacks enemies within 3 tiles. Needs 1 worker.',
+    desc: 'Attacks enemies within 3 tiles. Needs 1 worker to operate.',
   },
 };
 

@@ -298,6 +298,15 @@ export class TroopManager {
     return [...this.warriors, ...this.archers, ...this.monks].filter((u) => u.alive);
   }
 
+  // Remove one random living unit (Phase 3 food desertion). Returns true if any.
+  removeRandom() {
+    const all = this.allUnits();
+    if (all.length === 0) return false;
+    const u = all[Math.floor(Math.random() * all.length)];
+    u.die();
+    return true;
+  }
+
   spawnArcher(barracks) {
     this.archers.push(new Archer(this.scene, barracks.x + Phaser.Math.Between(-26, -14), barracks.y + Phaser.Math.Between(-14, 14)));
   }

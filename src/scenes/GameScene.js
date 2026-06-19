@@ -29,6 +29,24 @@
  *      dust, sparkles, float text), 30x22 scrolling map with right/middle-drag
  *      camera panning, bottom-right minimap, and a 1x/2x/3x speed control.
  *
+ *  POLISH/REBALANCE SESSION (latest):
+ *    - Camera: right/middle-DRAG always pans (÷zoom); right-TAP = unit move
+ *      order; mouse-wheel zoom 0.5–1.5; clamped to world bounds (setupCamera).
+ *    - WORKER ALLOCATION (Phase 2): workers are a manual pool. Production
+ *      buildings have worker slots and produce only when staffed (workerRates
+ *      by count). Selected building shows +/- worker controls; red "!"/green
+ *      "✓" status icons; pawns reflect assignments. Houses give +2 cap each.
+ *    - ECONOMY (Phase 3): start 80/20/60/150; soldiers cost gold+food and are
+ *      capped at 5 per Barracks; food upkeep (1/soldier/10s) → desertion at 0.
+ *      Barracks levels gate units/slots (Lv1 Warrior, Lv2 Archer, Lv3 Monk).
+ *    - Settlement build cap shown as "Buildings: X/cap" and enforced per tier.
+ *    - ONBOARDING (Phase 4): first-load welcome panel + one-time contextual hints.
+ *    - Grid feel: 15% grid lines (zone only), placement ghost preview.
+ *
+ *  NOT YET IMPLEMENTED (deferred this session): multi-tile building footprints
+ *  (Castle 3x3 / Barracks 2x2) and Phase-5 troop formations / path-around-
+ *  buildings / combat-feel (attack frame, damage numbers, death fade, leash).
+ *
  *  Coordinate note: GRID_W/GRID_H is the WORLD (1440x1056); GAME_W/GAME_H is the
  *  fixed VIEWPORT (960x900). All HUD is setScrollFactor(0) so it stays put while
  *  the camera pans.
@@ -58,11 +76,12 @@ const GRID_H = ROWS * TILE; // 1056 (world grid height)
 export const GAME_W = 960;
 export const GAME_H = 900;
 
-// Barracks unit training (Phase 4). All three count toward the Soldiers number.
+// Barracks unit training. All three count toward the Soldiers number.
+// (Phase 3 rebalance) slower + more expensive, food now part of every cost.
 const TRAIN_DEFS = {
-  warrior: { label: 'Warrior', time: 20, cost: {} },
-  archer: { label: 'Archer', time: 25, cost: { gold: 20 } },
-  monk: { label: 'Monk', time: 30, cost: { gold: 30, food: 10 } },
+  warrior: { label: 'Warrior', time: 30, cost: { gold: 30, food: 5 } },
+  archer: { label: 'Archer', time: 40, cost: { gold: 40, food: 8 } },
+  monk: { label: 'Monk', time: 50, cost: { gold: 50, food: 10, stone: 10 } },
 };
 
 export class GameScene extends Phaser.Scene {
@@ -187,25 +206,50 @@ export class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.createMinimap();
     this.refreshPanel();
+
+    // (Phase 4) First-load welcome panel; (Phase 2) follow-up worker tooltip.
+    this.showWelcomePanel();
+    this.time.delayedCall(900, () => this.fireHint('start', 'Assign workers to buildings to start producing resources'));
   }
 
   // ---- Camera (Phase 5): pan over the larger-than-screen map ---------------
 
   setupCamera() {
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, GRID_W, this.gridOriginY + GRID_H);
+    cam.setBounds(0, 0, GRID_W, this.gridOriginY + GRID_H); // clamps panning to the world
     const c = this.buildings.castle;
     cam.centerOn(c.x, c.y); // start centered on the player castle
+    this._rightDrag = null;
 
-    // Pan with middle-drag, or right-drag ONLY when no units are selected
-    // (with a selection, right-click is a move command — Phase 3).
     this.input.mouse.disableContextMenu();
+
+    // Right/middle drag ALWAYS pans (divided by zoom so it feels consistent).
     this.input.on('pointermove', (p) => {
-      const rightPan = p.rightButtonDown() && this.selectedUnits.length === 0;
-      if (rightPan || p.middleButtonDown()) {
-        cam.scrollX -= p.x - p.prevPosition.x;
-        cam.scrollY -= p.y - p.prevPosition.y;
+      if (p.rightButtonDown() || p.middleButtonDown()) {
+        if (this._rightDrag && (Math.abs(p.x - this._rightDrag.sx) > 4 || Math.abs(p.y - this._rightDrag.sy) > 4)) {
+          this._rightDrag.moved = true;
+        }
+        cam.scrollX -= (p.x - p.prevPosition.x) / cam.zoom;
+        cam.scrollY -= (p.y - p.prevPosition.y) / cam.zoom;
       }
+    });
+
+    // Track the right press so we can tell a pan-drag from a move-order click.
+    this.input.on('pointerdown', (p) => {
+      if (p.rightButtonDown()) this._rightDrag = { sx: p.x, sy: p.y, moved: false };
+    });
+    this.input.on('pointerup', (p) => {
+      // A right-click WITHOUT a drag, with units selected, is a move order.
+      const tapped = this._rightDrag && !this._rightDrag.moved;
+      this._rightDrag = null;
+      if (tapped && !this.isGameOver && !this.placementType && this.selectedUnits.length > 0) {
+        if (p.y >= TOP_BAR && p.y <= GAME_H - PANEL_H) this.issueMoveCommand(p.worldX, p.worldY);
+      }
+    });
+
+    // Mouse wheel = zoom (0.5–1.5), always available.
+    this.input.on('wheel', (p, over, dx, dy) => {
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.5, 1.5));
     });
   }
 
@@ -242,9 +286,10 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // (Phase 4) Very subtle grid lines, only inside the buildable zone.
+    // Very subtle grid lines (15% max), only inside the buildable zone; the
+    // wilderness has none (Phase 3 grid-feel).
     const g = this.add.graphics().setDepth(0);
-    g.lineStyle(1, 0x000000, 0.2);
+    g.lineStyle(1, 0x000000, 0.15);
     for (let r = z.r0; r <= z.r1; r++) {
       for (let c = z.c0; c <= z.c1; c++) {
         g.strokeRect(c * TILE, this.gridOriginY + r * TILE, TILE, TILE);
@@ -456,6 +501,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(50)
       .setScrollFactor(0);
     this.tweens.add({ targets: t, alpha: 0, y: t.y - 30, duration: 1400, onComplete: () => t.destroy() });
+    this.fireHint('firstWave', 'Enemy attack incoming — select your warriors and right-click enemies to fight');
     // (Phase 5) shake the wave counter so the player notices the new wave.
     const wt = this.hud && this.hud.wave;
     if (wt) {
@@ -509,13 +555,39 @@ export class GameScene extends Phaser.Scene {
         this.selectUnitsInBox(a.sx, a.sy, p.worldX, p.worldY);
       }
     });
+    // (Bug 1) Right-click move orders are handled in setupCamera() so that
+    // right-DRAG always pans and a right-TAP issues the move command.
 
-    // Right-click → move command for the current selection.
-    this.input.on('pointerdown', (p) => {
-      if (this.isGameOver || !p.rightButtonDown()) return;
-      if (this.placementType || this.selectedUnits.length === 0 || !inBand(p)) return;
-      this.issueMoveCommand(p.worldX, p.worldY);
-    });
+    // (Phase 3) Placement ghost: a translucent preview sprite + soft glow.
+    this.input.on('pointermove', (p) => this.updatePlacementGhost(p));
+  }
+
+  updatePlacementGhost(p) {
+    if (!this.placementType) {
+      this.clearGhost();
+      return;
+    }
+    const inBand = p.y >= TOP_BAR && p.y <= GAME_H - PANEL_H;
+    const tile = inBand ? this.pointerToTile(p.worldX, p.worldY) : null;
+    if (!tile) {
+      this.clearGhost();
+      return;
+    }
+    const { x, y } = this.tileCenter(tile.col, tile.row);
+    const valid = this.isBuildZone(tile.col, tile.row) && !this.buildings.isOccupied(tile.col, tile.row);
+    if (!this.ghost) {
+      this.ghostGlow = this.add.ellipse(x, y + 14, 50, 22, 0x66ff88, 0.3).setDepth(32);
+      this.ghost = this.add.image(x, y, this.placementType).setDepth(33).setAlpha(0.55);
+    }
+    if (this.ghost.texture.key !== this.placementType) this.ghost.setTexture(this.placementType);
+    const src = this.ghost.texture.getSourceImage();
+    this.ghost.setScale(46 / Math.max(src.width, src.height)).setPosition(x, y).setTint(valid ? 0xffffff : 0xff6666).setVisible(true);
+    this.ghostGlow.setPosition(x, y + 14).setFillStyle(valid ? 0x66ff88 : 0xff6666, 0.3).setVisible(true);
+  }
+
+  clearGhost() {
+    if (this.ghost) this.ghost.setVisible(false);
+    if (this.ghostGlow) this.ghostGlow.setVisible(false);
   }
 
   // ---- Box-select + unit commands (Phase 3) --------------------------------
@@ -631,6 +703,7 @@ export class GameScene extends Phaser.Scene {
   selectBuilding(b) {
     if (this.isGameOver) return;
     this.placementType = null;
+    this.clearGhost();
     this.selectedBuilding = b;
     this.showSelection(b);
     this.refreshPanel();
@@ -744,6 +817,8 @@ export class GameScene extends Phaser.Scene {
     this.hud.waveTime = fix(this.add.text(GAME_W - 65, TOP_BAR + 37, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffe066' }).setOrigin(0.5).setDepth(41));
 
     this.hud.aiStatus = fix(this.add.text(12, TOP_BAR + 8, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ff8a80', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 }).setDepth(41));
+    // (Phase 3) Low-food warning, just under the AI status (top-left).
+    this.hud.foodWarn = fix(this.add.text(12, TOP_BAR + 28, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffd23f', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 }).setDepth(41)).setVisible(false);
 
     // Speed control (Phase 5): cycles 1x / 2x / 3x.
     const speedBtn = fix(this.add.rectangle(GAME_W - 120, TOP_BAR + 62, 110, 26, 0x2d6cb0).setOrigin(0, 0).setStrokeStyle(2, 0xf0e6c8, 0.7).setDepth(40).setInteractive({ useHandCursor: true }));
@@ -845,9 +920,14 @@ export class GameScene extends Phaser.Scene {
     this.flashRes('stone', '#cfd3d6', Math.floor(r.stone), `Stone ${Math.floor(r.stone)}`);
     this.flashRes('food', '#8fd14f', Math.floor(r.food), `${Math.floor(r.food)}`);
     this.flashRes('gold', '#ffd23f', Math.floor(r.gold), `${Math.floor(r.gold)}`);
-    this.hud.workers.setText(`Workers ${this.buildings.availableWorkers(r)}/${r.workersCap}`);
-    this.hud.soldiers.setText(`Soldiers ${this.troops.count}`);
+    this.hud.workers.setText(`Workers ${this.buildings.workersUsed()}/${r.workersCap}`);
+    this.hud.soldiers.setText(`Soldiers ${this.troops.count}/${this.soldierCap()}`);
     this.hud.tier.setText(this.TIERS[this.tierIndex].name.toUpperCase());
+    // (Phase 3) Low-food / desertion warning.
+    if (this.hud.foodWarn) {
+      const warn = this.troops.count > 0 && r.food < 20;
+      this.hud.foodWarn.setText(r.food <= 0 ? '⚠ No food — soldiers deserting!' : '⚠ Low food — soldiers deserting soon').setVisible(warn);
+    }
     if (this.ai) {
       this.hud.wave.setText(`W ${this.ai.waveNumber}`);
       this.hud.waveTime.setText(!this.ai.castleAlive ? 'down' : this.ai.regrouping ? `${Math.max(0, Math.ceil(this.ai.waveTimer))}s` : 'NOW');
@@ -939,6 +1019,8 @@ export class GameScene extends Phaser.Scene {
       ? `Placing: ${BuildingTypes[this.placementType].name} — click an empty tile  (free workers: ${this.buildings.availableWorkers(this.resources)})`
       : 'Pick a building below, then click an empty tile. Click a building to inspect.';
     this.panelText(12, this.PANEL_Y + 8, status, { color: '#f1e3c0' });
+    // (Bug 2) Building cap readout.
+    this.panelText(GAME_W - 150, this.PANEL_Y + 8, `Buildings: ${this.buildings.placedCount()}/${this.maxBuildings()}`, { color: '#ffd23f', bold: true });
 
     const y = this.PANEL_Y + 30;
     const bw = 104;
@@ -969,6 +1051,7 @@ export class GameScene extends Phaser.Scene {
     if (this.placementType) {
       this.spriteButton(GAME_W - 150, y, 140, h, 'Cancel', 'stop placing', true, () => {
         this.placementType = null;
+        this.clearGhost();
         this.refreshPanel();
       });
     } else if (this.tierIndex < this.TIERS.length - 1) {
@@ -1024,34 +1107,88 @@ export class GameScene extends Phaser.Scene {
 
     this.panelText(26, this.PANEL_Y + 14, `${t.name}  (Lv ${b.level}/${MAX_LEVEL})`, { bold: true, size: '18px', color: '#ffe9b0' });
     this.panelText(26, this.PANEL_Y + 42, `HP ${Math.ceil(b.hp)} / ${b.maxHp}`, { color: '#9fe0a0' });
-    if (b.typeKey === 'barracks' && b.training) {
-      this.panelText(26, this.PANEL_Y + 62, `Training ${TRAIN_DEFS[b.training.type].label}: ${Math.ceil(b.training.timeLeft)}s`, { color: '#ffd23f' });
-    } else {
-      this.panelText(26, this.PANEL_Y + 62, info, { color: '#ffd23f' });
-    }
-    this.panelText(26, this.PANEL_Y + 84, t.desc, { color: '#cfc1a6', size: '11px', wrap: 400 });
 
-    const by = this.PANEL_Y + 34;
-    const closeBtn = () =>
-      this.spriteButton(GAME_W - 128, by, 110, 64, 'Close', '', true, () => {
+    const closeBtnAt = (x, y, w, h) =>
+      this.spriteButton(x, y, w, h, 'Close', '', true, () => {
         this.selectedBuilding = null;
         this.clearSelection();
         this.refreshPanel();
       });
 
     if (b.typeKey === 'barracks') {
-      // Phase 4: three train buttons (one unit at a time).
+      // (Bug 4) Slot status + level-gated training + upgrade.
+      const maxSlots = b.level;
+      const slotInfo = b.slots.length
+        ? `Slots ${b.slots.length}/${maxSlots}: ${b.slots.map((s) => `${TRAIN_DEFS[s.type].label[0]}${Math.ceil(s.timeLeft)}s`).join(' ')}`
+        : `Slots ${maxSlots} · idle`;
+      this.panelText(26, this.PANEL_Y + 60, slotInfo, { color: '#ffd23f', size: '12px' });
+      // Worker controls (workers set training speed; 0 = paused).
+      this.workerControls(b, 26, this.PANEL_Y + 78);
+
+      // Train buttons (top row), gated by level + free slots.
       let tx = 456;
       for (const type of ['warrior', 'archer', 'monk']) {
         const def = TRAIN_DEFS[type];
-        const costStr = Object.keys(def.cost).length ? `${formatCost(def.cost)} · ` : '';
-        const can = !b.training && this.resources.canAfford(def.cost);
-        this.spriteButton(tx, by, 120, 64, `Train ${def.label}`, `${costStr}${def.time}s`, can, () => this.trainUnit(b, type));
-        tx += 124;
+        const need = this.unitUnlockLevel(type);
+        const unlocked = b.level >= need;
+        const can = unlocked && b.slots.length < maxSlots && this.resources.canAfford(def.cost);
+        const sub = unlocked ? `${formatCost(def.cost)} · ${def.time}s` : `Lv ${need} req`;
+        this.spriteButton(tx, this.PANEL_Y + 8, 110, 52, `Train ${def.label}`, sub, can, () => this.trainUnit(b, type));
+        tx += 114;
       }
-      closeBtn();
+
+      // Upgrade + Close (bottom row).
+      if (b.level < MAX_LEVEL) {
+        const cost = b.nextUpgradeCost();
+        const afford = this.resources.gold >= cost;
+        this.spriteButton(456, this.PANEL_Y + 66, 234, 52, `Upgrade to Lv ${b.level + 1}`, `${cost}G · +1 slot, unlock unit`, afford, () => {
+          if (b.upgrade(this.resources)) {
+            this.showSelection(b);
+            this.refreshPanel();
+          }
+        }, { gold: afford });
+      } else {
+        this.spriteButton(456, this.PANEL_Y + 66, 234, 52, 'Max Level (3)', 'all units unlocked', false, null);
+      }
+      closeBtnAt(700, this.PANEL_Y + 66, 110, 52);
       return;
     }
+
+    // (Phase 2) Worker-allocated production buildings (Lumberyard/Mine/Farm/Tower).
+    if (b.type.maxWorkers > 0) {
+      if (b.workers === 0) {
+        this.panelText(26, this.PANEL_Y + 62, 'IDLE — assign a worker to activate', { color: '#ff8a80', bold: true });
+      } else if (b.type.attack) {
+        this.panelText(26, this.PANEL_Y + 62, `Active — firing (${b.workers}/${b.type.maxWorkers})`, { color: '#9fe0a0' });
+      } else {
+        this.panelText(26, this.PANEL_Y + 62, `Producing: ${b.currentOutput()} ${b.type.produces}/sec`, { color: '#9fe0a0' });
+      }
+      this.panelText(26, this.PANEL_Y + 84, t.desc, { color: '#cfc1a6', size: '11px', wrap: 410 });
+
+      this.workerControls(b, 470, this.PANEL_Y + 10);
+
+      const by2 = this.PANEL_Y + 34;
+      if (b.level < MAX_LEVEL) {
+        const cost = b.nextUpgradeCost();
+        const afford = this.resources.gold >= cost;
+        this.spriteButton(632, by2, 170, 60, 'Upgrade', `${cost}G · x2 output`, afford, () => {
+          if (b.upgrade(this.resources)) {
+            this.showSelection(b);
+            this.refreshPanel();
+          }
+        });
+      } else {
+        this.spriteButton(632, by2, 170, 60, 'Max Level', '', false, null);
+      }
+      closeBtnAt(GAME_W - 120, by2, 104, 60);
+      return;
+    }
+
+    this.panelText(26, this.PANEL_Y + 62, info, { color: '#ffd23f' });
+    this.panelText(26, this.PANEL_Y + 84, t.desc, { color: '#cfc1a6', size: '11px', wrap: 400 });
+
+    const by = this.PANEL_Y + 34;
+    const closeBtn = () => closeBtnAt(GAME_W - 128, by, 110, 64);
 
     if (b.level < MAX_LEVEL) {
       const cost = b.nextUpgradeCost();
@@ -1085,10 +1222,69 @@ export class GameScene extends Phaser.Scene {
     this.refreshPanel(); // affordability / worker availability changed
   }
 
-  // Start training a unit at a barracks (Phase 4). One unit at a time.
+  // ---- Worker allocation (Phase 2) -----------------------------------------
+
+  freeWorkers() {
+    return this.resources.workersCap - this.buildings.workersUsed();
+  }
+
+  addWorker(b) {
+    if (b.type.maxWorkers <= 0 || b.workers >= b.type.maxWorkers) return;
+    if (this.freeWorkers() <= 0) {
+      this.showToast('No free workers — build a House');
+      this.fireHint('noWorkers', 'No free workers — build another House to increase your workforce');
+      return;
+    }
+    b.workers += 1;
+    b.refreshWorkerIcon();
+    this.refreshPanel();
+  }
+
+  removeWorker(b) {
+    if (b.workers <= 0) return;
+    b.workers -= 1;
+    b.refreshWorkerIcon();
+    this.refreshPanel();
+  }
+
+  // Draws "Workers X/max" with − / + buttons at (x, y).
+  workerControls(b, x, y) {
+    this.panelText(x, y, `Workers ${b.workers}/${b.type.maxWorkers}`, { bold: true, color: '#62d0f0' });
+    this.spriteButton(x, y + 20, 38, 32, '−', '', b.workers > 0, () => this.removeWorker(b));
+    this.spriteButton(x + 44, y + 20, 38, 32, '+', '', b.workers < b.type.maxWorkers && this.freeWorkers() > 0, () => this.addWorker(b));
+    this.panelText(x + 92, y + 28, `${this.freeWorkers()} free`, { color: '#cfc1a6', size: '11px' });
+  }
+
+  // (Bug 4) Barracks level → training slots & unlocked unit types.
+  // Lv1: Warrior, 1 slot.  Lv2: +Archer, 2 slots.  Lv3: +Monk, 3 slots.
+  unitUnlockLevel(type) {
+    return { warrior: 1, archer: 2, monk: 3 }[type];
+  }
+
+  // (Phase 3) Hard soldier cap = 5 per Barracks built.
+  soldierCap() {
+    return 5 * this.buildings.countOfType('barracks');
+  }
+
+  // Living soldiers + units currently in training.
+  soldierTotal() {
+    let inTraining = 0;
+    for (const b of this.buildings.buildings) if (b.typeKey === 'barracks') inTraining += b.slots.length;
+    return this.troops.count + inTraining;
+  }
+
   trainUnit(barracks, type) {
-    if (barracks.training) {
-      this.showToast('Barracks already training');
+    const need = this.unitUnlockLevel(type);
+    if (barracks.level < need) {
+      this.showToast(`${TRAIN_DEFS[type].label} unlocks at Barracks Lv ${need}`);
+      return;
+    }
+    if (this.soldierTotal() >= this.soldierCap()) {
+      this.showToast(`Soldier cap reached (${this.soldierCap()}) — build another Barracks`);
+      return;
+    }
+    if (barracks.slots.length >= barracks.level) {
+      this.showToast('All training slots busy');
       return;
     }
     const def = TRAIN_DEFS[type];
@@ -1097,7 +1293,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.resources.spend(def.cost);
-    barracks.training = { type, timeLeft: def.time, total: def.time };
+    barracks.slots.push({ type, timeLeft: def.time, total: def.time });
     this.refreshPanel();
   }
 
@@ -1108,6 +1304,58 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(60);
     this.tweens.add({ targets: t, y: y - 34, alpha: 0, duration: 1500, onComplete: () => t.destroy() });
+  }
+
+  // (Phase 4) First-load welcome / onboarding panel. Modal until "Begin".
+  showWelcomePanel() {
+    const cx = GAME_W / 2;
+    const cy = GAME_H / 2 - 20;
+    const w = 640;
+    const h = 330;
+    const D = 120;
+    const fix = (o) => o.setScrollFactor(0);
+    const dim = fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0.55).setOrigin(0, 0).setDepth(D).setInteractive());
+    dim.on('pointerdown', (p, lx, ly, ev) => ev.stopPropagation());
+    const bg = fix(this.add.rectangle(cx, cy, w, h, 0x241a0e, 0.98).setDepth(D + 1).setStrokeStyle(3, 0xc9a14a, 0.9));
+    const title = fix(this.add.text(cx, cy - h / 2 + 26, 'Welcome to your Kingdom', { fontFamily: 'monospace', fontSize: '24px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5).setDepth(D + 2));
+    const lines = [
+      'Build Houses to get workers, then assign workers to Lumber yards and Mines to gather resources',
+      'Build a Barracks and train Warriors to defend against enemy attacks',
+      'Upgrade your settlement from Village → Town → Castle to unlock more buildings',
+      'Right-click drag to move camera. Scroll to zoom. Left-drag to select troops.',
+    ];
+    const texts = lines.map((l, i) =>
+      fix(this.add.text(cx - w / 2 + 30, cy - h / 2 + 66 + i * 52, `${i + 1}.  ${l}`, { fontFamily: 'monospace', fontSize: '14px', color: '#f0e6d0', wordWrap: { width: w - 60 }, lineSpacing: 2 }).setOrigin(0, 0).setDepth(D + 2))
+    );
+    const beginBg = fix(this.add.rectangle(cx, cy + h / 2 - 32, 170, 46, 0x2d6cb0).setDepth(D + 2).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    const beginTx = fix(this.add.text(cx, cy + h / 2 - 32, 'Begin', { fontFamily: 'monospace', fontSize: '17px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(D + 3));
+    const all = [dim, bg, title, ...texts, beginBg, beginTx];
+    beginBg.on('pointerover', () => beginBg.setFillStyle(0x3d83cf));
+    beginBg.on('pointerout', () => beginBg.setFillStyle(0x2d6cb0));
+    beginBg.on('pointerdown', (p, lx, ly, ev) => {
+      ev.stopPropagation();
+      all.forEach((o) => o.destroy());
+    });
+  }
+
+  // One-time contextual hint banner (Phase 2/4). Never repeats the same key,
+  // never shows more than one at a time, fades after 5s.
+  fireHint(key, msg) {
+    this._firedHints = this._firedHints || {};
+    if (this._firedHints[key]) return;
+    this._firedHints[key] = true;
+    if (this._hintBanner) this._hintBanner.destroy();
+    const t = this.add
+      .text(GAME_W / 2, TOP_BAR + 70, msg, { fontFamily: 'monospace', fontSize: '15px', color: '#ffffff', fontStyle: 'bold', backgroundColor: '#16263edd', padding: { x: 16, y: 9 }, align: 'center', wordWrap: { width: GAME_W - 160 } })
+      .setOrigin(0.5, 0)
+      .setDepth(70)
+      .setScrollFactor(0);
+    this._hintBanner = t;
+    this.tweens.add({ targets: t, alpha: { from: 0, to: 1 }, duration: 200 });
+    this.time.delayedCall(5000, () => {
+      if (this._hintBanner !== t) return;
+      this.tweens.add({ targets: t, alpha: 0, duration: 500, onComplete: () => { t.destroy(); if (this._hintBanner === t) this._hintBanner = null; } });
+    });
   }
 
   showToast(msg) {
@@ -1152,6 +1400,32 @@ export class GameScene extends Phaser.Scene {
       this.buildings.tick(this.resources, this);
     }
 
+    // (Phase 3) Food upkeep: each soldier eats 1 food / 10s. At 0 food, soldiers
+    // desert one at a time every 15s until food is positive again.
+    this._upkeepAcc = (this._upkeepAcc || 0) + gdelta;
+    while (this._upkeepAcc >= 10000) {
+      this._upkeepAcc -= 10000;
+      this.resources.food = Math.max(0, this.resources.food - this.troops.count);
+    }
+    if (this.resources.food <= 0 && this.troops.count > 0) {
+      this._desertAcc = (this._desertAcc || 0) + gdelta;
+      if (this._desertAcc >= 15000) {
+        this._desertAcc = 0;
+        if (this.troops.removeRandom()) {
+          const c = this.buildings.castle;
+          if (c) this.floatText(c.x, c.y - 40, 'A soldier deserted!', '#ff8a80');
+        }
+      }
+    } else {
+      this._desertAcc = 0;
+    }
+    if (this.troops.count > 0 && this.resources.food < 30) {
+      this.fireHint('lowFood', 'Your people are hungry — build a Farm and assign workers');
+    }
+    if (this.canUpgradeTier()) {
+      this.fireHint('canUpgrade', 'Your settlement can grow — check the upgrade button');
+    }
+
     this.ai.update(dt); // AI kingdom builds + drives waves (Phase 3)
     this.waves.update(dt);
     this.buildings.updateTowers(dt, this.waves.enemies);
@@ -1159,7 +1433,7 @@ export class GameScene extends Phaser.Scene {
     this.expeditions.update(dt); // expedition countdowns (Phase 2)
 
     // Keep the expedition panel / barracks training countdowns ticking live.
-    const trainingOpen = this.selectedBuilding && this.selectedBuilding.typeKey === 'barracks' && this.selectedBuilding.training;
+    const trainingOpen = this.selectedBuilding && this.selectedBuilding.typeKey === 'barracks' && this.selectedBuilding.slots.length > 0;
     if ((this.panelMode === 'expedition' && !this.selectedBuilding) || trainingOpen) {
       this._panelRefresh = (this._panelRefresh || 0) + dt;
       if (this._panelRefresh >= 0.5) {
@@ -1174,16 +1448,21 @@ export class GameScene extends Phaser.Scene {
     this.troops.update(dt, this.waves.enemies);
     this.resources.soldiers = this.troops.count;
 
-    // Barracks unit training (Phase 4).
+    // Barracks unit training — multiple slots (Bug 4); workers set speed (Phase 2).
     for (const b of this.buildings.buildings) {
-      if (b.typeKey !== 'barracks' || !b.training) continue;
-      b.training.timeLeft -= dt;
-      if (b.training.timeLeft <= 0) {
-        const type = b.training.type;
-        b.training = null;
-        if (type === 'archer') this.troops.spawnArcher(b);
-        else if (type === 'monk') this.troops.spawnMonk(b);
+      if (b.typeKey !== 'barracks' || b.slots.length === 0) continue;
+      // 0 workers = no progress, 1 worker = 1x, 2 workers = 1.5x.
+      const speed = b.workers >= 2 ? 1.5 : b.workers >= 1 ? 1 : 0;
+      let finished = false;
+      for (const slot of b.slots) slot.timeLeft -= dt * speed;
+      for (const slot of b.slots.filter((s) => s.timeLeft <= 0)) {
+        if (slot.type === 'archer') this.troops.spawnArcher(b);
+        else if (slot.type === 'monk') this.troops.spawnMonk(b);
         else this.troops.spawn(b);
+        finished = true;
+      }
+      if (finished) {
+        b.slots = b.slots.filter((s) => s.timeLeft > 0);
         if (this.selectedBuilding === b) this.refreshPanel();
       }
     }
