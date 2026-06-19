@@ -1,23 +1,24 @@
 import Phaser from 'phaser';
 
-// Expedition system (Phase 5 redesign). Workers gather the BASIC resources;
-// expeditions only ever return SPECIAL rewards — Iron, Artifacts, Scrolls,
-// Mercenaries and Intel — never wood/stone/food. Durations are measured in game
-// days (1 day = 5 real minutes), and one of each expedition runs at a time.
+// Expedition system (Phase 5 redesign + FIX 3/6). Workers gather the BASIC
+// resources; expeditions only ever return SPECIAL rewards — Iron, Artifacts,
+// Scrolls, Mercenaries and Intel — never wood/stone/food. Durations are measured
+// in game days (1 day = 5 real minutes). Multiple of the same type can run at
+// once (Scout x2, Raid x2, Campaign x1) — each is an independent slot.
 //
-//   SCOUTING PARTY (2 soldiers, 1 day)  — reveals the enemy army size for 2 days,
-//                                         small chance of an Artifact.
-//   RAID ENEMY CAMP (5 soldiers, 2 days)— 20-40 Iron, chance of a Mercenary,
-//                                         30% chance to lose 1 soldier.
-//   MAJOR CAMPAIGN (10 soldiers, 3 days)— 40-80 Iron, a guaranteed Artifact,
-//                                         chance of a rare Scroll, 50% lose 2-3.
+//   SCOUTING PARTY (2 soldiers, 0.5 day) — reveals the enemy army size for 2 days,
+//                                          small chance of an Artifact.
+//   RAID ENEMY CAMP (5 soldiers, 1 day)  — 20-40 Iron, chance of a Mercenary,
+//                                          30% chance to lose 1 soldier.
+//   MAJOR CAMPAIGN (10 soldiers, 2 days) — 40-80 Iron, a guaranteed Artifact,
+//                                          chance of a rare Scroll, 50% lose 2-3.
 
 const SEC_PER_DAY = 300; // matches IsometricScene DAY_MS (300000ms)
 
 const DEFS = {
-  scout: { name: 'Scouting Party', cost: 2, days: 1, reward: 'Reveal enemy army · maybe an Artifact' },
-  raid: { name: 'Raid Enemy Camp', cost: 5, days: 2, reward: '20-40 Iron · maybe a Mercenary · 30% lose 1' },
-  campaign: { name: 'Major Campaign', cost: 10, days: 3, reward: '40-80 Iron · Artifact · maybe a Scroll · 50% lose 2-3' },
+  scout: { name: 'Scouting Party', cost: 2, days: 0.5, maxSlots: 2, reward: 'Reveal enemy army · maybe an Artifact' },
+  raid: { name: 'Raid Enemy Camp', cost: 5, days: 1, maxSlots: 2, reward: '20-40 Iron · maybe a Mercenary · 30% lose 1' },
+  campaign: { name: 'Major Campaign', cost: 10, days: 2, maxSlots: 1, reward: '40-80 Iron · Artifact · maybe a Scroll · 50% lose 2-3' },
 };
 
 const WSCALE = 36 / 192;
@@ -26,49 +27,51 @@ export class ExpeditionManager {
   constructor(scene) {
     this.scene = scene;
     this.defs = DEFS;
-    this.state = {
-      scout: { active: false, timeLeft: 0 },
-      raid: { active: false, timeLeft: 0 },
-      campaign: { active: false, timeLeft: 0 },
-    };
+    // Each type holds an array of active slots: [{ timeLeft }]. (FIX 3)
+    this.state = { scout: [], raid: [], campaign: [] };
   }
 
-  // Days remaining for a running expedition (for the panel readout).
-  daysLeft(key) { return Math.max(0, this.state[key].timeLeft / SEC_PER_DAY); }
+  activeCount(key) { return this.state[key].length; }
+  maxSlots(key) { return this.defs[key].maxSlots; }
+
+  // Days remaining for each running slot of a type (for the panel readout).
+  slotDays(key) { return this.state[key].map((slot) => Math.max(0, slot.timeLeft / SEC_PER_DAY)); }
 
   canSend(key) {
-    return !this.state[key].active && this.scene.troops.count >= this.defs[key].cost;
+    return this.state[key].length < this.defs[key].maxSlots && this.scene.troops.count >= this.defs[key].cost;
   }
 
   send(key) {
     const def = this.defs[key];
-    const st = this.state[key];
-    if (st.active) return;
+    if (this.state[key].length >= def.maxSlots) {
+      this.scene.showToast(`All ${def.name} parties already out`);
+      return;
+    }
     if (this.scene.troops.count < def.cost) {
       this.scene.showToast('Not enough soldiers');
       return;
     }
     this.scene.troops.detach(def.cost); // soldiers leave the muster
     this.marchOff(def.cost);
-    st.active = true;
-    st.timeLeft = def.days * SEC_PER_DAY;
+    this.state[key].push({ timeLeft: def.days * SEC_PER_DAY });
     this.scene.refreshPanel();
   }
 
   update(dt) {
     for (const key of Object.keys(this.state)) {
-      const st = this.state[key];
-      if (!st.active) continue;
-      st.timeLeft -= dt;
-      if (st.timeLeft <= 0) this.resolve(key);
+      const slots = this.state[key];
+      for (let i = slots.length - 1; i >= 0; i--) {
+        slots[i].timeLeft -= dt;
+        if (slots[i].timeLeft <= 0) {
+          slots.splice(i, 1); // remove the finished slot, then resolve its rewards
+          this.resolve(key);
+        }
+      }
     }
   }
 
   resolve(key) {
     const def = this.defs[key];
-    const st = this.state[key];
-    st.active = false;
-    st.timeLeft = 0;
 
     let losses = 0;
     if (key === 'raid' && Math.random() < 0.3) losses = 1;

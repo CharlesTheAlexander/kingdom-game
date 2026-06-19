@@ -16,6 +16,15 @@ const GATHER = {
   food: { node: 'food', carry: 'pawn_run_meat' },
 };
 
+// (FIX 1) Idle/freelance gathering yields per trip, by node type. Gold nodes are
+// excluded — gold comes from the Castle/expeditions, not freelancers.
+const FREELANCE = {
+  wood: { carry: 'pawn_run_wood', res: 'wood', amt: 3 },
+  stone: { carry: 'pawn_run_gold', res: 'stone', amt: 2 },
+  food: { carry: 'pawn_run_meat', res: 'food', amt: 4 },
+};
+const FREELANCE_TYPES = ['wood', 'stone', 'food'];
+
 class Pawn {
   constructor(scene, x, y) {
     this.scene = scene;
@@ -38,6 +47,8 @@ class Pawn {
     this.targetNode = null;
     this.carryAnim = 'pawn_run_wood';
     this.carryRes = null;
+    this.freelance = false; // (FIX 1) idle worker gathering on its own
+    this.freelanceAmt = 0;
     this.play('pawn_idle');
     this.pickNewGoal();
   }
@@ -67,6 +78,7 @@ class Pawn {
 
     const b = this.assigned;
     if (b && b.alive) {
+      this.freelance = false; // dedicated to a building — stop freelancing
       const g = b.type.produces ? GATHER[b.type.produces] : null;
       // (Phase 4) Workers won't venture beyond the territory border + margin.
       const reach = this.scene.territory ? (n) => this.scene.territory.canHarvest(n) : null;
@@ -86,7 +98,25 @@ class Pawn {
       return;
     }
 
-    // Idle: wander near the castle in a small radius.
+    // (FIX 1) IDLE: freelance-gather from the nearest basic resource node within
+    // 10 tiles, then haul it back to the Castle. This bootstraps the early game
+    // (you no longer need resources to make resources). Slower than a staffed
+    // building, so dedicating workers is still the upgrade.
+    const node = this.scene.nodes ? this.scene.nodes.nearestAnyNode(this.x, this.y, 10 * this.scene.TILE, FREELANCE_TYPES) : null;
+    if (node) {
+      const m = FREELANCE[node.type];
+      this.freelance = true;
+      this.targetNode = node;
+      this.carryAnim = m.carry;
+      this.carryRes = m.res;
+      this.freelanceAmt = m.amt;
+      this.setMove(node.x, node.y, 3 + Math.random(), 'pawn_run');
+      this.state = 'toNode';
+      return;
+    }
+
+    // No node within range: wander near the castle in a small radius.
+    this.freelance = false;
     const a = Math.random() * Math.PI * 2;
     const r = 16 + Math.random() * 40;
     this.setMove(this.homeX + Math.cos(a) * r, this.homeY + Math.sin(a) * r, 1.5 + Math.random(), 'pawn_run');
@@ -116,7 +146,7 @@ class Pawn {
         if (this.targetNode && this.targetNode.alive) {
           this.targetNode.harvest();
           this.state = 'gathering';
-          this.workTimer = 1.2;
+          this.workTimer = this.freelance ? 3 : 1.2; // (FIX 1) freelancers gather 3s
           this.play('pawn_idle');
         } else {
           this.pickNewGoal();
@@ -124,7 +154,14 @@ class Pawn {
       } else {
         if (this.state === 'toCastle' && this.carryRes && this.scene.floatText) {
           const label = this.carryRes[0].toUpperCase() + this.carryRes.slice(1);
-          this.scene.floatText(this.homeX + Phaser.Math.Between(-14, 14), this.homeY - 26, `+2 ${label}`, '#aee9ff');
+          if (this.freelance) {
+            // (FIX 1) Freelancers actually deposit into the stockpile (assigned
+            // workers are visual only — their building's tick adds the resources).
+            this.scene.resources.add(this.carryRes, this.freelanceAmt);
+            this.scene.floatText(this.homeX + Phaser.Math.Between(-14, 14), this.homeY - 26, `+${this.freelanceAmt} ${label}`, '#aee9ff');
+          } else {
+            this.scene.floatText(this.homeX + Phaser.Math.Between(-14, 14), this.homeY - 26, `+2 ${label}`, '#aee9ff');
+          }
           this.scene.tweens.add({ targets: this.spr, scaleX: SCALE * 1.25, scaleY: SCALE * 0.8, yoyo: true, duration: 120 });
         }
         this.pickNewGoal();

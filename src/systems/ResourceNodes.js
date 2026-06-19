@@ -145,6 +145,23 @@ export class ResourceNodeManager {
     return best;
   }
 
+  // (FIX 1) Nearest alive node of any (optionally filtered) type within maxDist
+  // pixels — used by idle freelancing workers.
+  nearestAnyNode(x, y, maxDist = Infinity, types = null) {
+    let best = null;
+    let bd = maxDist;
+    for (const n of this.nodes) {
+      if (!n.alive) continue;
+      if (types && !types.includes(n.type)) continue;
+      const d = Phaser.Math.Distance.Between(x, y, n.x, n.y);
+      if (d < bd) {
+        bd = d;
+        best = n;
+      }
+    }
+    return best;
+  }
+
   update(dtMs) {
     for (const n of this.nodes) n.update(dtMs);
   }

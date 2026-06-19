@@ -806,15 +806,27 @@ export class IsometricScene extends GameScene {
 
   // ---- Selection outline (iso diamond around the footprint) ----------------
 
+  // (FIX 4) The selection highlight must surround the VISIBLE building sprite
+  // and match its clickable hit area exactly. The building stands up from its
+  // tile (origin 0.5,1.0), so a ground-footprint diamond sat at the base —
+  // offset from the sprite body. Instead we outline the sprite's frame bounds,
+  // which IS the interactive hit area (so highlight == click target for every
+  // building, single- or multi-tile), plus a faint ground diamond for footprint
+  // context on multi-tile structures.
   showSelection(b) {
     this.clearSelection();
     const g = this.add.graphics().setDepth(30);
     const fp = this.footprintSize(b.typeKey);
-    const half = Math.floor(fp / 2);
-    const pts = this.regionDiamond(b.col - half, b.col - half + fp - 1, b.row - half, b.row - half + fp - 1);
-    g.lineStyle(3, 0xffffff, 0.95);
-    this.strokeDiamond(g, pts);
-    g.strokePath();
+    if (fp > 1) {
+      const half = Math.floor(fp / 2);
+      const pts = this.regionDiamond(b.col - half, b.col - half + fp - 1, b.row - half, b.row - half + fp - 1);
+      g.lineStyle(1.5, 0xffffff, 0.4);
+      this.strokeDiamond(g, pts);
+      g.strokePath();
+    }
+    const bnds = b.rect.getBounds(); // exactly the interactive sprite frame
+    g.fillStyle(0xffffff, 0.06).fillRect(bnds.x, bnds.y, bnds.width, bnds.height);
+    g.lineStyle(3, 0xffffff, 0.95).strokeRect(bnds.x, bnds.y, bnds.width, bnds.height);
     if (b.type.attack) {
       const rng = b.type.range * this.TILE;
       g.fillStyle(0x2980b9, 0.12).fillCircle(b.x, b.y, rng);
@@ -1002,21 +1014,31 @@ export class IsometricScene extends GameScene {
     }
   }
 
-  // Top-of-screen threat banner (4s, then fades). Reused by wildlife spawns and
-  // AI kingdom attacks (Phase 7). The newest warning replaces the previous one.
+  // (FIX 5) Threat banners are queued and shown ONE AT A TIME for 3s each
+  // (smaller than before). Reused by wildlife spawns and AI kingdom attacks.
   threatWarning(text, color = 0xffd23f) {
-    if (this._threatBanner && this._threatBanner.active) this._threatBanner.destroy();
+    this._warnQueue = this._warnQueue || [];
+    if (this._warnLast === text || this._warnQueue.some((w) => w.text === text)) return; // dedupe
+    if (this._warnQueue.length >= 3) this._warnQueue.shift(); // bound the backlog
+    this._warnQueue.push({ text, color });
+    this._pumpWarnings();
+  }
+
+  _pumpWarnings() {
+    if (this._warnActive || !this._warnQueue || this._warnQueue.length === 0) return;
+    const { text, color } = this._warnQueue.shift();
+    this._warnActive = true;
+    this._warnLast = text;
     const hex = '#' + (color >>> 0).toString(16).padStart(6, '0');
     const t = this.add
-      .text(GAME_W / 2, TOP_BAR + 110, text, { fontFamily: 'monospace', fontSize: '15px', color: hex, fontStyle: 'bold', backgroundColor: '#160d0deb', padding: { x: 14, y: 8 }, align: 'center', stroke: '#000000', strokeThickness: 3, wordWrap: { width: GAME_W - 160 } })
+      .text(GAME_W / 2, TOP_BAR + 92, text, { fontFamily: 'monospace', fontSize: '13px', color: hex, fontStyle: 'bold', backgroundColor: '#160d0deb', padding: { x: 10, y: 5 }, align: 'center', stroke: '#000000', strokeThickness: 3, wordWrap: { width: GAME_W - 240 } })
       .setOrigin(0.5, 0)
       .setDepth(72)
-      .setScrollFactor(0);
-    this._threatBanner = t;
-    this.tweens.add({ targets: t, alpha: { from: 0, to: 1 }, duration: 200 });
-    this.time.delayedCall(4000, () => {
-      if (this._threatBanner !== t) return;
-      this.tweens.add({ targets: t, alpha: 0, duration: 600, onComplete: () => { t.destroy(); if (this._threatBanner === t) this._threatBanner = null; } });
+      .setScrollFactor(0)
+      .setAlpha(0);
+    this.tweens.add({ targets: t, alpha: 1, duration: 180 });
+    this.time.delayedCall(3000, () => {
+      this.tweens.add({ targets: t, alpha: 0, duration: 400, onComplete: () => { t.destroy(); this._warnActive = false; this._warnLast = null; this._pumpWarnings(); } });
     });
   }
 
@@ -1024,12 +1046,23 @@ export class IsometricScene extends GameScene {
 
   // Iron readout in the resource bar (gray icon). Shifts Workers/Soldiers right
   // to make room (they were laid out by the base buildHud).
+  // (FIX 5) Re-lay the resource bar into two tidy rows within the top bar:
+  //   Row 1: Wood | Stone | Food | Gold      Row 2: Iron | Workers | Soldiers
   createIronHud() {
-    // Slot Iron into the empty gap between Food and Gold (the centered Day
-    // counter sits over the gap further right, so keep clear of it).
     const fix = (o) => o.setScrollFactor(0);
-    this.hud.ironIcon = fix(this.add.image(322, 25, 'icon_gold').setDisplaySize(20, 20).setTint(0x9aa0a6).setDepth(41));
-    this.hud.iron = fix(this.add.text(336, 15, '0', { fontFamily: 'monospace', fontSize: '18px', color: '#c2c8ce', fontStyle: 'bold' }).setDepth(41));
+    const SZ = '15px';
+    const ic = (o, x, y) => o.setPosition(x, y).setDisplaySize(18, 18);
+    const tx = (o, x, y) => o.setPosition(x, y).setFontSize(SZ);
+    // Row 1
+    ic(this.hud.woodIcon, 18, 13); tx(this.hud.wood, 32, 6);
+    tx(this.hud.stone, 96, 6);
+    ic(this.hud.foodIcon, 200, 13); tx(this.hud.food, 214, 6);
+    ic(this.hud.goldIcon, 276, 13); tx(this.hud.gold, 290, 6);
+    // Row 2
+    this.hud.ironIcon = fix(this.add.image(18, 37, 'icon_gold').setDisplaySize(18, 18).setTint(0x9aa0a6).setDepth(41));
+    this.hud.iron = fix(this.add.text(32, 30, '0', { fontFamily: 'monospace', fontSize: SZ, color: '#c2c8ce', fontStyle: 'bold' }).setDepth(41));
+    tx(this.hud.workers, 96, 30);
+    tx(this.hud.soldiers, 250, 30);
   }
 
   updateHud() {
@@ -1105,20 +1138,21 @@ export class IsometricScene extends GameScene {
     );
     this.panelText(16, this.PANEL_Y + 8, `EXPEDITIONS — special rewards only.   Soldiers: ${this.troops.count}    Iron: ${Math.floor(this.resources.iron)}`, { bold: true, color: '#ffe9b0' });
 
+    // (FIX 3) Each type can have several slots running at once; the button
+    // sends another party while free, and active slots show their own countdown.
     const keys = ['scout', 'raid', 'campaign'];
     const w = 296;
     const gap = 8;
     let x = 14;
-    const by = this.PANEL_Y + 34;
+    const by = this.PANEL_Y + 30;
     for (const key of keys) {
       const def = this.expeditions.defs[key];
-      const st = this.expeditions.state[key];
-      if (st.active) {
-        this.spriteButton(x, by, w, 58, def.name, `Returns in ${this.expeditions.daysLeft(key).toFixed(1)} days`, false, null);
-      } else {
-        const can = this.expeditions.canSend(key);
-        this.spriteButton(x, by, w, 58, `${def.name}  (${def.cost} sol · ${def.days}d)`, def.reward, can, () => this.expeditions.send(key));
-      }
+      const active = this.expeditions.activeCount(key);
+      const can = this.expeditions.canSend(key);
+      this.spriteButton(x, by, w, 42, `${def.name}  (${def.cost} sol · ${def.days}d)`, def.reward, can, () => this.expeditions.send(key));
+      const days = this.expeditions.slotDays(key);
+      const slotTxt = `Out ${active}/${def.maxSlots}` + (days.length ? '   ' + days.map((d) => `[${d.toFixed(1)}d]`).join(' ') : '');
+      this.panelText(x + 2, by + 46, slotTxt, { size: '12px', color: active > 0 ? '#ffe066' : '#9aa0a6' });
       x += w + gap;
     }
 
@@ -1163,20 +1197,22 @@ export class IsometricScene extends GameScene {
   }
 
   // Small HUD button (top-right) that toggles the kingdom status panel.
+  // (FIX 5) Two collapsed top-right openers: Kingdoms status + Expeditions.
+  // Both toggle their bottom panel so neither takes up space by default.
   createKingdomsButton() {
     const fix = (o) => o.setScrollFactor(0);
-    const x = GAME_W - 238, y = TOP_BAR + 8, w = 108, h = 26;
-    const btn = fix(this.add.rectangle(x, y, w, h, 0x4a2d6b).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.6).setDepth(40).setInteractive({ useHandCursor: true }));
-    fix(this.add.text(x + w / 2, y + h / 2, 'Kingdoms', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(41));
-    btn.on('pointerover', () => btn.setFillStyle(0x5d3a85));
-    btn.on('pointerout', () => btn.setFillStyle(0x4a2d6b));
-    btn.on('pointerdown', (p, lx, ly, ev) => {
-      ev.stopPropagation();
-      this.selectedBuilding = null;
-      this.clearSelection();
-      this.panelMode = this.panelMode === 'kingdoms' ? 'build' : 'kingdoms';
-      this.refreshPanel();
-    });
+    const mkBtn = (x, y, w, h, label, fillC, hoverC, onClick) => {
+      const btn = fix(this.add.rectangle(x, y, w, h, fillC).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.6).setDepth(40).setInteractive({ useHandCursor: true }));
+      fix(this.add.text(x + w / 2, y + h / 2, label, { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(41));
+      btn.on('pointerover', () => btn.setFillStyle(hoverC));
+      btn.on('pointerout', () => btn.setFillStyle(fillC));
+      btn.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); onClick(); });
+      return btn;
+    };
+    const toggle = (mode) => { this.selectedBuilding = null; this.clearSelection(); this.placementType = null; this.panelMode = this.panelMode === mode ? 'build' : mode; this.refreshPanel(); };
+    const X = GAME_W - 238, W = 108;
+    mkBtn(X, TOP_BAR + 8, W, 22, 'Kingdoms ▾', 0x4a2d6b, 0x5d3a85, () => toggle('kingdoms'));
+    mkBtn(X, TOP_BAR + 34, W, 22, 'Expeditions ▾', 0x1f5b3a, 0x2e7d50, () => toggle('expedition'));
   }
 
   renderKingdomsPanel() {

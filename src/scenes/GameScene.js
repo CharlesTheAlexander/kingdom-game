@@ -800,12 +800,13 @@ export class GameScene extends Phaser.Scene {
     const num = (x, color) => fix(this.add.text(x, 15, '', { fontFamily: 'monospace', fontSize: '18px', color, fontStyle: 'bold' }).setDepth(41));
     const icon = (x, key) => fix(this.add.image(x, 25, key).setDisplaySize(26, 26).setDepth(41));
 
-    icon(24, 'icon_wood');
+    // Icon refs are stored so IsometricScene can re-lay the bar into two rows.
+    this.hud.woodIcon = icon(24, 'icon_wood');
     this.hud.wood = num(40, '#e3c27a');
     this.hud.stone = num(118, '#cfd3d6');
-    icon(252, 'icon_food');
+    this.hud.foodIcon = icon(252, 'icon_food');
     this.hud.food = num(268, '#8fd14f');
-    icon(380, 'icon_gold');
+    this.hud.goldIcon = icon(380, 'icon_gold');
     this.hud.gold = num(396, '#ffd23f');
     this.hud.workers = num(500, '#62d0f0');
     this.hud.soldiers = num(700, '#ffffff');
@@ -846,7 +847,8 @@ export class GameScene extends Phaser.Scene {
 
   // Minimap (Phase 5): bottom-right, fixed to the screen. Redrawn each frame.
   createMinimap() {
-    this.MM = { x: GAME_W - 162, y: this.PANEL_Y - 112, w: 150, h: 100 };
+    // (FIX 5) Smaller minimap (120x80) tucked into the bottom-right corner.
+    this.MM = { x: GAME_W - 132, y: this.PANEL_Y - 92, w: 120, h: 80 };
     const m = this.MM;
     this.add.rectangle(m.x - 2, m.y - 2, m.w + 4, m.h + 4, 0x000000, 0.7).setOrigin(0, 0).setDepth(44).setScrollFactor(0).setStrokeStyle(2, 0xc9a14a, 0.7);
     const bg = this.add.rectangle(m.x, m.y, m.w, m.h, 0x12281a, 0.92).setOrigin(0, 0).setDepth(44).setScrollFactor(0).setInteractive();
@@ -1040,12 +1042,8 @@ export class GameScene extends Phaser.Scene {
       x += bw + gap;
     }
 
-    // Expeditions opener (Phase 2).
-    this.spriteButton(x, y, 104, h, 'Expeditions', `${this.troops.count} soldiers`, true, () => {
-      this.panelMode = 'expedition';
-      this.placementType = null;
-      this.refreshPanel();
-    });
+    // (FIX 5) The Expeditions opener moved to a dedicated top-right HUD button
+    // (createKingdomsButton) so it no longer crowds the build palette.
 
     // Right side: cancel placement, or the settlement tier upgrade button.
     if (this.placementType) {

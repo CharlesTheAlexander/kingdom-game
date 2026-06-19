@@ -17,6 +17,12 @@ import Phaser from 'phaser';
 // castle does not clear them and vice-versa.
 
 const MAX_WILDLIFE = 8;
+// (FIX 2) Wolf tuning.
+const MAX_WOLVES = 4;          // wolves on the map at once
+const WOLF_CHASE_TILES = 5;    // max chase range
+const NORTH_ROW = 11;          // a pawn at row <= 11 counts as "in the north zone"
+const WOLF_MIN_DIST = 12;      // min tiles from the player castle for a wolf spawn
+const GOBLIN_MIN_DIST = 8;     // min tiles from the player castle for a goblin spawn
 
 // ---- Shared base ----------------------------------------------------------
 class Beast {
@@ -115,20 +121,25 @@ class Wolf extends Beast {
     super(scene, x, y, { kind: 'wolf', tex: 'warrior_idle', anim: 'warrior_idle', px: 28, tint: 0xff6b6b, hp: 20, dropType: 'meat', dropAmt: 5 });
     this.speed = 26;
     this.chaseSpeed = 64;
-    this.goal = this.wanderPoint(['north', 'west']);
+    this.goal = this.wanderPoint(['north']);
     this.target = null;
     this.biteCd = 0;
+  }
+
+  // (FIX 2) Wolves only chase pawns that venture into the north zone (rows
+  // <= 11), within a 5-tile range — they never path to the settlement centre.
+  inNorth(obj) {
+    return this.scene.screenToTile(obj.x, obj.y).row <= NORTH_ROW;
   }
 
   update(dt) {
     if (!this.alive) return;
     this.biteCd = Math.max(0, this.biteCd - dt);
-    // Acquire the nearest worker pawn within 3 tiles. (Pawns have no `.alive`
-    // flag — they live in pawns.pawns until destroyed, so check membership.)
     const pawns = this.scene.pawns.pawns;
     if (!this.target || !pawns.includes(this.target)) {
-      let best = null, bd = 3;
+      let best = null, bd = WOLF_CHASE_TILES;
       for (const p of pawns) {
+        if (!this.inNorth(p)) continue; // only pawns inside the north zone
         const d = this.tilesTo(p.x, p.y);
         if (d < bd) { bd = d; best = p; }
       }
@@ -136,19 +147,21 @@ class Wolf extends Beast {
     }
     if (this.target) {
       const d = this.tilesTo(this.target.x, this.target.y);
-      if (d > 4) { this.target = null; } // lost it
-      else if (d > 0.5) { this.moveToward(this.target.x, this.target.y, this.chaseSpeed, dt); }
-      else if (this.biteCd <= 0) {
+      if (d > WOLF_CHASE_TILES || !this.inNorth(this.target)) {
+        this.target = null; // escaped 5 tiles away or left the north zone — return to roam
+      } else if (d > 0.5) {
+        this.moveToward(this.target.x, this.target.y, this.chaseSpeed, dt);
+      } else if (this.biteCd <= 0) {
         this.biteCd = 2.5;
         this.scene.wolfCatchPawn(this.target); // pawn flees + 1 resource stolen
         this.target = null;
-        this.goal = this.wanderPoint(['north', 'west']);
+        this.goal = this.wanderPoint(['north']);
       }
       this.syncBar();
       return;
     }
-    // Roam slowly toward the wander goal.
-    if (Phaser.Math.Distance.Between(this.x, this.y, this.goal.x, this.goal.y) < 8) this.goal = this.wanderPoint(['north', 'west']);
+    // Roam slowly within the north forest.
+    if (Phaser.Math.Distance.Between(this.x, this.y, this.goal.x, this.goal.y) < 8) this.goal = this.wanderPoint(['north']);
     this.moveToward(this.goal.x, this.goal.y, this.speed, dt);
     this.syncBar();
   }
@@ -263,6 +276,7 @@ export class WildlifeManager {
   }
 
   count() { return this.units.length; }
+  wolfCount() { return this.units.reduce((n, u) => n + (u.kind === 'wolf' ? 1 : 0), 0); }
 
   // Spawn a starting wolf pack + a boar so the world feels alive on day 1.
   spawnInitial() {
@@ -271,31 +285,39 @@ export class WildlifeManager {
   }
 
   // Pick a scatter point inside one of the given regions (returns world coords).
-  regionPoint(regions) {
+  // opts.rowMax caps the tile row; opts.minTiles enforces a minimum distance
+  // from the player castle (so threats never spawn on top of the settlement).
+  regionPoint(regions, opts = {}) {
     const s = this.scene;
-    for (let a = 0; a < 60; a++) {
+    const castle = s.buildings.castle;
+    for (let a = 0; a < 90; a++) {
       const col = Phaser.Math.Between(0, s.COLS - 1);
       const row = Phaser.Math.Between(0, s.ROWS - 1);
+      if (opts.rowMax != null && row > opts.rowMax) continue;
       if (!regions.includes(s.regionAt(col, row))) continue;
       if (s.terrainType && s.terrainType[row][col] === 'water') continue;
+      if (opts.minTiles && castle && Phaser.Math.Distance.Between(col, row, castle.col, castle.row) < opts.minTiles) continue;
       const t = s.tileCenter(col, row);
       return { x: t.x + Phaser.Math.Between(-12, 12), y: t.y + Phaser.Math.Between(-12, 12) };
     }
     return null;
   }
 
+  // (FIX 2) Wolves spawn only in the north forest (rows 0-10), >= 12 tiles from
+  // the castle, capped at 4 on the map.
   spawnWolfPack() {
-    const p = this.regionPoint(['north']);
+    if (this.wolfCount() >= MAX_WOLVES) return;
+    const p = this.regionPoint(['north', 'plain'], { rowMax: 10, minTiles: WOLF_MIN_DIST });
     if (!p) return;
     const n = Phaser.Math.Between(2, 3);
-    for (let i = 0; i < n && this.count() < MAX_WILDLIFE; i++) {
+    for (let i = 0; i < n && this.wolfCount() < MAX_WOLVES && this.count() < MAX_WILDLIFE; i++) {
       this.units.push(new Wolf(this.scene, p.x + Phaser.Math.Between(-30, 30), p.y + Phaser.Math.Between(-20, 20)));
     }
     this.scene.threatWarning('⚠ Wolves spotted prowling the northern forest', 0xff8a80);
   }
 
   spawnGoblinRaid() {
-    const p = this.regionPoint(['west']);
+    const p = this.regionPoint(['west'], { minTiles: GOBLIN_MIN_DIST });
     if (!p) return;
     const party = { rewarded: false, members: [] };
     const n = Phaser.Math.Between(3, 5);
@@ -318,7 +340,7 @@ export class WildlifeManager {
 
   update(dt) {
     const day = this.scene.gameDay;
-    if (day - this._lastWolfDay >= 3 && this.count() < MAX_WILDLIFE) { this._lastWolfDay = day; this.spawnWolfPack(); }
+    if (day - this._lastWolfDay >= 4 && this.wolfCount() < MAX_WOLVES) { this._lastWolfDay = day; this.spawnWolfPack(); } // (FIX 2) every 4 days, max 4
     if (day >= 2 && day - this._lastGobDay >= 2 && this.count() < MAX_WILDLIFE) { this._lastGobDay = day; this.spawnGoblinRaid(); }
     if (day - this._lastBoarDay >= 2 && this.count() < MAX_WILDLIFE) { this._lastBoarDay = day; this.spawnBoar(); }
 
