@@ -84,7 +84,6 @@ export class IsometricScene extends GameScene {
     // --- Isometric terrain tiles (64x64) ---
     this.load.image('iso_grass', `${IND}/img_6.png`);       // clean grass (base)
     this.load.image('iso_grass2', `${IND}/img_7.png`);      // clean grass (variant)
-    this.load.image('iso_grass_dirt', `${IND}/img_8.png`);  // grass w/ dirt patch
     this.load.image('iso_water', `${IND}/img_71.png`);
     this.load.image('iso_water2', `${IND}/img_82.png`);
     this.load.image('iso_water3', `${IND}/img_85.png`);
@@ -220,6 +219,42 @@ export class IsometricScene extends GameScene {
 
     this.showWelcomePanel();
     this.time.delayedCall(900, () => this.fireHint('start', 'Assign workers to buildings to start producing resources'));
+
+    this.setupUICamera();
+  }
+
+  // ---- BUG 1 FIX: dedicated UI camera that never zooms/pans -----------------
+  // scrollFactor(0) fixes an object against camera SCROLL, but the main camera's
+  // ZOOM still scales it. So the HUD is rendered by a separate uiCamera (zoom 1,
+  // no scroll): the main camera ignores all screen-fixed (scrollFactor 0) objects
+  // and the uiCamera ignores all world objects. routeCameras() assigns each object
+  // to exactly one camera (read after its scrollFactor has been set).
+  setupUICamera() {
+    this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+    this.uiCamera.setScroll(0, 0);
+    this.routeCameras();
+  }
+
+  routeCameras() {
+    if (!this.uiCamera) return;
+    const main = this.cameras.main;
+    const ui = this.uiCamera;
+    const list = this.children.list;
+    for (let i = 0; i < list.length; i++) {
+      const obj = list[i];
+      if (obj._camRouted) continue;
+      obj._camRouted = true;
+      if (obj.scrollFactorX === 0) main.ignore(obj); // HUD -> uiCamera only
+      else ui.ignore(obj); // world -> main camera only
+    }
+  }
+
+  // The game-over overlay is built here, but update() returns early once game
+  // over, so route its (screen-fixed) elements to the uiCamera immediately —
+  // otherwise the main camera also renders them, zoomed (BUG 1 regression).
+  triggerGameOver() {
+    super.triggerGameOver();
+    this.routeCameras();
   }
 
   // Slice the "finished" frame out of each construction sheet into a standalone
@@ -366,8 +401,10 @@ export class IsometricScene extends GameScene {
         else if (t === 'forest') key = Phaser.Utils.Array.GetRandom(forestKeys);
         else if (t === 'rock') key = Phaser.Utils.Array.GetRandom(rockKeys);
         else {
-          const rnd = Math.random();
-          key = rnd < 0.14 ? 'iso_grass2' : rnd < 0.18 ? 'iso_grass_dirt' : 'iso_grass';
+          // BUG 3: clean grass only. The old dirt-patch tile (img_8) had a reddish
+          // blob that, scattered across the map, looked like "random enemies".
+          // Now the only red sprites are actual enemies marching from the AI castle.
+          key = Math.random() < 0.16 ? 'iso_grass2' : 'iso_grass';
         }
         this.add.image(tl.x, tl.y, key).setOrigin(0, 0).setDepth((c + r) * DMUL);
       }
@@ -398,7 +435,9 @@ export class IsometricScene extends GameScene {
 
     const scale = fp === 3 ? 2.0 : fp === 2 ? 1.5 : 1.0;
     b.baseScale = scale;
-    b.rect.setOrigin(0.5, 0.75).setScale(scale).setAngle(0);
+    // BUG 2 FIX: anchor at the base (0.5, 1.0) so the building stands up from the
+    // tile; positioned at the tile centre so its base sits on the diamond.
+    b.rect.setOrigin(0.5, 1.0).setScale(scale).setAngle(0);
     b.rect.x = b.x;
     b.rect.y = b.y;
     if (b.shadow) b.shadow.setVisible(false);
@@ -583,7 +622,7 @@ export class IsometricScene extends GameScene {
 
     if (!this.ghostG) {
       this.ghostG = this.add.graphics().setDepth(30);
-      this.ghostImg = this.add.image(0, 0, this.placementType).setDepth(30.5).setAlpha(0.6).setOrigin(0.5, 0.75);
+      this.ghostImg = this.add.image(0, 0, this.placementType).setDepth(30.5).setAlpha(0.6).setOrigin(0.5, 1.0);
     }
     const color = valid ? 0x66ff88 : 0xff6666;
     const pts = this.regionDiamond(c0, c1, r0, r1);
@@ -637,7 +676,7 @@ export class IsometricScene extends GameScene {
     const castle = this.buildings.castle;
     if (castle) {
       castle.rect.setTexture(this.tierIndex === 1 ? 'castle_town' : 'castle_castle');
-      castle.rect.setOrigin(0.5, 0.75).setScale(castle.baseScale * next.castleScale);
+      castle.rect.setOrigin(0.5, 1.0).setScale(castle.baseScale * next.castleScale);
       castle.rect.clearTint();
       const by = castle.y - castle.baseScale * next.castleScale * 48;
       this.castleBarBg.y = by;
@@ -681,6 +720,28 @@ export class IsometricScene extends GameScene {
     const map = { 0: [N / 2, 0], 1: [N - 1, N / 2], 2: [N / 2, N - 1], 3: [0, N / 2] };
     const [c, r] = map[edge] || [0, 0];
     return this.tileCenter(Math.floor(c), Math.floor(r));
+  }
+
+  // ---- BUG 3 FIX: enemies always originate from the AI castle ---------------
+  // Each newly-spawned enemy is pinned (once) to the AI castle's iso tile,
+  // converted to screen coords; if the AI castle is gone, the map's left edge is
+  // used as a fallback. It then paths to the player castle via the existing A*.
+  reconcileEnemySpawns() {
+    for (const e of this.waves.enemies) {
+      if (e._spawnPinned) continue;
+      e._spawnPinned = true;
+      const aiAlive = this.ai && this.ai.castleAlive;
+      const row = this.ai && this.ai.castleRow != null ? this.ai.castleRow : Math.floor(this.ROWS / 2);
+      const p = aiAlive ? this.tileCenter(1, row) : this.tileCenter(0, row); // AI castle tile, else left edge
+      e.x = p.x + Phaser.Math.Between(-12, 12);
+      e.y = p.y + Phaser.Math.Between(-24, 24);
+      if (e.rect) e.rect.setPosition(e.x, e.y);
+      if (e.spr) e.spr.setPosition(e.x, e.y);
+      if (e.hpBarBg) e.hpBarBg.setPosition(e.x, e.y - 18);
+      if (e.hpBarFill) e.hpBarFill.setPosition(e.x - (e._barW || 24) / 2, e.y - 18);
+      e.path = null; // re-path from the guaranteed spawn point
+      e.pathIdx = 0;
+    }
   }
 
   // ---- Minimap (iso world shown as a top-down grid of dots) ----------------
@@ -843,6 +904,7 @@ export class IsometricScene extends GameScene {
     if (this.canUpgradeTier()) this.fireHint('canUpgrade', 'Your settlement can grow — check the upgrade button');
 
     this.ai.update(dt);
+    this.reconcileEnemySpawns(); // BUG 3: pin new enemies to the AI castle tile
     this.waves.update(dt);
     this.buildings.updateTowers(dt, this.waves.enemies);
     this.nodes.update(gdelta);
@@ -896,5 +958,6 @@ export class IsometricScene extends GameScene {
     this.updateHud();
     this.updateMinimap();
     this.applyIsoDepths();
+    this.routeCameras(); // BUG 1: keep newly-created objects on the right camera
   }
 }
