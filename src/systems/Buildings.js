@@ -1,0 +1,249 @@
+import Phaser from 'phaser';
+import { BuildingTypes, MAX_LEVEL, upgradeCost, outputMultiplier } from '../data/BuildingTypes.js';
+
+// A single placed building: its visuals, HP, level and per-tick behaviour.
+export class Building {
+  constructor(scene, typeKey, col, row) {
+    this.scene = scene;
+    this.typeKey = typeKey;
+    this.type = BuildingTypes[typeKey];
+    this.col = col;
+    this.row = row;
+    this.level = 1;
+    this.maxHp = this.type.hp;
+    this.hp = this.maxHp;
+    this.prodTimer = 0; // seconds accumulated toward next production
+    this.attackTimer = 0; // seconds accumulated toward next shot
+    this.alive = true;
+
+    const { x, y } = scene.tileCenter(col, row);
+    this.x = x;
+    this.y = y;
+
+    const size = 40;
+    // (Phase 5) soft shadow at the base for depth.
+    this.shadow = scene.add.ellipse(x, y + 16, 38, 14, 0x000000, 0.3).setDepth(4);
+    // Real Tiny Swords sprite (texture key == typeKey). Scaled to sit neatly
+    // inside the 48px tile while preserving the art's aspect ratio.
+    this.rect = scene.add
+      .image(x, y, this.typeKey)
+      .setDepth(5)
+      .setInteractive({ useHandCursor: true });
+    const src = this.rect.texture.getSourceImage();
+    this.baseScale = 46 / Math.max(src.width, src.height);
+    this.rect.setScale(this.baseScale);
+    // (Phase 4) Tiny random tilt so buildings don't look robotically aligned.
+    this.rect.setAngle(Phaser.Math.FloatBetween(-2, 2));
+    this.rect.on('pointerdown', (p, lx, ly, ev) => {
+      if (!p.leftButtonDown()) return; // right-click is reserved for unit move commands
+      ev.stopPropagation();
+      scene.selectBuilding(this);
+    });
+
+    // HP bar above the building (small rectangle; the castle uses a sprite bar).
+    this.hpBarBg = scene.add.rectangle(x, y - 26, size, 5, 0x000000, 0.6).setDepth(6);
+    this.hpBar = scene.add
+      .rectangle(x - size / 2, y - 26, size, 5, 0x2ecc71)
+      .setOrigin(0, 0.5)
+      .setDepth(7);
+    this.hpBarWidth = size;
+
+    // Level pip.
+    this.levelText = scene.add
+      .text(x + size / 2 - 2, y + size / 2 - 2, 'L1', {
+        fontFamily: 'monospace',
+        fontSize: '10px',
+        color: '#ffff88',
+      })
+      .setOrigin(1, 1)
+      .setDepth(7);
+  }
+
+  // Whole-number production. Called once per second by the manager.
+  produce(resources, scene) {
+    if (this.type.attack || !this.type.produces) return;
+    const mult = outputMultiplier(this.level);
+    const interval = this.type.interval || 1;
+    this.prodTimer += 1;
+    if (this.prodTimer >= interval) {
+      this.prodTimer = 0;
+      if (this.type.produces === 'soldiers') {
+        scene.onSoldierProduced(this); // spawns a visible warrior (Phase 4)
+      } else {
+        resources.add(this.type.produces, this.type.rate * mult);
+      }
+    }
+  }
+
+  // Building upgrades cost GOLD only (see BuildingTypes.upgradeCost).
+  canUpgrade(resources) {
+    return this.level < MAX_LEVEL && resources.gold >= this.nextUpgradeCost();
+  }
+
+  nextUpgradeCost() {
+    return upgradeCost(this.type, this.level);
+  }
+
+  upgrade(resources) {
+    if (!this.canUpgrade(resources)) return false;
+    resources.gold -= this.nextUpgradeCost();
+    this.level += 1;
+    this.maxHp = Math.round(this.type.hp * (1 + (this.level - 1) * 0.5));
+    this.hp = this.maxHp;
+    this.levelText.setText('L' + this.level);
+    this.refreshHpBar();
+    this.scene.tweens.add({ targets: this.rect, scale: this.baseScale * 1.3, yoyo: true, duration: 120 });
+    return true;
+  }
+
+  currentOutput() {
+    const mult = outputMultiplier(this.level);
+    if (this.type.attack) return this.type.damage * mult;
+    return (this.type.rate || 0) * mult;
+  }
+
+  takeDamage(amount) {
+    this.hp -= amount;
+    this.refreshHpBar();
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.destroy();
+    }
+  }
+
+  refreshHpBar() {
+    const pct = Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
+    this.hpBar.width = this.hpBarWidth * pct;
+    const color = pct > 0.5 ? 0x2ecc71 : pct > 0.25 ? 0xf1c40f : 0xe74c3c;
+    this.hpBar.fillColor = color;
+  }
+
+  destroy() {
+    this.alive = false;
+    if (this.scene.explosionAt) this.scene.explosionAt(this.x, this.y); // Phase 5 FX
+    this.shadow.destroy();
+    this.rect.destroy();
+    this.hpBar.destroy();
+    this.hpBarBg.destroy();
+    this.levelText.destroy();
+  }
+}
+
+// Owns the placement grid, worker accounting and all building updates.
+export class BuildingManager {
+  constructor(scene, cols, rows) {
+    this.scene = scene;
+    this.cols = cols;
+    this.rows = rows;
+    this.buildings = [];
+    this.grid = Array.from({ length: rows }, () => Array(cols).fill(null));
+    this.castle = null;
+  }
+
+  isOccupied(col, row) {
+    return this.grid[row][col] !== null;
+  }
+
+  countOfType(typeKey) {
+    return this.buildings.filter((b) => b.typeKey === typeKey).length;
+  }
+
+  // Placeable buildings count toward the settlement building cap (castle excluded).
+  placedCount() {
+    return this.buildings.filter((b) => b.typeKey !== 'castle').length;
+  }
+
+  // Sum of workers consumed by operating buildings.
+  workersUsed() {
+    return this.buildings.reduce((sum, b) => sum + (b.type.workerCost || 0), 0);
+  }
+
+  availableWorkers(resources) {
+    return resources.workersCap - this.workersUsed();
+  }
+
+  // Validate a build attempt. Returns { ok, reason }.
+  canPlace(typeKey, resources, maxBuildings) {
+    const type = BuildingTypes[typeKey];
+    if (this.placedCount() >= maxBuildings) {
+      return { ok: false, reason: `Building limit reached (${maxBuildings}) — upgrade your settlement` };
+    }
+    if (type.maxCount && this.countOfType(typeKey) >= type.maxCount) {
+      return { ok: false, reason: `Max ${type.maxCount} ${type.name}s reached` };
+    }
+    if (!resources.canAfford(type.cost)) {
+      return { ok: false, reason: 'Not enough resources' };
+    }
+    if (type.workerCost > 0 && this.availableWorkers(resources) < type.workerCost) {
+      return { ok: false, reason: 'Need more workers — build a House' };
+    }
+    return { ok: true };
+  }
+
+  place(typeKey, col, row) {
+    if (this.isOccupied(col, row)) return null;
+    const b = new Building(this.scene, typeKey, col, row);
+    this.grid[row][col] = b;
+    this.buildings.push(b);
+    if (typeKey === 'castle') this.castle = b;
+    // Houses raise the population cap.
+    if (b.type.capIncrease) this.scene.resources.workersCap += b.type.capIncrease;
+    return b;
+  }
+
+  remove(building) {
+    this.grid[building.row][building.col] = null;
+    this.buildings = this.buildings.filter((b) => b !== building);
+    // Destroying a House lowers the population cap again.
+    if (building.type.capIncrease) {
+      this.scene.resources.workersCap = Math.max(0, this.scene.resources.workersCap - building.type.capIncrease);
+    }
+  }
+
+  // Boolean obstacle grid for pathfinding (every building blocks).
+  blockedGrid() {
+    return this.grid.map((row) => row.map((cell) => cell !== null));
+  }
+
+  // Called once per second to generate resources / train soldiers.
+  tick(resources, scene) {
+    for (const b of this.buildings) b.produce(resources, scene);
+  }
+
+  // Called every frame; towers acquire and shoot the nearest enemy in range.
+  updateTowers(dt, enemies) {
+    for (const b of this.buildings) {
+      if (!b.type.attack || !b.alive) continue;
+      b.attackTimer += dt;
+      if (b.attackTimer < b.type.attackInterval) continue;
+
+      const rangePx = b.type.range * this.scene.TILE;
+      let target = null;
+      let best = Infinity;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const d = Phaser.Math.Distance.Between(b.x, b.y, e.x, e.y);
+        if (d <= rangePx && d < best) {
+          best = d;
+          target = e;
+        }
+      }
+      if (target) {
+        b.attackTimer = 0;
+        target.takeDamage(b.currentOutput());
+        this.scene.spawnShot(b.x, b.y, target.x, target.y);
+      }
+    }
+  }
+
+  reap() {
+    let changed = false;
+    for (const b of [...this.buildings]) {
+      if (!b.alive) {
+        this.remove(b);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+}
