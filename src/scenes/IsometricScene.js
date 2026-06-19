@@ -63,18 +63,25 @@ import { ExpeditionManager } from '../systems/Expeditions.js';
 import { AIKingdom, FACTIONS } from '../systems/AIKingdom.js';
 import { WildlifeManager } from '../systems/Wildlife.js';
 import { Territory } from '../systems/Territory.js';
+import { SettlementManager } from '../systems/Settlements.js';
+import { GoblinCampManager } from '../systems/GoblinCamps.js';
 import { findPath } from '../systems/Pathfinding.js';
 import { BuildingTypes } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
-const N = 40;            // 40x40 tile grid
+const N = 200;           // 200x200 tile grid (the huge continent)
 const HW = 32;           // half tile width  (screenX step = col-row * 32)
 const HH = 16;           // half tile height (screenY step = col+row * 16)
-const OX = 1248;         // origin offset so col-row = -39 lands at x = 0
+const OX = (N - 1) * HW; // origin offset so col-row = -(N-1) lands at x = 0
 const OY = 120;          // origin offset (headroom for back-row building tops)
-const WORLD_W = 2600;    // camera world bounds
-const WORLD_H = 1500;
-const DMUL = 0.35;       // depth = (col+row) * DMUL, kept < 33 so the HUD stays on top
+const WORLD_W = (N - 1) * HW * 2 + 128; // camera world bounds (~12864)
+const WORLD_H = (N - 1) * HH * 2 + 260;  // (~6628)
+// Depth = (col+row) * DMUL. With col+row up to 398 we keep DMUL small so the
+// whole world band stays below ~24 and the HUD (28+) renders on top. Terrain is
+// a single Blitter layer well below everything (TERRAIN_DEPTH), so only moving
+// units/buildings need this fine-grained ordering.
+const DMUL = 0.06;
+const TERRAIN_DEPTH = -10;
 const TOP_BAR = 50;      // screen-space HUD band (matches GameScene)
 const PANEL_H = 130;
 const DAY_MS = 300000;   // one game day = 5 real minutes (scaled by game speed)
@@ -202,8 +209,9 @@ export class IsometricScene extends GameScene {
     this.gridOriginY = 0;
     this.PANEL_Y = GAME_H - PANEL_H;
 
-    // Center 15x15 buildable settlement zone of the 40x40 world (cols/rows 13-27).
-    this.BZ = { c0: 13, c1: 27, r0: 13, r1: 27 };
+    // Center ~20x20 buildable settlement zone of the 200x200 world.
+    const mid = Math.floor(N / 2);
+    this.BZ = { c0: mid - 10, c1: mid + 10, r0: mid - 10, r1: mid + 10 };
 
     this.isGameOver = false;
     this.selectedBuilding = null;
@@ -286,6 +294,9 @@ export class IsometricScene extends GameScene {
     this.waveCoord = { holder: null, cooldown: 0 };
     this.ai = new AIKingdom(this, FACTIONS.red); // primary (kept for legacy refs)
     this.kingdoms = [this.ai, new AIKingdom(this, FACTIONS.purple), new AIKingdom(this, FACTIONS.yellow)];
+    this.DAY_SECONDS = DAY_MS / 1000;
+    this.settlements = new SettlementManager(this); // Phase B: neutral settlements
+    this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
     this.territory = new Territory(this); // Phase 4: territory + fog of war
     this.setupInput();
     this.setupCamera();
@@ -303,6 +314,16 @@ export class IsometricScene extends GameScene {
     }
 
     this.setupUICamera();
+
+    // (Phase B) Tab toggles the continent overview (launched on top, this scene
+    // pauses while it's open).
+    this.input.keyboard.on('keydown-TAB', (e) => { if (e && e.preventDefault) e.preventDefault(); this.openContinent(); });
+  }
+
+  openContinent() {
+    if (this.scene.isActive('ContinentScene') || this.isGameOver) return;
+    this.scene.launch('ContinentScene');
+    this.scene.pause();
   }
 
   // ---- BUG 1 FIX: dedicated UI camera that never zooms/pans -----------------
@@ -457,105 +478,124 @@ export class IsometricScene extends GameScene {
   // regionAt() is the single source of truth, also read by ResourceNodes,
   // Wildlife, Territory and AIKingdom. The NE/SE corners fold into north/south
   // so the Purple (NE forest) and Yellow (SE plains) kingdoms sit in-theme.
-  regionAt(c, r) {
-    if (c < 0 || r < 0 || c >= N || r >= N) return 'plain';
-    if (this.isBuildZone(c, r)) return 'settlement';
-    if (r <= 8) return c <= 8 ? 'west' : 'north';
-    if (r >= 31) return c <= 8 ? 'west' : 'south';
-    if (c <= 8) return 'west';
-    if (c >= 31) return 'east';
-    return 'plain'; // inner transition ring between the build zone and the bands
+  // Named biome for a tile. The huge map is banded: a flat START zone in the
+  // centre, DEEP FOREST to the north, HIGHLAND MOUNTAINS east, RIVER DELTA south,
+  // WESTERN WILDLANDS west, and transitional MIDDLE wilderness between them.
+  biomeAt(c, r) {
+    if (c < 0 || r < 0 || c >= N || r >= N) return 'middle';
+    if (this.isBuildZone(c, r)) return 'start';
+    if (c < 50) return 'wildlands';     // west (incl. NW/SW corners)
+    if (c >= 150) return 'mountains';   // east (incl. NE/SE corners)
+    if (r < 50) return 'forest';        // north band
+    if (r >= 150) return 'delta';       // south band
+    return 'middle';
   }
 
-  // 0..1 measure of how deep a tile sits inside its region (1 = world edge),
-  // used to fade terrain density toward the centre for smooth transitions.
-  regionDepth(reg, c, r) {
-    if (reg === 'north') return Phaser.Math.Clamp((9 - r) / 9, 0, 1);
-    if (reg === 'south') return Phaser.Math.Clamp((r - 30) / 9, 0, 1);
-    if (reg === 'east') return Phaser.Math.Clamp((c - 30) / 9, 0, 1);
-    if (reg === 'west') return Phaser.Math.Clamp(Math.max((9 - c) / 9, c <= 8 ? 0 : -1), 0, 1);
-    return 0;
+  // Compatibility shim: the older systems (Wildlife/ResourceNodes/Territory)
+  // think in N/E/S/W "regions" — map the biomes onto those names.
+  regionAt(c, r) {
+    const b = this.biomeAt(c, r);
+    if (b === 'start') return this.isBuildZone(c, r) ? 'settlement' : 'plain';
+    return { forest: 'north', mountains: 'east', delta: 'south', wildlands: 'west', middle: 'plain' }[b];
+  }
+
+  // Build a single 64x64-cell canvas atlas containing every terrain tile, so the
+  // whole 40,000-tile floor can be drawn by ONE Blitter (one batched draw call,
+  // per-tile tint for fog/territory) instead of 40,000 separate images.
+  buildTerrainAtlas() {
+    this.TERRAIN_KEYS = ['iso_grass', 'iso_grass2', 'iso_water', 'iso_water2', 'iso_water3', 'iso_rock', 'iso_mtn',
+      'iso_forest1', 'iso_forest2', 'iso_forest3', 'iso_forest4', 'iso_forest5', 'iso_forest6', 'iso_forest7', 'iso_forest8'];
+    if (this.textures.exists('terrainAtlas')) return;
+    const cols = 8, cell = 64;
+    const rows = Math.ceil(this.TERRAIN_KEYS.length / cols);
+    const tex = this.textures.createCanvas('terrainAtlas', cols * cell, rows * cell);
+    const ctx = tex.getContext();
+    this.TERRAIN_KEYS.forEach((k, i) => {
+      const x = (i % cols) * cell, y = Math.floor(i / cols) * cell;
+      ctx.drawImage(this.textures.get(k).getSourceImage(), 0, 0, 64, 64, x, y, cell, cell);
+      tex.add(k, 0, x, y, cell, cell); // frame named by the original tile key
+    });
+    tex.refresh();
   }
 
   drawGrid() {
+    this.buildTerrainAtlas();
     const waterKeys = ['iso_water', 'iso_water2', 'iso_water3'];
     const forestKeys = ['iso_forest1', 'iso_forest2', 'iso_forest3', 'iso_forest4', 'iso_forest5', 'iso_forest6', 'iso_forest7', 'iso_forest8'];
-    const rockKeys = ['iso_rock', 'iso_mtn'];
 
     const type = Array.from({ length: N }, () => Array(N).fill('grass'));
-    const region = Array.from({ length: N }, () => Array(N).fill('plain'));
+    const biome = Array.from({ length: N }, () => Array(N).fill('middle'));
 
     for (let r = 0; r < N; r++) {
       for (let c = 0; c < N; c++) {
-        const reg = this.regionAt(c, r);
-        region[r][c] = reg;
-        if (reg === 'settlement' || reg === 'plain') {
-          // Light forest/rock bleed into the transition ring for a soft edge.
-          const nf = this.regionAt(c, r - 2), sf = this.regionAt(c, r + 2);
-          const wf = this.regionAt(c - 2, r), ef = this.regionAt(c + 2, r);
-          if (reg === 'plain' && [nf, wf].includes('north') && Math.random() < 0.12) type[r][c] = 'forest';
-          else if (reg === 'plain' && ef === 'east' && Math.random() < 0.1) type[r][c] = 'rock';
-          continue;
-        }
-        const d = this.regionDepth(reg, c, r);
+        const b = this.biomeAt(c, r);
+        biome[r][c] = b;
         let pForest = 0, pRock = 0;
-        if (reg === 'north') { pForest = 0.3 + d * 0.62; pRock = 0.03; }
-        else if (reg === 'east') { pRock = 0.28 + d * 0.55; pForest = 0.04; }
-        else if (reg === 'south') { pForest = 0.05; pRock = 0.03; } // flat, open plains
-        else if (reg === 'west') { pForest = 0.18; pRock = 0.12; }   // mixed
-        const roll = Math.random();
-        if (roll < pForest) type[r][c] = 'forest';
-        else if (roll < pForest + pRock) type[r][c] = 'rock';
+        if (b === 'forest') { pForest = 0.62; pRock = 0.03; }
+        else if (b === 'mountains') { pRock = 0.6; pForest = 0.04; }
+        else if (b === 'wildlands') { pForest = 0.22; pRock = 0.16; }
+        else if (b === 'delta') { pForest = 0.04; pRock = 0.02; }
+        else if (b === 'middle') { pForest = 0.1; pRock = 0.07; }
+        // start zone stays clean grass
+        if (b !== 'start') {
+          const roll = Math.random();
+          if (roll < pForest) type[r][c] = 'forest';
+          else if (roll < pForest + pRock) type[r][c] = 'rock';
+        }
       }
     }
 
-    // River: a 2-3 tile band along the bottom (south) edge with a gentle wobble.
+    // River: a continuous 3-4 tile east-west band across the south delta.
     for (let c = 0; c < N; c++) {
-      const w = 2 + (Math.sin(c * 0.45) > 0.3 ? 1 : 0);
+      const base = 172 + Math.round(3 * Math.sin(c * 0.05) + 1.5 * Math.sin(c * 0.21));
+      const w = 3 + (Math.sin(c * 0.13) > 0.4 ? 1 : 0);
       for (let k = 0; k < w; k++) {
-        const r = N - 1 - k;
-        if (!this.isBuildZone(c, r)) type[r][c] = 'water';
+        const r = base + k;
+        if (r >= 0 && r < N && !this.isBuildZone(c, r)) type[r][c] = 'water';
       }
     }
+    this.riverRowAt = (c) => 172 + Math.round(3 * Math.sin(c * 0.05) + 1.5 * Math.sin(c * 0.21)) + 1;
 
     this.terrainType = type;
-    this.regionGrid = region;
-    // Keep a reference to every ground tile so the Territory system can tint
-    // them (territory wash / fog of war) without spawning extra overlay objects.
+    this.biomeGrid = biome;
+    this.regionGrid = biome; // descriptive grid (continent view reads biomes)
+    // One Bob per tile, created back-to-front (increasing col+row) so any baked
+    // tree/rock props overlap correctly. Bobs are stored for fog/territory tint.
     this.terrainTiles = Array.from({ length: N }, () => Array(N).fill(null));
-
-    // Render every tile back-to-front via depth = (col+row).
-    for (let r = 0; r < N; r++) {
-      for (let c = 0; c < N; c++) {
+    const blitter = this.add.blitter(0, 0, 'terrainAtlas').setDepth(TERRAIN_DEPTH);
+    this.terrainBlitter = blitter;
+    for (let s = 0; s <= 2 * (N - 1); s++) {
+      const cLo = Math.max(0, s - (N - 1));
+      const cHi = Math.min(s, N - 1);
+      for (let c = cLo; c <= cHi; c++) {
+        const r = s - c;
         const tl = this.tileTopLeft(c, r);
         const t = type[r][c];
         let key;
         if (t === 'water') key = Phaser.Utils.Array.GetRandom(waterKeys);
         else if (t === 'forest') key = Phaser.Utils.Array.GetRandom(forestKeys);
-        else if (t === 'rock') key = Phaser.Utils.Array.GetRandom(rockKeys);
+        else if (t === 'rock') key = (this.biomeGrid[r][c] === 'mountains' || Math.random() < 0.5) ? 'iso_mtn' : 'iso_rock';
         else key = Math.random() < 0.16 ? 'iso_grass2' : 'iso_grass';
-        this.terrainTiles[r][c] = this.add.image(tl.x, tl.y, key).setOrigin(0, 0).setDepth((c + r) * DMUL);
+        this.terrainTiles[r][c] = blitter.create(tl.x, tl.y, key);
       }
     }
   }
 
-  // (Phase 3) Scatter a few standalone decorative rocks in the open wilderness
-  // (forest tiles already carry their own props) for visual variety.
+  // Decorative rocks scattered through the central/explored area for variety
+  // (biome forest/rock tiles already carry their own props).
   scatterDecorations() {
     const rockKeys = ['rock1', 'rock2', 'rock3', 'rock4'];
+    const mid = Math.floor(N / 2);
     let placed = 0;
-    for (let a = 0; a < 120 && placed < 16; a++) {
-      const c = Phaser.Math.Between(0, N - 1);
-      const r = Phaser.Math.Between(0, N - 1);
-      if (!this.isWilderness(c, r)) continue;
-      if (this.terrainType[r][c] !== 'grass') continue;
-      const reg = this.regionGrid[r][c];
-      if (reg === 'north') continue; // forest fringe stays clear of loose rocks
+    for (let a = 0; a < 400 && placed < 60; a++) {
+      const c = Phaser.Math.Between(mid - 40, mid + 40);
+      const r = Phaser.Math.Between(mid - 40, mid + 40);
+      if (!this.isWilderness(c, r) || this.terrainType[r][c] !== 'grass') continue;
       const ctr = this.tileCenter(c, r);
       this.add.image(ctr.x + Phaser.Math.Between(-10, 10), ctr.y + Phaser.Math.Between(-4, 8),
         Phaser.Utils.Array.GetRandom(rockKeys))
-        .setOrigin(0.5, 0.7).setScale(0.5 * Phaser.Math.FloatBetween(0.8, 1.2))
-        .setDepth((c + r) * DMUL + 0.03).setAlpha(0.9);
+        .setOrigin(0.5, 0.7).setScale(0.45 * Phaser.Math.FloatBetween(0.8, 1.2))
+        .setDepth((c + r) * DMUL + 0.02).setAlpha(0.85);
       placed++;
     }
   }
@@ -596,66 +636,73 @@ export class IsometricScene extends GameScene {
   }
 
   // Re-sort everything that can move/spawn, every frame, by iso depth.
+  // Depth ordering. Terrain is a single Blitter below everything (TERRAIN_DEPTH);
+  // these objects sort among themselves by (col+row)*DMUL with tiny sub-tile
+  // layer offsets (all < DMUL so the ordering within a tile is stable). The whole
+  // band stays < ~24, below the HUD at 28+.
   applyIsoDepths() {
     const D = (wy) => this.worldDepth(wy);
+    const BODY = 0.006, UNIT = 0.008, RING = 0.010, BARB = 0.012, BARF = 0.014, LBL = 0.016, NODE = 0.004;
 
     for (const b of this.buildings.buildings) {
       this.decorateBuilding(b);
       const f = b._fp || 1;
       const base = (b.col + b.row + (f - 1)) * DMUL;
-      b.rect.setDepth(base + 0.05);
-      if (b.hpBarBg) b.hpBarBg.setDepth(base + 0.07);
-      if (b.hpBar) b.hpBar.setDepth(base + 0.08);
-      if (b.levelText) b.levelText.setDepth(base + 0.08);
-      if (b.workerIcon) b.workerIcon.setDepth(base + 0.08);
+      b.rect.setDepth(base + BODY);
+      if (b.hpBarBg) b.hpBarBg.setDepth(base + BARB);
+      if (b.hpBar) b.hpBar.setDepth(base + BARF);
+      if (b.levelText) b.levelText.setDepth(base + BARF);
+      if (b.workerIcon) b.workerIcon.setDepth(base + LBL);
     }
     const c = this.buildings.castle;
     if (c && this.castleBarBg) {
       const base = (c.col + c.row + 2) * DMUL;
-      this.castleBarBg.setDepth(base + 0.09);
-      this.castleBarFill.setDepth(base + 0.1);
+      this.castleBarBg.setDepth(base + BARB);
+      this.castleBarFill.setDepth(base + BARF);
     }
 
-    for (const p of this.pawns.pawns) p.spr.setDepth(D(p.spr.y) + 0.06);
+    for (const p of this.pawns.pawns) p.spr.setDepth(D(p.spr.y) + UNIT);
 
     for (const u of this.troops.allUnits()) {
-      u.spr.setDepth(D(u.spr.y) + 0.06);
-      if (u.selRing) u.selRing.setDepth(D(u.y) + 0.07);
-      if (u.label) u.label.setDepth(D(u.spr.y) + 0.09); // Mercenary tag (Phase 5)
+      u.spr.setDepth(D(u.spr.y) + UNIT);
+      if (u.selRing) u.selRing.setDepth(D(u.y) + RING);
+      if (u.label) u.label.setDepth(D(u.spr.y) + LBL); // Mercenary tag (Phase 5)
     }
 
     for (const e of this.waves.enemies) {
       const s = e.rect || e.spr;
       if (!s) continue;
       const d = D(s.y);
-      s.setDepth(d + 0.06);
-      if (e.hpBarBg) e.hpBarBg.setDepth(d + 0.07);
-      if (e.hpBarFill) e.hpBarFill.setDepth(d + 0.08);
+      s.setDepth(d + UNIT);
+      if (e.hpBarBg) e.hpBarBg.setDepth(d + BARB);
+      if (e.hpBarFill) e.hpBarFill.setDepth(d + BARF);
     }
 
     for (const n of this.nodes.nodes) {
-      if (n.spr) n.spr.setDepth(D(n.spr.y) + 0.04);
-      if (n.label) n.label.setDepth(29); // always readable, above the world band
+      if (n.spr) n.spr.setDepth(D(n.spr.y) + NODE);
+      if (n.label) n.label.setDepth(D(n.spr.y) + LBL); // just above its node
     }
 
     if (this.wildlife) {
       for (const w of this.wildlife.units) {
         if (!w.spr) continue;
         const d = D(w.spr.y);
-        w.spr.setDepth(d + 0.06);
-        if (w.hpBarBg) w.hpBarBg.setDepth(d + 0.07);
-        if (w.hpBarFill) w.hpBarFill.setDepth(d + 0.08);
+        w.spr.setDepth(d + UNIT);
+        if (w.hpBarBg) w.hpBarBg.setDepth(d + BARB);
+        if (w.hpBarFill) w.hpBarFill.setDepth(d + BARF);
       }
     }
+    if (this.settlements) this.settlements.applyDepths(D, BODY, BARB, BARF, LBL);
+    if (this.goblinCamps) this.goblinCamps.applyDepths(D, BODY, BARB, BARF);
 
     for (const k of this.kingdoms || []) {
-      for (const ab of k.buildings) if (ab.sprite) ab.sprite.setDepth(D(ab.sprite.y) + 0.05);
+      for (const ab of k.buildings) if (ab.sprite) ab.sprite.setDepth(D(ab.sprite.y) + BODY);
       if (k.castleSpr) {
         const d = D(k.castleY);
-        k.castleSpr.setDepth(d + 0.05);
-        if (k.castleBarBg) k.castleBarBg.setDepth(d + 0.09);
-        if (k.castleBarFill) k.castleBarFill.setDepth(d + 0.1);
-        if (k.castleLabel) k.castleLabel.setDepth(d + 0.11);
+        k.castleSpr.setDepth(d + BODY);
+        if (k.castleBarBg) k.castleBarBg.setDepth(d + BARB);
+        if (k.castleBarFill) k.castleBarFill.setDepth(d + BARF);
+        if (k.castleLabel) k.castleLabel.setDepth(d + LBL);
       }
     }
   }
@@ -716,7 +763,7 @@ export class IsometricScene extends GameScene {
       }
     });
     this.input.on('wheel', (p, over, dx, dy) => {
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.5, 2));
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.3, 2));
     });
   }
 
@@ -878,10 +925,13 @@ export class IsometricScene extends GameScene {
   computeEnemyPath(enemy) {
     const castle = this.buildings.castle;
     if (!castle || !castle.alive) return null;
-    const blocked = this.buildings.blockedGrid();
     const t = this.screenToTile(enemy.x, enemy.y);
     const col = Phaser.Math.Clamp(t.col, 0, this.COLS - 1);
     const row = Phaser.Math.Clamp(t.row, 0, this.ROWS - 1);
+    // (Phase B) On the huge map, only run A* once the enemy is near the base
+    // (the wilderness is open) — long-distance A* would be far too expensive.
+    if (Phaser.Math.Distance.Between(col, row, castle.col, castle.row) > 28) return null; // march straight
+    const blocked = this.buildings.blockedGrid();
     const path = findPath(blocked, { col, row }, { col: castle.col, row: castle.row });
     if (!path) return null;
     return path.slice(1).map((tt) => this.tileCenter(tt.col, tt.row));
@@ -1324,6 +1374,8 @@ export class IsometricScene extends GameScene {
         if (n) this.resources.add('stone', this.buffs.mineBonusPerDay * n);
       }
     }
+    // (Phase B) Passive income from conquered neutral settlements.
+    if (this.settlements) this.settlements.collectDaily();
     // Brief sunrise: a warm screen flash + a sun disc rising.
     const flash = this.add.rectangle(0, 0, GAME_W, GAME_H, 0xffd27f, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(80);
     this.tweens.add({ targets: flash, alpha: { from: 0.45, to: 0 }, duration: 1400, onComplete: () => flash.destroy() });
@@ -1387,9 +1439,11 @@ export class IsometricScene extends GameScene {
     this.reconcileEnemySpawns(); // mark new enemies (they already spawn at their castle)
     this.waves.update(dt);
     this.wildlife.update(dt); // Phase 2 wildlife threats
-    // Player troops + towers fight AI enemies and wildlife with the same combat
-    // code (wildlife flagged noWarriorMelee so only the player damages them).
-    const threats = this.waves.enemies.concat(this.wildlife.units);
+    this.settlements.update(dt); // Phase B: neutral settlements
+    this.goblinCamps.update(dt); // Phase B: goblin camps
+    // Player troops + towers fight AI enemies, wildlife, and the garrisons of
+    // neutral settlements / goblin camps with the same combat code.
+    const threats = this.waves.enemies.concat(this.wildlife.units, this.settlements.threats(), this.goblinCamps.threats());
     this.buildings.updateTowers(dt, threats);
     this.nodes.update(gdelta);
     this.expeditions.update(dt);

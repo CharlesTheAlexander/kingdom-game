@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import './style.css';
 import { GameScene, GAME_W, GAME_H } from './scenes/GameScene.js';
 import { IsometricScene } from './scenes/IsometricScene.js';
+import { ContinentScene } from './scenes/ContinentScene.js';
 
 const config = {
   type: Phaser.AUTO,
@@ -14,8 +15,9 @@ const config = {
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   // IsometricScene is the active scene (first in the array auto-starts);
-  // GameScene stays registered as reference but is not started.
-  scene: [IsometricScene, GameScene],
+  // GameScene stays registered as reference but is not started. ContinentScene
+  // is launched on demand (Tab) on top of the local view.
+  scene: [IsometricScene, GameScene, ContinentScene],
 };
 
 const game = new Phaser.Game(config);

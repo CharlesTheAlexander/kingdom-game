@@ -15,27 +15,29 @@ const GLOBAL_GAP = 12;    // seconds of calm between two different kingdoms' wav
 
 // Per-faction configuration. tile = castle tile; build* = where it expands;
 // zoneTint = the light territory wash colour.
+// (Phase B) On the 200x200 map the kingdoms sit in the far corners, 80+ tiles
+// from the player's centre start, and stay passive for the first several days.
 export const FACTIONS = {
   red: {
     key: 'red', name: 'Red Kingdom', color: 0xc0392b, labelColor: '#ff8a80', zoneTint: 0xffc2c2,
-    tile: { col: 1, row: 20 }, buildCols: [0, 5], buildRows: [1, 38],
-    startDay: 3, buildEvery: 45, waveGap: 30, firstWave: 18,
+    tile: { col: 12, row: 100 }, buildCols: [4, 24], buildRows: [88, 112],
+    startDay: 12, buildEvery: 45, waveGap: 30, firstWave: 18,
     countMul: 1.0, hpMul: 1.0, buildMix: ['barracks', 'tower', 'house'],
     tex: { castle: 'enemy_castle', barracks: 'ai_barracks', tower: 'ai_tower', house: 'ai_house' },
     warrior: { idle: 'warrior_idle', run: 'red_warrior_run' },
   },
   purple: {
     key: 'purple', name: 'Purple Kingdom', color: 0x8e44ad, labelColor: '#d6a4ff', zoneTint: 0xe2c2ff,
-    tile: { col: 37, row: 4 }, buildCols: [33, 39], buildRows: [1, 8],
-    startDay: 10, buildEvery: 35, waveGap: 45, firstWave: 30, // passive: economy first, small frequent raids
+    tile: { col: 185, row: 15 }, buildCols: [168, 194], buildRows: [5, 28],
+    startDay: 18, buildEvery: 35, waveGap: 45, firstWave: 30, // passive: economy first, small frequent raids
     countMul: 0.7, hpMul: 1.1, buildMix: ['house', 'house', 'tower', 'barracks'],
     tex: { castle: 'purple_castle', barracks: 'purple_barracks', tower: 'purple_tower', house: 'purple_house' },
     warrior: { idle: 'purple_warrior_idle', run: 'purple_warrior_run' },
   },
   yellow: {
     key: 'yellow', name: 'Yellow Kingdom', color: 0xf1c40f, labelColor: '#ffe066', zoneTint: 0xfff0b0,
-    tile: { col: 37, row: 35 }, buildCols: [33, 39], buildRows: [31, 36],
-    startDay: 6, buildEvery: 30, waveGap: 22, firstWave: 24, // aggressive: army fast, big fragile waves
+    tile: { col: 185, row: 185 }, buildCols: [168, 194], buildRows: [178, 195],
+    startDay: 8, buildEvery: 30, waveGap: 22, firstWave: 24, // aggressive: army fast, big fragile waves
     countMul: 1.5, hpMul: 0.7, buildMix: ['barracks', 'barracks', 'tower'],
     tex: { castle: 'yellow_castle', barracks: 'yellow_barracks', tower: 'yellow_tower', house: 'yellow_house' },
     warrior: { idle: 'yellow_warrior_idle', run: 'yellow_warrior_run' },
@@ -144,6 +146,8 @@ export class AIKingdom {
     this.startDay = cfg.startDay;
 
     this.placeCastle();
+    this.addBuilding(); // (Phase B) each kingdom starts with its castle + 2 buildings
+    this.addBuilding();
   }
 
   get barracksCount() {

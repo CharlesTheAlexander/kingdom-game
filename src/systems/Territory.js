@@ -1,218 +1,192 @@
 import Phaser from 'phaser';
 
-// Territory + basic fog of war (Phase 4).
+// Territory + fog of war, scaled for the 200x200 continent (Phase B).
 //
-// Your controlled area is the union of a growing radius around the castle and a
-// small radius around every building you place — so building toward an edge
-// pushes the border that way, and each settlement-tier upgrade adds +5 radius.
-// The AI kingdoms project their own (red) territory; where the two meet is a
-// contested (yellow) border with heavier raids.
-//
-// Rendering is done by TINTING the existing terrain tiles (each already carries
-// the correct per-tile isometric depth) rather than stacking overlay diamonds:
-//   player    -> subtle blue wash      contested -> yellow
-//   ai        -> red wash              just-outside -> slightly desaturated
-//   far away  -> progressively darker "fog" (lifted around your units)
-// A soft cyan glow line traces the player border.
-//
-// Gameplay hooks:
-//   isInTerritory / nodeProtected -> resource nodes inside territory are safe
-//       from goblin raids (goblins must breach the border first).
-//   canHarvest -> worker pawns only walk to nodes within 2 tiles of the border.
+// Rendering tints the terrain Blitter's per-tile Bobs. On a 40,000-tile map we
+// CANNOT re-tint every tile each frame, so:
+//   - all tiles start dark (unexplored fog),
+//   - recompute() (on build / tier upgrade — rare) re-tints only the bounded
+//     region around the player's territory,
+//   - update() incrementally marks tiles newly seen by your units as explored
+//     (permanent) and tints just those.
+// Tints are a pure function of position (tintFor), so there's no giant state grid.
 
-const BASE_RADIUS = 9;     // tiles around the castle at game start (~the build zone)
-const BUILDING_R = 2.6;    // tiles of territory each building projects
-const TIER_BONUS = 5;      // +radius per settlement-tier upgrade
-const AI_RADIUS = 6;       // tiles of territory around an AI castle
+const BASE_RADIUS = 8;     // tiles around the castle at game start
+const BUILDING_R = 2;      // +2 tiles of territory each building projects
+const TIER_BONUS = 15;     // +radius per settlement-tier upgrade
+const AI_RADIUS = 8;       // tiles of territory around an AI castle
+const SETTLE_R = 4;        // territory around a conquered neutral settlement
 const HARVEST_MARGIN = 2;  // tiles outside the border that workers will still reach
-const FOG_START = 3;       // tiles beyond the border before fog begins
-const REVEAL_TILES = 3;    // reveal radius around player units
+const FOG = 15;            // tiles beyond territory before it goes fully dark
+const REVEAL_TILES = 5;    // reveal radius around player units (permanent)
 
 // Tints (multiplicative over the ground art).
 const T_PLAYER = 0xcfe0ff;
 const T_CONTEST = 0xffe9a8;
-const T_AI = 0xffc2c2;
-const T_EDGE = 0xc4c8cc;     // just outside the border, desaturated
-const T_FOG1 = 0x9aa3ad;
-const T_FOG2 = 0x737b86;
-const T_FOG3 = 0x515862;
-const T_REVEAL = 0xdfe6ee;
+const T_EDGE = 0xc8ccd0;   // just outside the border
+const T_NEAR = 0xa6aeb8;   // visible, within fog range
+const T_FAR = 0x848c97;    // visible, near the fog edge
+const T_EXPLORED = 0x646b76; // explored but far from territory — dim but visible
+const T_DARK = 0x333941;   // unexplored fog
 
 export class Territory {
   constructor(scene) {
     this.scene = scene;
     this.N = scene.COLS;
-    this.bonus = 0; // accumulated tier radius bonus
-    this.state = Array.from({ length: this.N }, () => Array(this.N).fill('neutral'));
-    this.aiTint = Array.from({ length: this.N }, () => Array(this.N).fill(null));
-    this.fogDist = Array.from({ length: this.N }, () => Array(this.N).fill(99));
-    this.border = scene.add.graphics().setDepth(27.7).setScrollFactor(1);
+    this.bonus = 0;
+    this.explored = Array.from({ length: this.N }, () => Array(this.N).fill(false));
+    this.border = scene.add.graphics().setDepth(-9).setScrollFactor(1); // just above terrain blitter
     this._revealAcc = 0;
     this._tileCount = 0;
+    this._lastRegion = null;
+    this.darkenAll();
     this.recompute();
   }
 
+  baseR() { return BASE_RADIUS + this.bonus; }
   addTierBonus() { this.bonus += TIER_BONUS; this.recompute(); }
-
-  // Number of player-controlled tiles (used for the kingdom status readout).
   get controlledTiles() { return this._tileCount; }
+  get hasContested() { return this._contested > 0; }
+  // Fraction of the whole continent the player controls (for the continent view).
+  get percentOwned() { return (this._tileCount / (this.N * this.N)) * 100; }
+
+  // Paint the entire map dark once at startup (everything begins unexplored).
+  darkenAll() {
+    const tiles = this.scene.terrainTiles;
+    if (!tiles) return;
+    for (let r = 0; r < this.N; r++) for (let c = 0; c < this.N; c++) if (tiles[r][c]) tiles[r][c].setTint(T_DARK);
+  }
+
+  // AI castle nearest (c,r) within AI_RADIUS → its zone tint, else null.
+  aiTintAt(c, r) {
+    const ks = this.scene.kingdoms || (this.scene.ai ? [this.scene.ai] : []);
+    for (const k of ks) {
+      if (!k.castleAlive || k.castleCol == null) continue;
+      if (Phaser.Math.Distance.Between(c, r, k.castleCol, k.castleRow) <= AI_RADIUS) return (k.cfg && k.cfg.zoneTint) || T_CONTEST;
+    }
+    return null;
+  }
+
+  // Is (c,r) inside the player's controlled territory?
+  playerLevel(c, r) {
+    const castle = this.scene.buildings.castle;
+    if (castle && Phaser.Math.Distance.Between(c, r, castle.col, castle.row) <= this.baseR()) return true;
+    for (const b of this.scene.buildings.buildings) {
+      if (b.typeKey === 'castle') continue;
+      if (Phaser.Math.Distance.Between(c, r, b.col, b.row) <= BUILDING_R) return true;
+    }
+    if (this.scene.settlements) {
+      for (const st of this.scene.settlements.list) {
+        if (st.owner === 'player' && Phaser.Math.Distance.Between(c, r, st.col, st.row) <= SETTLE_R) return true;
+      }
+    }
+    return false;
+  }
+
+  // Approx tiles from the nearest player territory (circle around the castle).
+  fogDist(c, r) {
+    const castle = this.scene.buildings.castle;
+    if (!castle) return 99;
+    return Math.max(0, Phaser.Math.Distance.Between(c, r, castle.col, castle.row) - this.baseR());
+  }
+
+  tintFor(c, r) {
+    const pl = this.playerLevel(c, r);
+    const ai = this.aiTintAt(c, r);
+    if (pl && ai) return T_CONTEST;
+    if (pl) return T_PLAYER;
+    const fd = this.fogDist(c, r);
+    const seen = this.explored[r][c];
+    if (ai && (seen || fd <= FOG)) return ai;
+    if (fd <= FOG || seen) {
+      if (fd <= 2) return T_EDGE;
+      if (fd <= 8) return T_NEAR;
+      if (fd <= FOG) return T_FAR;
+      return T_EXPLORED; // explored but beyond the fog ring
+    }
+    return T_DARK;
+  }
 
   isInTerritory(col, row) {
     if (col < 0 || row < 0 || col >= this.N || row >= this.N) return false;
-    const s = this.state[row][col];
-    return s === 'player' || s === 'contested';
+    return this.playerLevel(col, row);
   }
 
-  // A resource node is protected (raid-safe) when its tile sits in territory.
   nodeProtected(node) {
     const t = this.scene.screenToTile(node.x, node.y);
     return this.isInTerritory(t.col, t.row);
   }
 
-  // Workers will only venture to nodes within HARVEST_MARGIN tiles of the border.
+  // Workers only walk to nodes within HARVEST_MARGIN tiles of the border.
   canHarvest(node) {
     const t = this.scene.screenToTile(node.x, node.y);
     if (t.col < 0 || t.row < 0 || t.col >= this.N || t.row >= this.N) return false;
-    return this.fogDist[t.row][t.col] <= HARVEST_MARGIN;
+    return this.playerLevel(t.col, t.row) || this.fogDist(t.col, t.row) <= HARVEST_MARGIN;
   }
 
-  // True while any tile is contested between the player and an AI kingdom.
-  get hasContested() { return this._contested > 0; }
-
+  // Re-tint the bounded region around the player's territory (+ fog ring). Far
+  // tiles keep their dark/explored tint. Called on build / tier upgrade.
   recompute() {
-    const s = this.scene;
-    const N = this.N;
-    const castle = s.buildings.castle;
-    const cc = castle ? castle.col : Math.floor(N / 2);
-    const cr = castle ? castle.row : Math.floor(N / 2);
-    const baseR = BASE_RADIUS + this.bonus;
+    const castle = this.scene.buildings.castle;
+    const cc = castle ? castle.col : Math.floor(this.N / 2);
+    const cr = castle ? castle.row : Math.floor(this.N / 2);
+    const reach = this.baseR() + FOG + BUILDING_R + 2;
+    const c0 = Math.max(0, cc - reach), c1 = Math.min(this.N - 1, cc + reach);
+    const r0 = Math.max(0, cr - reach), r1 = Math.min(this.N - 1, cr + reach);
 
-    // AI castle influence sources (Phase 6: each kingdom projects its colour).
-    const aiSources = [];
-    const pushAI = (k) => { if (k && k.castleAlive && k.castleCol != null) aiSources.push({ c: k.castleCol, r: k.castleRow, tint: (k.cfg && k.cfg.zoneTint) || T_AI }); };
-    if (s.kingdoms) for (const k of s.kingdoms) pushAI(k);
-    else if (s.ai) pushAI(s.ai);
-
-    const playerTiles = [];
     this._tileCount = 0;
     this._contested = 0;
-    for (let r = 0; r < N; r++) {
-      for (let c = 0; c < N; c++) {
-        let player = Phaser.Math.Distance.Between(c, r, cc, cr) <= baseR;
-        if (!player) {
-          for (const b of s.buildings.buildings) {
-            if (Phaser.Math.Distance.Between(c, r, b.col, b.row) <= BUILDING_R) { player = true; break; }
-          }
-        }
-        let ai = false;
-        let aiTint = null;
-        for (const a of aiSources) {
-          if (Phaser.Math.Distance.Between(c, r, a.c, a.r) <= AI_RADIUS) { ai = true; aiTint = a.tint; break; }
-        }
-        this.aiTint[r][c] = aiTint;
-        let st = 'neutral';
-        if (player && ai) { st = 'contested'; this._contested++; }
-        else if (player) st = 'player';
-        else if (ai) st = 'ai';
-        this.state[r][c] = st;
-        if (st === 'player' || st === 'contested') { playerTiles.push([c, r]); this._tileCount++; }
-      }
-    }
-
-    // Multi-source BFS: distance (in tiles) from the nearest player territory.
-    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) this.fogDist[r][c] = 99;
-    let frontier = [];
-    for (const [c, r] of playerTiles) { this.fogDist[r][c] = 0; frontier.push([c, r]); }
-    let d = 0;
-    while (frontier.length) {
-      const next = [];
-      for (const [c, r] of frontier) {
-        const nb = [[c + 1, r], [c - 1, r], [c, r + 1], [c, r - 1]];
-        for (const [nc, nr] of nb) {
-          if (nc < 0 || nr < 0 || nc >= N || nr >= N) continue;
-          if (this.fogDist[nr][nc] > d + 1) { this.fogDist[nr][nc] = d + 1; next.push([nc, nr]); }
+    const playerTiles = [];
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const bob = this.scene.terrainTiles[r][c];
+        if (bob) bob.setTint(this.tintFor(c, r));
+        const pl = this.playerLevel(c, r);
+        if (pl) {
+          this._tileCount++;
+          this.explored[r][c] = true;
+          if (this.aiTintAt(c, r)) this._contested++;
+          if (!this.playerLevel(c, r + 1) || !this.playerLevel(c, r - 1) || !this.playerLevel(c + 1, r) || !this.playerLevel(c - 1, r)) playerTiles.push([c, r]);
         }
       }
-      frontier = next;
-      d++;
     }
-
     this.redrawBorder(playerTiles);
-    this.applyTints();
+    this._lastRegion = { c0, c1, r0, r1 };
   }
 
-  // Soft cyan glow tracing player tiles that touch non-player tiles.
-  redrawBorder(playerTiles) {
+  redrawBorder(edges) {
     const s = this.scene;
     const g = this.border;
     g.clear();
-    const isP = (c, r) => c >= 0 && r >= 0 && c < this.N && r < this.N && (this.state[r][c] === 'player' || this.state[r][c] === 'contested');
-    const edges = [];
-    for (const [c, r] of playerTiles) {
-      if (!isP(c, r + 1) || !isP(c, r - 1) || !isP(c + 1, r) || !isP(c - 1, r)) edges.push([c, r]);
-    }
     const draw = (width, alpha) => {
       g.lineStyle(width, 0x6fdcff, alpha);
-      for (const [c, r] of edges) {
-        const pts = s.regionDiamond(c, c, r, r);
-        s.strokeDiamond(g, pts);
-        g.strokePath();
-      }
+      for (const [c, r] of edges) { const pts = s.regionDiamond(c, c, r, r); s.strokeDiamond(g, pts); g.strokePath(); }
     };
-    draw(5, 0.12); // outer glow
-    draw(2, 0.5);  // crisp edge
+    draw(5, 0.1);
+    draw(2, 0.45);
   }
 
-  // Tint every tile by its territory state + fog distance, lifting fog around
-  // the player's own units. Cheap (just setTint calls); called on recompute and
-  // throttled for the moving fog-reveal.
-  applyTints(reveal) {
-    const s = this.scene;
-    const tiles = s.terrainTiles;
-    if (!tiles) return;
-    for (let r = 0; r < this.N; r++) {
-      for (let c = 0; c < this.N; c++) {
-        const img = tiles[r][c];
-        if (!img) continue;
-        const st = this.state[r][c];
-        let tint;
-        if (st === 'player') tint = T_PLAYER;
-        else if (st === 'contested') tint = T_CONTEST;
-        else if (st === 'ai') tint = this.aiTint[r][c] || T_AI;
-        else {
-          const fd = this.fogDist[r][c];
-          const revealed = reveal && reveal[r][c];
-          if (fd <= FOG_START) tint = T_EDGE;
-          else if (revealed) tint = T_REVEAL;
-          else if (fd <= FOG_START + 2) tint = T_FOG1;
-          else if (fd <= FOG_START + 4) tint = T_FOG2;
-          else tint = T_FOG3;
-        }
-        img.setTint(tint);
-      }
-    }
-  }
-
-  // Throttled fog-reveal: ~3x/sec rebuild a reveal grid from unit positions and
-  // re-tint so the darkness lifts around moving troops/pawns.
+  // Incremental fog reveal: mark tiles newly seen by units as explored (forever)
+  // and tint just those. Cheap — bounded by units * reveal area.
   update(dt) {
     this._revealAcc += dt;
-    if (this._revealAcc < 0.33) return;
+    if (this._revealAcc < 0.4) return;
     this._revealAcc = 0;
     const s = this.scene;
-    const reveal = Array.from({ length: this.N }, () => Array(this.N).fill(false));
+    const seen = [];
     const mark = (x, y) => {
       const t = s.screenToTile(x, y);
       for (let dr = -REVEAL_TILES; dr <= REVEAL_TILES; dr++) {
         for (let dc = -REVEAL_TILES; dc <= REVEAL_TILES; dc++) {
           const nc = t.col + dc, nr = t.row + dr;
           if (nc < 0 || nr < 0 || nc >= this.N || nr >= this.N) continue;
-          if (dc * dc + dr * dr <= REVEAL_TILES * REVEAL_TILES) reveal[nr][nc] = true;
+          if (dc * dc + dr * dr > REVEAL_TILES * REVEAL_TILES) continue;
+          if (!this.explored[nr][nc]) { this.explored[nr][nc] = true; seen.push([nc, nr]); }
         }
       }
     };
     for (const u of s.troops.allUnits()) mark(u.x, u.y);
     for (const p of s.pawns.pawns) mark(p.x, p.y);
-    this.applyTints(reveal);
+    for (const [c, r] of seen) { const bob = s.terrainTiles[r][c]; if (bob) bob.setTint(this.tintFor(c, r)); }
   }
 }

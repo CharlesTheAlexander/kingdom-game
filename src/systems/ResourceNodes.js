@@ -88,46 +88,63 @@ export class ResourceNodeManager {
     this.nodes = [];
   }
 
+  // (Phase B) 60-80 nodes across the continent. A small reachable cluster sits
+  // just outside the build zone (so idle workers can bootstrap the economy),
+  // while the rest are distributed into biome-appropriate zones for exploration.
   spawnInitial() {
-    // Placement balances two goals: thematic direction (Phase 3 — wood to the
-    // north, stone/gold east, sheep south) AND reachability (Phase 4 — workers
-    // only walk to nodes near the territory border). So the worker-gathered
-    // nodes (wood/stone/food) sit in a ring just outside the build zone in their
-    // themed direction; Gold (not worker-gathered) ranges farther east.
-    const C = this.scene.COLS / 2;
-    const R = this.scene.ROWS / 2;
-    const plan = [
-      ['wood', 7, 'N', [7, 12]],
-      ['stone', 5, 'E', [7, 12]],
-      ['food', 5, 'S', [7, 12]],
-      ['gold', 4, 'E', [10, 20]],
-    ];
-    const dirOk = (dir, c, r) =>
-      dir === 'N' ? r <= R - 3 : dir === 'S' ? r >= R + 3 : dir === 'E' ? c >= C + 3 : c <= C - 3;
     const used = new Set();
-    const pick = (dir, band) => {
-      for (let pass = 0; pass < 3; pass++) {
-        for (let a = 0; a < 160; a++) {
-          const col = Phaser.Math.Between(0, this.scene.COLS - 1);
-          const row = Phaser.Math.Between(0, this.scene.ROWS - 1);
+    const mid = Math.floor(this.scene.COLS / 2);
+    const place = (type, x, y) => this.nodes.push(new ResourceNode(this.scene, type, x, y));
+
+    // Reachable starter cluster (within ~12 tiles of the castle).
+    const near = (type, n, dMin, dMax) => {
+      for (let i = 0; i < n; i++) {
+        for (let a = 0; a < 200; a++) {
+          const col = Phaser.Math.Between(mid - dMax, mid + dMax);
+          const row = Phaser.Math.Between(mid - dMax, mid + dMax);
+          const d = Phaser.Math.Distance.Between(col, row, mid, mid);
           const key = `${col},${row}`;
-          if (!this.scene.isWilderness(col, row) || used.has(key)) continue;
-          const dist = Phaser.Math.Distance.Between(col, row, C, R);
-          if (pass < 2 && (dist < band[0] || dist > band[1])) continue; // honour the ring
-          if (pass === 0 && !dirOk(dir, col, row)) continue;             // pass 0 also honours direction
+          if (d < dMin || d > dMax || !this.scene.isWilderness(col, row) || used.has(key)) continue;
           used.add(key);
           const t = this.scene.tileCenter(col, row);
-          return { x: t.x + Phaser.Math.Between(-14, 14), y: t.y + Phaser.Math.Between(-14, 14) };
+          place(type, t.x + Phaser.Math.Between(-14, 14), t.y + Phaser.Math.Between(-14, 14));
+          break;
         }
       }
-      return null;
     };
-    for (const [type, n, dir, band] of plan) {
+    near('wood', 3, 7, 12);
+    near('stone', 2, 7, 12);
+    near('food', 3, 7, 12);
+    near('gold', 1, 9, 14);
+
+    // Biome-distributed nodes (bounding box per biome).
+    const BBOX = {
+      forest: [50, 149, 4, 48], mountains: [152, 197, 4, 195],
+      delta: [52, 148, 152, 195], wildlands: [4, 48, 4, 195], middle: [55, 145, 55, 145],
+    };
+    const inBiome = (type, n, biome) => {
+      const [c0, c1, r0, r1] = BBOX[biome];
       for (let i = 0; i < n; i++) {
-        const p = pick(dir, band);
-        if (p) this.nodes.push(new ResourceNode(this.scene, type, p.x, p.y));
+        for (let a = 0; a < 200; a++) {
+          const col = Phaser.Math.Between(c0, c1);
+          const row = Phaser.Math.Between(r0, r1);
+          const key = `${col},${row}`;
+          if (this.scene.biomeAt(col, row) !== biome || !this.scene.isWilderness(col, row) || used.has(key)) continue;
+          used.add(key);
+          const t = this.scene.tileCenter(col, row);
+          place(type, t.x + Phaser.Math.Between(-14, 14), t.y + Phaser.Math.Between(-14, 14));
+          break;
+        }
       }
-    }
+    };
+    inBiome('wood', 18, 'forest');     // abundant wood in the deep forest
+    inBiome('wood', 6, 'wildlands');
+    inBiome('stone', 9, 'mountains');  // stone + gold in the highlands
+    inBiome('gold', 7, 'mountains');
+    inBiome('stone', 4, 'wildlands');
+    inBiome('food', 11, 'delta');      // sheep + fish on the river plains
+    inBiome('food', 5, 'middle');
+    inBiome('gold', 2, 'middle');
   }
 
   nearestNode(type, x, y, filter) {

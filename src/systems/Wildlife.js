@@ -16,11 +16,11 @@ import Phaser from 'phaser';
 // list (scene.wildlife.units), never in scene.waves.enemies, so destroying an AI
 // castle does not clear them and vice-versa.
 
-const MAX_WILDLIFE = 8;
-// (FIX 2) Wolf tuning.
-const MAX_WOLVES = 4;          // wolves on the map at once
+const MAX_WILDLIFE = 20;       // (Phase B) the map is 25x bigger
+// Wolf tuning.
+const MAX_WOLVES = 8;          // wolves on the map at once
 const WOLF_CHASE_TILES = 5;    // max chase range
-const NORTH_ROW = 11;          // a pawn at row <= 11 counts as "in the north zone"
+const NORTH_ROW = 50;          // a unit at row < 50 counts as "in the deep forest"
 const WOLF_MIN_DIST = 12;      // min tiles from the player castle for a wolf spawn
 const GOBLIN_MIN_DIST = 8;     // min tiles from the player castle for a goblin spawn
 
@@ -307,7 +307,7 @@ export class WildlifeManager {
   // the castle, capped at 4 on the map.
   spawnWolfPack() {
     if (this.wolfCount() >= MAX_WOLVES) return;
-    const p = this.regionPoint(['north', 'plain'], { rowMax: 10, minTiles: WOLF_MIN_DIST });
+    const p = this.regionPoint(['north'], { rowMax: 49, minTiles: WOLF_MIN_DIST });
     if (!p) return;
     const n = Phaser.Math.Between(2, 3);
     for (let i = 0; i < n && this.wolfCount() < MAX_WOLVES && this.count() < MAX_WILDLIFE; i++) {
@@ -317,7 +317,14 @@ export class WildlifeManager {
   }
 
   spawnGoblinRaid() {
-    const p = this.regionPoint(['west'], { minTiles: GOBLIN_MIN_DIST });
+    // (Phase B) Raids set out from the goblin camp nearest your territory.
+    let p = null;
+    const castle = this.scene.buildings.castle;
+    if (this.scene.goblinCamps && castle) {
+      const camp = this.scene.goblinCamps.nearestAliveTo(castle.col, castle.row);
+      if (camp) p = { x: camp.x + Phaser.Math.Between(-20, 20), y: camp.y + Phaser.Math.Between(-20, 20) };
+    }
+    if (!p) p = this.regionPoint(['west'], { minTiles: GOBLIN_MIN_DIST });
     if (!p) return;
     const party = { rewarded: false, members: [] };
     const n = Phaser.Math.Between(3, 5);
