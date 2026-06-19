@@ -68,7 +68,9 @@ class Pawn {
     const b = this.assigned;
     if (b && b.alive) {
       const g = b.type.produces ? GATHER[b.type.produces] : null;
-      const node = g && this.scene.nodes ? this.scene.nodes.nearestNode(g.node, this.x, this.y) : null;
+      // (Phase 4) Workers won't venture beyond the territory border + margin.
+      const reach = this.scene.territory ? (n) => this.scene.territory.canHarvest(n) : null;
+      const node = g && this.scene.nodes ? this.scene.nodes.nearestNode(g.node, this.x, this.y, reach) : null;
       if (node) {
         // Gathering building → walk out to the resource node.
         this.targetNode = node;

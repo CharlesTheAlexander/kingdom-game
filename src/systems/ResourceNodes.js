@@ -64,6 +64,7 @@ class ResourceNode {
     this.respawnTimer = RESPAWN_MS;
     this.spr.disableInteractive();
     this.spr.clearTint();
+    if (this.scene.dustAt) this.scene.dustAt(this.x, this.y); // (Phase 7) dust puff on depletion
     this.scene.tweens.add({ targets: [this.spr, this.label], alpha: 0, duration: 600 });
   }
 
@@ -76,6 +77,7 @@ class ResourceNode {
       this.refreshLabel();
       this.spr.setInteractive();
       this.scene.tweens.add({ targets: [this.spr, this.label], alpha: 1, duration: 600 });
+      if (this.scene.sparkleAt) this.scene.sparkleAt(this.x, this.y); // (Phase 7) respawn sparkle
     }
   }
 }
@@ -87,34 +89,53 @@ export class ResourceNodeManager {
   }
 
   spawnInitial() {
-    const plan = [['wood', 6], ['gold', 4], ['stone', 4], ['food', 3]];
+    // Placement balances two goals: thematic direction (Phase 3 — wood to the
+    // north, stone/gold east, sheep south) AND reachability (Phase 4 — workers
+    // only walk to nodes near the territory border). So the worker-gathered
+    // nodes (wood/stone/food) sit in a ring just outside the build zone in their
+    // themed direction; Gold (not worker-gathered) ranges farther east.
+    const C = this.scene.COLS / 2;
+    const R = this.scene.ROWS / 2;
+    const plan = [
+      ['wood', 7, 'N', [7, 12]],
+      ['stone', 5, 'E', [7, 12]],
+      ['food', 5, 'S', [7, 12]],
+      ['gold', 4, 'E', [10, 20]],
+    ];
+    const dirOk = (dir, c, r) =>
+      dir === 'N' ? r <= R - 3 : dir === 'S' ? r >= R + 3 : dir === 'E' ? c >= C + 3 : c <= C - 3;
     const used = new Set();
-    const pick = () => {
-      for (let a = 0; a < 80; a++) {
-        const col = Phaser.Math.Between(0, this.scene.COLS - 1);
-        const row = Phaser.Math.Between(0, this.scene.ROWS - 1);
-        const key = `${col},${row}`;
-        if (!this.scene.isWilderness(col, row) || used.has(key)) continue;
-        used.add(key);
-        // (Phase 4) Pixel-level scatter so nodes don't snap to tile centers.
-        const t = this.scene.tileCenter(col, row);
-        return { x: t.x + Phaser.Math.Between(-14, 14), y: t.y + Phaser.Math.Between(-14, 14) };
+    const pick = (dir, band) => {
+      for (let pass = 0; pass < 3; pass++) {
+        for (let a = 0; a < 160; a++) {
+          const col = Phaser.Math.Between(0, this.scene.COLS - 1);
+          const row = Phaser.Math.Between(0, this.scene.ROWS - 1);
+          const key = `${col},${row}`;
+          if (!this.scene.isWilderness(col, row) || used.has(key)) continue;
+          const dist = Phaser.Math.Distance.Between(col, row, C, R);
+          if (pass < 2 && (dist < band[0] || dist > band[1])) continue; // honour the ring
+          if (pass === 0 && !dirOk(dir, col, row)) continue;             // pass 0 also honours direction
+          used.add(key);
+          const t = this.scene.tileCenter(col, row);
+          return { x: t.x + Phaser.Math.Between(-14, 14), y: t.y + Phaser.Math.Between(-14, 14) };
+        }
       }
       return null;
     };
-    for (const [type, n] of plan) {
+    for (const [type, n, dir, band] of plan) {
       for (let i = 0; i < n; i++) {
-        const p = pick();
+        const p = pick(dir, band);
         if (p) this.nodes.push(new ResourceNode(this.scene, type, p.x, p.y));
       }
     }
   }
 
-  nearestNode(type, x, y) {
+  nearestNode(type, x, y, filter) {
     let best = null;
     let bd = Infinity;
     for (const n of this.nodes) {
       if (!n.alive || n.type !== type) continue;
+      if (filter && !filter(n)) continue;
       const d = Phaser.Math.Distance.Between(x, y, n.x, n.y);
       if (d < bd) {
         bd = d;

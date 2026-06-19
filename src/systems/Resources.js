@@ -6,6 +6,7 @@ export class Resources {
     this.stone = 20;
     this.food = 60;
     this.gold = 150;
+    this.iron = 0; // (Phase 5) special resource — only from expeditions, future Knight cost
     this.workersCap = 3; // population cap (raised by Houses); pawns spawn up to this
     this.soldiers = 0; // driven by the live warrior count (Phase 4)
   }

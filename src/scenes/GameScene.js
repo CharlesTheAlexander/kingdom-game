@@ -358,7 +358,7 @@ export class GameScene extends Phaser.Scene {
     mk('blue_warrior_idle', 7, 8);
     mk('blue_warrior_run', 5, 10);
     mk('red_warrior_run', 5, 10);
-    mk('red_archer_idle', 7, 8);
+    mk('red_archer_idle', 5, 8); // sheet has 6 frames (0-5); 7 logged "frame not found" warnings
     mk('blue_archer_idle', 5, 8);
     mk('monk_idle', 5, 7);
     mk('sheep_idle', 5, 6); // food resource node (6 frames)

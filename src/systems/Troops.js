@@ -11,21 +11,34 @@ const DPS_TO_ENEMY = 15;
 const ENEMY_DPS_TO_WARRIOR = 5;
 const WARRIOR_DPS_TO_AI = 10; // when commanded to attack the AI castle
 const MAX_HP = 50;
+// (Phase 2) Auto-acquire leash: warriors only auto-engage threats within ~7
+// tiles and won't chase past ~12 tiles from home, so they defend the base
+// instead of wandering after wildlife. Right-click commands ignore the leash.
+const AUTO_ACQUIRE = 7 * 48;
+const LEASH = 12 * 48;
 
 // Shared move-to-command handler for any unit (Phase 3 box-select). Returns true
 // while a command is active so the unit's normal AI is skipped that frame.
+function speedMul(u) {
+  return u.scene.buffs ? u.scene.buffs.troopSpeed : 1; // War Drum artifact (Phase 5)
+}
+
 function runCommand(u, dt, speed, runAnim, idleAnim) {
   if (!u.cmd) return false;
   const c = u.cmd;
   const d = Phaser.Math.Distance.Between(u.x, u.y, c.x, c.y);
   if (d > 6) {
     const ang = Math.atan2(c.y - u.y, c.x - u.x);
-    u.x += Math.cos(ang) * speed * dt;
-    u.y += Math.sin(ang) * speed * dt;
+    const sp = speed * speedMul(u);
+    u.x += Math.cos(ang) * sp * dt;
+    u.y += Math.sin(ang) * sp * dt;
     u.spr.setFlipX(c.x < u.x);
     u.play(runAnim);
-  } else if (c.attackAI && u.canAttackAI && u.scene.ai && u.scene.ai.castleAlive) {
-    u.scene.ai.damageCastle(WARRIOR_DPS_TO_AI * dt); // chip the AI castle
+  } else if (c.attackAI && u.canAttackAI) {
+    // Chip the commanded enemy castle (Phase 6 — any faction), else the legacy AI.
+    const castle = c.castle || (u.scene.ai && u.scene.ai.castleAlive ? u.scene.ai : null);
+    if (castle && castle.castleAlive) castle.damageCastle(WARRIOR_DPS_TO_AI * dt);
+    else u.cmd = null;
     u.play(idleAnim);
   } else {
     u.cmd = null; // arrived
@@ -36,7 +49,7 @@ function runCommand(u, dt, speed, runAnim, idleAnim) {
 }
 
 class Warrior {
-  constructor(scene, x, y, homeX, homeY) {
+  constructor(scene, x, y, homeX, homeY, opts = {}) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -48,12 +61,20 @@ class Warrior {
     this.target = null;
     this.cmd = null; // manual move/attack command (box-select, Phase 3)
     this.canAttackAI = true;
+    // (Phase 5) Mercenaries are yellow-sprited warriors with a higher food
+    // upkeep and a floating label; regular warriors are blue.
+    this.mercenary = !!opts.mercenary;
+    this.idleAnim = opts.idle || 'blue_warrior_idle';
+    this.runAnim = opts.run || 'blue_warrior_run';
     // (Phase 4) small idle offset so warriors don't rest on exact coordinates.
     this.idleOX = Phaser.Math.Between(-4, 4);
     this.idleOY = Phaser.Math.Between(-4, 4);
-    this.spr = scene.add.sprite(x, y, 'blue_warrior_idle', 0).setScale(SCALE).setDepth(7);
-    this.curAnim = 'blue_warrior_idle';
-    if (scene.anims.exists('blue_warrior_idle')) this.spr.play('blue_warrior_idle');
+    this.spr = scene.add.sprite(x, y, this.idleAnim, 0).setScale(SCALE).setDepth(7);
+    this.curAnim = this.idleAnim;
+    if (scene.anims.exists(this.idleAnim)) this.spr.play(this.idleAnim);
+    if (opts.label) {
+      this.label = scene.add.text(x, y - 24, opts.label, { fontFamily: 'monospace', fontSize: '9px', color: '#ffe066', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 }).setOrigin(0.5, 1).setDepth(8);
+    }
   }
 
   play(key) {
@@ -64,22 +85,27 @@ class Warrior {
 
   update(dt, enemies) {
     if (!this.alive) return;
-    if (runCommand(this, dt, WARRIOR_SPEED, 'blue_warrior_run', 'blue_warrior_idle')) return;
+    if (runCommand(this, dt, WARRIOR_SPEED, this.runAnim, this.idleAnim)) return;
 
-    // Acquire / re-acquire nearest living enemy.
+    // Acquire / re-acquire the nearest living threat within auto-acquire range.
     if (!this.target || !this.target.alive) {
-      this.target = this.nearestEnemy(enemies);
+      this.target = this.nearestEnemy(enemies, AUTO_ACQUIRE);
+    }
+    // Drop the chase if it pulls us too far from home (return to defend).
+    if (this.target && Phaser.Math.Distance.Between(this.homeX, this.homeY, this.x, this.y) > LEASH) {
+      this.target = null;
     }
 
     if (this.target && this.target.alive) {
       const d = Phaser.Math.Distance.Between(this.x, this.y, this.target.x, this.target.y);
       if (d > ATTACK_RANGE) {
         this.moveToward(this.target.x, this.target.y, dt);
-        this.play('blue_warrior_run');
+        this.play(this.runAnim);
       } else {
         this.spr.setFlipX(this.target.x < this.x); // (Phase 5) face the enemy
-        this.target.takeDamage(DPS_TO_ENEMY * dt);
-        this.play('blue_warrior_idle');
+        const dmgMul = this.scene.buffs ? this.scene.buffs.warriorDamage : 1; // Whetstone artifact
+        this.target.takeDamage(DPS_TO_ENEMY * dt * dmgMul);
+        this.play(this.idleAnim);
       }
     } else {
       // No enemies: drift back toward the (slightly offset) home point and idle.
@@ -87,9 +113,9 @@ class Warrior {
       const hy = this.homeY + this.idleOY;
       if (Phaser.Math.Distance.Between(this.x, this.y, hx, hy) > 3) {
         this.moveToward(hx, hy, dt);
-        this.play('blue_warrior_run');
+        this.play(this.runAnim);
       } else {
-        this.play('blue_warrior_idle');
+        this.play(this.idleAnim);
       }
     }
     this.sync();
@@ -97,13 +123,16 @@ class Warrior {
 
   moveToward(tx, ty, dt) {
     const ang = Math.atan2(ty - this.y, tx - this.x);
-    this.x += Math.cos(ang) * WARRIOR_SPEED * dt;
-    this.y += Math.sin(ang) * WARRIOR_SPEED * dt;
+    const sp = WARRIOR_SPEED * speedMul(this);
+    this.x += Math.cos(ang) * sp * dt;
+    this.y += Math.sin(ang) * sp * dt;
     this.spr.setFlipX(tx < this.x);
   }
 
   takeDamage(amount) {
     this.hp -= amount;
+    this.spr.setTintFill(0xff5555); // (Phase 7) hit flash
+    this.scene.time.delayedCall(70, () => { if (this.alive) this.spr.clearTint(); });
     if (this.hp <= 0) this.die();
   }
 
@@ -111,11 +140,12 @@ class Warrior {
     this.alive = false;
     if (this.scene.dustAt) this.scene.dustAt(this.x, this.y); // Phase 5 death FX
     this.spr.destroy();
+    if (this.label) this.label.destroy();
   }
 
-  nearestEnemy(enemies) {
+  nearestEnemy(enemies, maxRange = Infinity) {
     let best = null;
-    let bestD = Infinity;
+    let bestD = maxRange;
     for (const e of enemies) {
       if (!e.alive) continue;
       const d = Phaser.Math.Distance.Between(this.x, this.y, e.x, e.y);
@@ -130,6 +160,7 @@ class Warrior {
   sync() {
     this.spr.x = this.x;
     this.spr.y = this.y;
+    if (this.label) { this.label.x = this.x; this.label.y = this.y - 24; }
   }
 }
 
@@ -247,7 +278,8 @@ class Monk {
         this.y += Math.sin(ang) * 62 * dt;
         this.spr.setFlipX(w.x < this.x);
       } else if (w.hp < w.maxHp * 0.8) {
-        w.hp = Math.min(w.maxHp, w.hp + 5 * dt);
+        const healMul = this.scene.buffs ? this.scene.buffs.monkHeal : 1; // Healer's Tome artifact
+        w.hp = Math.min(w.maxHp, w.hp + 5 * dt * healMul);
         this.healTimer += dt;
         if (this.healTimer >= 1) {
           this.healTimer = 0;
@@ -331,6 +363,28 @@ export class TroopManager {
     this.warriors.push(new Warrior(this.scene, x, y, x, y));
   }
 
+  // (Phase 5) A Mercenary joins from an expedition: yellow sprite, "Mercenary"
+  // label, fights like a warrior but eats 5 food/day (see dailyUpkeep).
+  spawnMercenary() {
+    const home = this.scene.buildings.barracks ? this.scene.buildings.barracks : (this.scene.buildings.buildings.find((b) => b.typeKey === 'barracks') || this.scene.buildings.castle);
+    const hx = home.x + Phaser.Math.Between(-24, 24);
+    const hy = home.y + Phaser.Math.Between(20, 36);
+    const m = new Warrior(this.scene, hx, hy, hx, hy, { mercenary: true, label: 'Mercenary', idle: 'yellow_warrior_idle', run: 'yellow_warrior_run' });
+    this.warriors.push(m);
+    const c = this.scene.buildings.castle;
+    if (c && this.scene.floatText) this.scene.floatText(c.x, c.y - 44, 'A Mercenary joined your army!', '#ffe066');
+    return m;
+  }
+
+  // (Phase 5) Daily food upkeep: 2/soldier, 5/mercenary.
+  dailyUpkeep() {
+    let n = 0;
+    for (const w of this.warriors) n += w.mercenary ? 5 : 2;
+    n += this.archers.length * 2;
+    n += this.monks.length * 2;
+    return n;
+  }
+
   // Remove up to n warriors quietly (they leave on an expedition).
   detach(n) {
     for (let i = 0; i < n && this.warriors.length > 0; i++) {
@@ -343,9 +397,10 @@ export class TroopManager {
   update(dt, enemies) {
     for (const w of this.warriors) w.update(dt, enemies);
 
-    // Any enemy within 1 tile damages the nearest warrior.
+    // Any enemy within 1 tile damages the nearest warrior. Wildlife is flagged
+    // noWarriorMelee (it harasses the economy, not the warriors directly).
     for (const e of enemies) {
-      if (!e.alive) continue;
+      if (!e.alive || e.noWarriorMelee) continue;
       let nearest = null;
       let nd = Infinity;
       for (const w of this.warriors) {

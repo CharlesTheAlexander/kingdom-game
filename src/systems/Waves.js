@@ -5,7 +5,7 @@ const CASTLE_DPS = 10; // damage an enemy deals to the castle per second on cont
 const ENEMY_SPEED = 55; // pixels per second
 
 export class Enemy {
-  constructor(scene, x, y, hp, damage) {
+  constructor(scene, x, y, hp, damage, anims) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -17,10 +17,12 @@ export class Enemy {
     this.pathIdx = 0;
     this.recalcTimer = Math.random(); // stagger path recalcs
 
-    // Red warrior sprite, scaled so the 192px frame fits within 40x40px.
-    this.rect = scene.add.sprite(x, y, 'warrior_idle', 0).setScale(40 / 192).setDepth(8);
+    // (Phase 6) Faction warrior sprite (defaults to the red kingdom's).
+    this.idleAnim = (anims && anims.idle) || 'warrior_idle';
+    this.runAnim = (anims && anims.run) || 'red_warrior_run';
+    this.rect = scene.add.sprite(x, y, this.idleAnim, 0).setScale(40 / 192).setDepth(8);
     this.curAnim = null;
-    this.playAnim('warrior_idle');
+    this.playAnim(this.idleAnim);
 
     // Clean drawn HP bar (sprite bars smeared when stretched — see GameScene note).
     this._barW = 24;
@@ -42,6 +44,9 @@ export class Enemy {
     const pct = Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
     this.hpBarFill.width = this._barW * pct;
     this.hpBarFill.fillColor = pct > 0.5 ? 0x2ecc71 : pct > 0.25 ? 0xf1c40f : 0xe74c3c;
+    // (Phase 7) brief red hit flash.
+    this.rect.setTintFill(0xff3333);
+    this.scene.time.delayedCall(70, () => { if (this.alive) this.rect.clearTint(); });
     if (this.hp <= 0) this.destroy();
   }
 
@@ -54,11 +59,11 @@ export class Enemy {
     if (distToCastle <= scene.TILE) {
       // In contact with the castle: stop and attack.
       castle.takeDamage(CASTLE_DPS * dt);
-      this.playAnim('warrior_idle');
+      this.playAnim(this.idleAnim);
       this.syncVisual();
       return;
     }
-    this.playAnim('red_warrior_run');
+    this.playAnim(this.runAnim);
 
     // Periodically recompute a route around buildings.
     this.recalcTimer += dt;
@@ -97,10 +102,14 @@ export class Enemy {
   }
 
   destroy() {
+    if (!this.alive) return;
     this.alive = false;
-    this.rect.destroy();
+    // (Phase 7) dust puff + 0.5s fade-out on death.
+    if (this.scene.dustAt) this.scene.dustAt(this.x, this.y);
     this.hpBarBg.destroy();
     this.hpBarFill.destroy();
+    this.rect.clearTint();
+    this.scene.tweens.add({ targets: this.rect, alpha: 0, scale: this.rect.scale * 0.8, duration: 450, onComplete: () => this.rect.destroy() });
   }
 }
 
