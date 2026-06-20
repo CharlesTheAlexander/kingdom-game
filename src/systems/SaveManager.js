@@ -38,6 +38,7 @@ export function capture(scene) {
     worldEvents: scene.worldEvents && scene.worldEvents.serialize ? scene.worldEvents.serialize() : null,
     king: { kingdom: scene.kingdomName, ruler: scene.rulerName, trait: scene.kingTrait },
     reputation: scene.reputation && scene.reputation.serialize ? scene.reputation.serialize() : null,
+    research: scene.research && scene.research.serialize ? scene.research.serialize() : null,
     flags: { tut: safeParse(localStorage.getItem('kg_tut')) || {}, hints: scene._firedHints ? Object.keys(scene._firedHints) : [] },
     audio: scene.sfx ? { volume: scene.sfx.volume, muted: scene.sfx.muted } : null,
   };
@@ -157,6 +158,7 @@ export function applySave(scene, data) {
     if (data.reputation && scene.reputation) scene.reputation.restore(data.reputation);
     if (scene.updateKingdomTitle) scene.updateKingdomTitle();
   });
+  sect('research', () => { if (data.research && scene.research) scene.research.restore(data.research); });
   sect('diplomacy', () => {
     if (data.diplomacy && scene.diplomacy) {
       Object.assign(scene.diplomacy.rel, data.diplomacy.rel || {});

@@ -29,7 +29,7 @@ export class Building {
     // Real Tiny Swords sprite (texture key == typeKey). Scaled to sit neatly
     // inside the 48px tile while preserving the art's aspect ratio.
     this.rect = scene.add
-      .image(x, y, this.typeKey)
+      .image(x, y, this.type.tex || this.typeKey) // (Phase 5) tex override (Library reuses Mine art)
       .setDepth(5)
       .setInteractive({ useHandCursor: true });
     const src = this.rect.texture.getSourceImage();
@@ -99,6 +99,9 @@ export class Building {
     if (scene && scene.population && this.type.maxWorkers > 0) rate *= scene.population.prodMult;
     // (Expansion Phase 3) seasonal farm modifier (autumn +25%, summer -10%).
     if (scene && this.typeKey === 'farm' && scene._seasonFarmMult) rate *= scene._seasonFarmMult;
+    // (Expansion Phase 5) research: Advanced Farming / Mining Techniques.
+    if (scene && this.typeKey === 'farm' && scene._researchFarmMult) rate *= scene._researchFarmMult;
+    if (scene && this.typeKey === 'mine' && scene._researchMineMult) rate *= scene._researchMineMult;
     // (Expansion Phase 4) Merchant trait: +15% Castle gold.
     if (scene && this.typeKey === 'castle' && scene.traitBonuses && scene.traitBonuses.goldMult) rate *= scene.traitBonuses.goldMult;
     if (rate > 0) resources.add(this.type.produces, rate);

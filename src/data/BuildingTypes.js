@@ -60,6 +60,13 @@ export const BuildingTypes = {
     footprint: 2, placeable: true, stageUnlock: 5,
     desc: 'Crafts Equipment (1/day per worker). Enables Knight training. 1-2 workers.',
   },
+  // (Expansion Phase 5) Library — unlocks the research tree. Reuses the mine
+  // sprite (tinted blue + floating book icon) since the pack has no library art.
+  library: {
+    key: 'library', name: 'Library', cost: { gold: 100, wood: 80, stone: 40 }, maxWorkers: 2, hp: 130,
+    footprint: 2, placeable: true, stageUnlock: 2, tex: 'mine',
+    desc: 'Unlocks research. 1 worker = 1 tech / 3 days, 2 workers = faster.',
+  },
   watchtower: {
     key: 'watchtower', name: 'Watchtower', cost: { wood: 40, stone: 20 }, maxWorkers: 1, hp: 100,
     revealRadius: 8, placeable: true, stageUnlock: 2,

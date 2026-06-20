@@ -75,6 +75,7 @@ import { Population } from '../systems/Population.js';
 import { ArmyManager } from '../systems/ArmyManager.js';
 import { WorldEvents } from '../systems/WorldEvents.js';
 import { Reputation, TRAITS, defaultBonuses } from '../systems/Reputation.js';
+import { Research } from '../systems/Research.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -330,6 +331,7 @@ export class IsometricScene extends GameScene {
     if (this.kingTrait) this.applyTraitBonuses(this.kingTrait);
     this.armyMgr = new ArmyManager(this); // (Expansion) armies on the map
     this.worldEvents = new WorldEvents(this); // (Expansion Phase 3) events + messenger
+    this.research = new Research(this); // (Expansion Phase 5) research tree
     this._eventLog = this._eventLog || [];
     this.panelMode = 'build';
 
@@ -785,7 +787,7 @@ export class IsometricScene extends GameScene {
     b.x = sc.x;
     b.y = sc.y;
     b.rect.setOrigin(0.5, 1.0).setScale(scale).setAngle(0).setPosition(sc.x, sc.y);
-    const BTINT = { market: 0xffe27a, blacksmith: 0xd08a4a, watchtower: 0xa9c6e6, tavern: 0xe0b070, wall: 0xb6b6b6 };
+    const BTINT = { market: 0xffe27a, blacksmith: 0xd08a4a, watchtower: 0xa9c6e6, tavern: 0xe0b070, wall: 0xb6b6b6, library: 0x8ab0e6 };
     if (BTINT[b.typeKey]) b.rect.setTint(BTINT[b.typeKey]); else if (!b._tierTinted) b.rect.clearTint();
     if (b.shadow) b.shadow.setVisible(false);
 
@@ -808,7 +810,7 @@ export class IsometricScene extends GameScene {
   // their function reads at a glance. Hidden while the building is selected.
   addBuildingIcon(b, topOff) {
     if (b._floatIcon) return;
-    const KIND = { market: 'coin', blacksmith: 'hammer', watchtower: 'eye', tavern: 'mug' };
+    const KIND = { market: 'coin', blacksmith: 'hammer', watchtower: 'eye', tavern: 'mug', library: 'book' };
     const kind = KIND[b.typeKey];
     if (!kind) return;
     const iy = b.y - topOff - 22;
@@ -826,6 +828,7 @@ export class IsometricScene extends GameScene {
     else if (kind === 'hammer') { g.fillStyle(0xb5793f, 1).fillRect(-1.6, -2, 3.2, 11); g.fillStyle(0xeef2f7, 1).fillRoundedRect(-8, -8, 16, 6, 1.5); g.fillStyle(0x9aa3ad, 1).fillRect(-8, -3, 16, 1.5); }
     else if (kind === 'eye') { g.fillStyle(0xffffff, 1).fillEllipse(0, 0, 18, 11); g.fillStyle(0x2a6cb0, 1).fillCircle(0, 0, 4.5); g.fillStyle(0x111111, 1).fillCircle(0, 0, 2.2); }
     else if (kind === 'mug') { g.fillStyle(0xf0c277, 1).fillRoundedRect(-6, -5, 11, 12, 2); g.lineStyle(2.5, 0xf0c277, 1).strokeCircle(7, 1, 4); g.fillStyle(0xfffbe8, 1).fillRoundedRect(-6, -8, 11, 4, 2); }
+    else if (kind === 'book') { g.fillStyle(0xeef2f7, 1).fillRect(-7, -6, 14, 11); g.fillStyle(0x6a9ad6, 1).fillRect(-7, -6, 3, 11); g.lineStyle(1, 0x9aa3ad, 1); g.beginPath(); g.moveTo(0, -5); g.lineTo(0, 4); g.strokePath(); }
   }
 
   // (Phase 6) Outlined building name on hover; auto-fades after ~2s.
@@ -2210,7 +2213,7 @@ export class IsometricScene extends GameScene {
       // (Gameplay change 1) No daily limit — trade as long as resources allow.
       const can = b.workers > 0 && this.resources.canAfford(give);
       // (Phase 4) Merchant trait + reputation improve what you receive.
-      const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0);
+      const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0) + ((this._researchMarketMult || 1) - 1);
       this.spriteButton(x, this.PANEL_Y + 30, 132, 40, label.split(' → ')[0] + '→', label.split(' → ')[1], can, () => {
         this.resources.spend(give); for (const [r, v] of Object.entries(get)) this.resources.add(r, Math.round(v * mult)); if (this.reputation) this.reputation.add('merchant', 3); this.refreshPanel();
       });
@@ -2520,9 +2523,9 @@ export class IsometricScene extends GameScene {
   // replace the old top-right openers: [Build][Expeditions][Kingdoms][Caravans].
   createKingdomsButton() {
     const fix = (o) => o.setScrollFactor(0);
-    const defs = [['Build', 'build', 0x3a2f1a], ['Armies', 'armies', 0x2d5a4a], ['Expeditions', 'expedition', 0x1f4f33], ['Kingdoms', 'kingdoms', 0x432863], ['Caravans', 'caravans', 0x2d4a6b]];
+    const defs = [['Build', 'build', 0x3a2f1a], ['Armies', 'armies', 0x2d5a4a], ['Expeditions', 'expedition', 0x1f4f33], ['Kingdoms', 'kingdoms', 0x432863], ['Caravans', 'caravans', 0x2d4a6b], ['Research', 'research', 0x2a3a5a]];
     this.panelTabs = [];
-    const ty = this.PANEL_Y - 26, h = 26, w = 112, gap = 3;
+    const ty = this.PANEL_Y - 26, h = 26, w = 94, gap = 3;
     defs.forEach((t, i) => {
       const x = 8 + i * (w + gap);
       const bg = fix(this.add.rectangle(x, ty, w, h, t[2]).setOrigin(0, 0).setDepth(40).setStrokeStyle(2, 0xc9a14a, 0.5).setInteractive({ useHandCursor: true }));
@@ -2545,9 +2548,10 @@ export class IsometricScene extends GameScene {
   highlightTabs() {
     if (!this.panelTabs) return;
     const caravanOk = this.caravans && this.caravans.sites().length >= 2;
+    const researchOk = this.research && this.research.hasLibrary();
     for (const t of this.panelTabs) {
       const on = this.tabActive(t.mode);
-      const dim = t.mode === 'caravans' && !caravanOk;
+      const dim = (t.mode === 'caravans' && !caravanOk) || (t.mode === 'research' && !researchOk);
       t.bg.setFillStyle(on ? 0xc9a14a : t.base, dim ? 0.5 : 1);
       t.txt.setColor(on ? '#1a140c' : dim ? '#8a8f99' : '#ffffff');
       t.bg.setStrokeStyle(2, 0xc9a14a, on ? 1 : 0.45);
@@ -2558,6 +2562,7 @@ export class IsometricScene extends GameScene {
     sfx.play('ui_click'); // (Polish Phase 2)
     this.selectedBuilding = null; this.clearSelection(); this.placementType = null; this.clearGhost(); this.hideTip();
     if (mode === 'caravans' && !(this.caravans && this.caravans.sites().length >= 2)) { this.showToast('Conquer a settlement first (need 2+ sites)'); return; }
+    if (mode === 'research' && !(this.research && this.research.hasLibrary())) { this.showToast('Build a Library to research'); return; }
     this.panelMode = mode;
     this.refreshPanel();
   }
@@ -2911,6 +2916,7 @@ export class IsometricScene extends GameScene {
     if (this.armyMgr) this.armyMgr.onNewDay(); // (Expansion) army supply/morale
     if (this.worldEvents) this.worldEvents.onNewDay(); // (Expansion Phase 3) world events
     if (this.reputation) { this.reputation.onNewDay(); this.updateKingdomTitle(); } // (Phase 4)
+    if (this.research) this.research.onNewDay(); // (Phase 5) research progress
     // (Save system) Auto-save to slot 0 every N days.
     const freq = this._autoSaveEveryDays || 5;
     if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();
