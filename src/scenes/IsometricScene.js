@@ -72,6 +72,7 @@ import { registerUnitAnimations } from '../systems/Animations.js';
 import { sfx } from '../audio/SoundEngine.js';
 import * as SaveManager from '../systems/SaveManager.js';
 import { Population } from '../systems/Population.js';
+import { ArmyManager } from '../systems/ArmyManager.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -316,6 +317,8 @@ export class IsometricScene extends GameScene {
     this.expeditions = new ExpeditionManager(this);
     this.wildlife = new WildlifeManager(this); // Phase 2 wildlife threats
     this.population = new Population(this); // (Expansion Phase 5) population + happiness
+    this.armyMgr = new ArmyManager(this); // (Expansion) armies on the map
+    this._eventLog = this._eventLog || [];
     this.panelMode = 'build';
 
     // (Phase 5) Expedition rewards: special resources + permanent artifact buffs.
@@ -1068,9 +1071,14 @@ export class IsometricScene extends GameScene {
     this.input.on('pointerup', (p) => {
       const tapped = this._rightDrag && !this._rightDrag.moved;
       this._rightDrag = null;
-      if (tapped && !this.isGameOver && !this.placementType && this.selectedUnits.length > 0) {
-        if (p.y >= TOP_BAR && p.y <= GAME_H - PANEL_H) this.issueMoveCommand(p.worldX, p.worldY);
+      if (!tapped || this.isGameOver || this.placementType) return;
+      if (p.y < TOP_BAR || p.y > GAME_H - PANEL_H) return;
+      // (Expansion) A selected army marches/attacks where you right-click.
+      if (this.armyMgr && this.armyMgr.selected && this.armyMgr.selected.faction === 'player') {
+        this.commandArmy(this.armyMgr.selected, p.worldX, p.worldY);
+        return;
       }
+      if (this.selectedUnits.length > 0) this.issueMoveCommand(p.worldX, p.worldY);
     });
     this.input.on('wheel', (p, over, dx, dy) => {
       if (this._overSound) return; // (Polish Phase 2) scroll over the speaker adjusts volume, not zoom
@@ -1914,7 +1922,60 @@ export class IsometricScene extends GameScene {
     else if (this.panelMode === 'artifacts') this.renderArtifactsPanel();
     else if (this.panelMode === 'kingdoms') this.renderKingdomsPanel();
     else if (this.panelMode === 'caravans' && this.caravans) this.caravans.renderPanel();
+    else if (this.panelMode === 'armies') this.renderArmiesPanel();
+    else if (this.panelMode === 'armyform') this.renderArmyForm();
+    else if (this.panelMode === 'research' && this.research) this.research.renderPanel();
     else this.renderDefaultPanel();
+  }
+
+  // (Expansion) March/attack a selected army toward a right-clicked point.
+  commandArmy(army, wx, wy) {
+    const tile = this.pointerToTile(wx, wy);
+    if (!tile) return;
+    if (army.marchTargetCol != null && Math.abs(army.marchTargetCol - tile.col) < 1 && Math.abs(army.marchTargetRow - tile.row) < 1) { this.armyMgr.stopMarch(army); return; }
+    // (Phase 2) detect a hostile/settlement target under the click.
+    const target = this.armyTargetAt ? this.armyTargetAt(tile.col, tile.row) : null;
+    if (target) this.armyMgr.marchTo(army, target.col, target.row, { attackTarget: target });
+    else this.armyMgr.marchTo(army, tile.col, tile.row);
+    sfx.play('unit_command');
+    this.floatText && this.floatText(this.tileCenter(tile.col, tile.row).x, this.tileCenter(tile.col, tile.row).y, target ? 'Attack!' : 'March', target ? '#ff8a80' : '#aee9ff');
+  }
+
+  // ---- Armies tab ----------------------------------------------------------
+  renderArmiesPanel() {
+    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x111c18, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    const m = this.armyMgr; const list = m.playerArmies();
+    this.panelText(14, this.PANEL_Y + 6, `ARMIES  (${list.length}/${m.maxPlayerArmies})`, { bold: true, color: '#bdf0d4' });
+    if (!list.length) this.panelText(16, this.PANEL_Y + 32, 'No armies yet. Form one from your trained troops →', { color: '#9aa0a6' });
+    list.forEach((a, i) => {
+      const y = this.PANEL_Y + 28 + i * 30;
+      this.panelText(16, y, a.name, { bold: true, color: '#ffffff', size: '13px' });
+      this.panelText(150, y, `${m.totalUnits(a)} units · ${a.state} · morale ${a.morale} · supply ${a.supplyDays}d`, { color: '#bcd0c6', size: '11px' });
+      this.spriteButton(540, y - 2, 86, 24, 'Select', '', true, () => { m.selectArmy(a); this.cameras.main.centerOn(this.tileCenter(a.col, a.row).x, this.tileCenter(a.col, a.row).y); });
+      this.spriteButton(630, y - 2, 96, 24, 'Supplies', '', true, () => { m.sendSupplies(a); this.refreshPanel(); }, { gold: true });
+      this.spriteButton(730, y - 2, 92, 24, 'Disband', '', true, () => { m.disband(a); this.refreshPanel(); });
+    });
+    this.spriteButton(GAME_W - 180, this.PANEL_Y + PANEL_H - 36, 168, 28, 'Form New Army', '', list.length < m.maxPlayerArmies, () => { this._armyFormSpec = { warrior: 0, archer: 0, monk: 0, knight: 0, mercenary: 0 }; this.panelMode = 'armyform'; this.refreshPanel(); }, { active: true });
+  }
+
+  renderArmyForm() {
+    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x111c18, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.panelText(14, this.PANEL_Y + 6, 'FORM NEW ARMY — add units, then Form Army', { bold: true, color: '#bdf0d4' });
+    const avail = this.armyMgr.availableUnits();
+    const spec = this._armyFormSpec || (this._armyFormSpec = { warrior: 0, archer: 0, monk: 0, knight: 0, mercenary: 0 });
+    const types = ['warrior', 'archer', 'monk', 'knight', 'mercenary'];
+    let total = 0;
+    types.forEach((t, i) => {
+      const x = 16 + (i % 3) * 300, y = this.PANEL_Y + 30 + Math.floor(i / 3) * 36;
+      this.panelText(x, y, `${t[0].toUpperCase() + t.slice(1)}: ${spec[t]}/${avail[t]}`, { color: avail[t] ? '#ffffff' : '#7d8389', size: '12px', bold: true });
+      this.spriteButton(x + 150, y - 4, 30, 24, '−', '', spec[t] > 0, () => { spec[t]--; this.refreshPanel(); });
+      this.spriteButton(x + 184, y - 4, 30, 24, '+', '', spec[t] < avail[t], () => { spec[t]++; this.refreshPanel(); });
+      total += spec[t];
+    });
+    this.spriteButton(GAME_W - 300, this.PANEL_Y + PANEL_H - 36, 130, 28, 'Form Army', `${total} units`, total > 0, () => {
+      const a = this.armyMgr.formArmy({ ...spec }); if (a) { this.panelMode = 'armies'; this.refreshPanel(); }
+    }, { active: total > 0 });
+    this.spriteButton(GAME_W - 160, this.PANEL_Y + PANEL_H - 36, 100, 28, 'Cancel', '', true, () => { this.panelMode = 'armies'; this.refreshPanel(); });
   }
 
   // (Phase 2/4) Build palette shows only stage-unlocked buildings (compact grid),
@@ -2218,9 +2279,9 @@ export class IsometricScene extends GameScene {
   // replace the old top-right openers: [Build][Expeditions][Kingdoms][Caravans].
   createKingdomsButton() {
     const fix = (o) => o.setScrollFactor(0);
-    const defs = [['Build', 'build', 0x3a2f1a], ['Expeditions', 'expedition', 0x1f4f33], ['Kingdoms', 'kingdoms', 0x432863], ['Caravans', 'caravans', 0x2d4a6b]];
+    const defs = [['Build', 'build', 0x3a2f1a], ['Armies', 'armies', 0x2d5a4a], ['Expeditions', 'expedition', 0x1f4f33], ['Kingdoms', 'kingdoms', 0x432863], ['Caravans', 'caravans', 0x2d4a6b]];
     this.panelTabs = [];
-    const ty = this.PANEL_Y - 26, h = 26, w = 134, gap = 3;
+    const ty = this.PANEL_Y - 26, h = 26, w = 112, gap = 3;
     defs.forEach((t, i) => {
       const x = 8 + i * (w + gap);
       const bg = fix(this.add.rectangle(x, ty, w, h, t[2]).setOrigin(0, 0).setDepth(40).setStrokeStyle(2, 0xc9a14a, 0.5).setInteractive({ useHandCursor: true }));
@@ -2234,8 +2295,9 @@ export class IsometricScene extends GameScene {
   }
 
   tabActive(mode) {
-    if (mode === 'build') return !['expedition', 'artifacts', 'kingdoms', 'caravans'].includes(this.panelMode) || !!this.selectedBuilding;
+    if (mode === 'build') return !['expedition', 'artifacts', 'kingdoms', 'caravans', 'armies', 'armyform', 'research'].includes(this.panelMode) || !!this.selectedBuilding;
     if (mode === 'expedition') return this.panelMode === 'expedition' || this.panelMode === 'artifacts';
+    if (mode === 'armies') return this.panelMode === 'armies' || this.panelMode === 'armyform';
     return this.panelMode === mode && !this.selectedBuilding;
   }
 
@@ -2595,6 +2657,7 @@ export class IsometricScene extends GameScene {
     this.updateSeason();
     this.updateWeather(); // (Polish Phase 4) switch snow/rain on season change
     if (this.population) { this.population.onNewDay(); this.updatePopulationHud(); } // (Phase 5)
+    if (this.armyMgr) this.armyMgr.onNewDay(); // (Expansion) army supply/morale
     // (Save system) Auto-save to slot 0 every N days.
     const freq = this._autoSaveEveryDays || 5;
     if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();
@@ -2752,10 +2815,19 @@ export class IsometricScene extends GameScene {
       return;
     }
 
+    if (this.armyMgr) this.armyMgr.update(gdelta); // (Expansion) march armies
     this.updateSelectionRings();
     this.updateHud();
     this.updateMinimap();
     this.applyIsoDepths();
     this.routeCameras(); // BUG 1: keep newly-created objects on the right camera
+  }
+
+  // (Expansion Phase 7) Append a notification-log entry (kind: info/red/green/yellow).
+  logEvent(text, kind = 'info') {
+    if (!this._eventLog) this._eventLog = [];
+    this._eventLog.push({ day: this.gameDay, text, kind });
+    if (this._eventLog.length > 50) this._eventLog.shift();
+    if (this._logBtnBadge) this.updateLogBadge();
   }
 }
