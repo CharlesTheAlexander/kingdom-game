@@ -1,5 +1,5 @@
 # KINGDOM GAME — MASTER DESIGN & PRODUCTION DOCUMENT
-*Last updated: June 2026 — auto-updated after every session*
+*Last updated: June 2026 — auto-updated after every session* (copy 2)
 
 ---
 
@@ -323,28 +323,69 @@ Separate Phaser scene (BattleScene.js).
 - ✅ Troops (Warrior, Archer, Monk)
 - ✅ Box-select and right-click move/attack
 - ✅ Enemy waves from AI kingdom
-- ✅ Expeditions system (needs redesign to special resources only)
 - ✅ AI kingdom (one, Red faction)
 - ✅ Resource nodes (trees, gold, rocks, sheep)
 - ✅ Day/night cycle + day counter
 - ✅ Food upkeep system
-- ✅ Camera pan + zoom
-- ✅ Minimap
+- ✅ Camera pan + zoom, minimap
 - ✅ Tutorial onboarding panel + contextual hints
 - ✅ Isometric rebuild (IsometricScene.js)
-- 🔄 UI zoom bug fix (in progress)
-- 🔄 Building sprite anchor fix (in progress)
-- 🔄 Enemy spawn location fix (in progress)
-- ⬜ Expedition redesign (special resources only)
+- ✅ UI zoom bug fixed (dedicated uiCamera)
+- ✅ Building sprite anchor fixed (origin 0.5, 1.0)
+- ✅ Enemy spawn fixed (from AI castle location)
+- ✅ Expedition redesign (special resources only)
 
-### Phase B — World Expansion (NEXT)
+### Phase B — World Expansion ✅ COMPLETE
 *Goal: Map feels like a real world, threats feel organic*
-- ⬜ Wildlife threats (goblins raid nodes, wolves attack workers, boars raid food)
-- ⬜ Larger map with proper region zones (forest, river, mountains)
-- ⬜ Territory expansion system (buildings expand visible zone)
-- ⬜ Fog of war (unexplored areas hidden)
-- ⬜ Multiple AI kingdoms (not just one)
-- ⬜ Neutral settlements to discover and conquer
+- ✅ Wildlife.js: wolves (north forest, attack pawns), goblins (west, raid nodes/buildings), boars (south, deplete sheep nodes)
+- ✅ Warriors auto-defend with leash radius — won't chase across whole map
+- ✅ Four distinct terrain regions: N forest / E highlands / S plains+river / W mixed with soft gradients
+- ✅ Region-biased resource node placement
+- ✅ Territory.js: expands with buildings/tiers, soft cyan border, fog of war lifts near units
+- ✅ Per-faction territory colors (cyan=player, red/purple/yellow=AI)
+- ✅ Raid-safe nodes inside territory, worker harvest range enforced
+- ✅ Iron resource added to HUD
+- ✅ Expeditions redesigned: Scout (intel, ×2 simultaneous), Raid (iron+mercenary, ×2), Campaign (iron+artifact+scroll, ×1)
+- ✅ Expedition timers: Scout 0.5 days, Raid 1 day, Campaign 2 days
+- ✅ 5 Artifact types with permanent buffs + artifacts panel UI
+- ✅ Mercenary units (yellow sprite, food upkeep, permanent until killed)
+- ✅ 3 AI kingdoms: Red (west), Purple (NE passive), Yellow (SE aggressive)
+- ✅ Wave coordinator: one attacker at a time with cooldowns
+- ✅ Kingdom status panel (collapsed button by default)
+- ✅ Attack banners, threat warnings queued (one at a time, 3s each)
+- ✅ Node depletion/respawn FX, combat hit-flash, death fade
+- ✅ Settlement wall/castle visual evolution per tier
+- ✅ Idle workers auto-gather nearest node (freelancing system)
+- ✅ Assigning worker to building stops freelancing; removing resumes it
+- ✅ Wolf spawn fixes: north zone only, ≥12 tiles from castle, every 4 days, max 4
+- ✅ Building selection highlight aligned to actual sprite bounds
+- ✅ UI decluttered: 2-row resource bar, collapsed expedition/kingdom panels, smaller minimap
+- ⬜ Neutral settlements (deferred to Phase D)
+- ⬜ Wheat/Meat as separate resources (currently merged as Food — needs own pass)
+
+### Phase B2 — World Expansion + Continent View ✅ COMPLETE
+*Goal: Map feels like a real continent worth exploring*
+- ✅ Map expanded 40x40 → 200x200 tiles
+- ✅ 6 named biomes: start plains, deep forest (N), iron mountains (E), river delta (S), western wildlands (W), transitional middle
+- ✅ Continuous river running E-W across south region
+- ✅ Performance: Blitter-batched terrain rendering (40k tiles without lag)
+- ✅ 9 neutral settlements (named, garrisoned, conquerable, passive income)
+- ✅ 9 goblin camps (guards, loot drops, 5-day respawn, raids from nearest camp)
+- ✅ AI kingdoms relocated to far corners (80+ tiles from player start)
+- ✅ AI day-gated attacks: Yellow day 8, Red day 12, Purple day 18
+- ✅ Territory rescaled: radius 8 start, +2/building, +15/tier upgrade
+- ✅ Fog of war: 15 tiles beyond territory, permanently revealed by unit movement
+- ✅ ContinentScene.js: Tab toggles Catan-style continent overview
+- ✅ Continent view: biome colors, territory blobs, faction castles, river, region labels
+- ✅ Settlement/camp/castle icons with hover tooltips on continent view
+- ✅ Click settlement on continent → zoom into local view
+- ✅ Live stats on continent: day/season, % owned, settlements controlled, active threats
+- ✅ 71 resource nodes distributed across biomes
+- ✅ Wildlife scaled to big map: wolves max 8, total wildlife max 20
+- ✅ Idle workers bounded to 10 tile radius
+- ⬜ Iron nodes in mountains (currently iron from camps/expeditions only)
+- ⬜ Decorative bandit roads between goblin camps
+- ⬜ Zoom-morph transition (currently fade transition)
 
 ### Phase C — Army & Battle System
 *Goal: Warfare feels strategic and satisfying*
@@ -396,15 +437,17 @@ kingdom-game/
     scenes/
       IsometricScene.js        — ACTIVE: isometric renderer, extends GameScene
       GameScene.js             — kept as reference, not active
-      BattleScene.js           — planned
+      BattleScene.js           — planned (Phase C)
     systems/
       Resources.js             ✅
       Buildings.js             ✅
       Pawns.js                 ✅
       Troops.js                ✅
-      Expeditions.js           ✅ (needs redesign)
-      AIKingdom.js             ✅
+      Expeditions.js           ✅ redesigned (special resources only)
+      AIKingdom.js             ✅ 3 factions (Red/Purple/Yellow)
       ResourceNodes.js         ✅
+      Wildlife.js              ✅ wolves/goblins/boars
+      Territory.js             ✅ expansion + fog of war
     data/
       BuildingTypes.js         ✅
     audio/
@@ -413,6 +456,7 @@ kingdom-game/
     assets/
       Tiny Swords (Free Pack)/          — units + UI sprites
       Isometric Strategy - Medieval Pixel Art Tiles/  — terrain + buildings
+  DESIGN_DOC.md                — master design document (committed to git)
   index.html
   package.json
 ```
@@ -439,16 +483,28 @@ kingdom-game/
 
 Always include this doc at the top of every major Claude Code prompt.
 
-**Next session target: Phase B — World & Threats**
-- Wildlife threats replacing random enemy waves for early game
-- Goblins raid resource nodes
-- Wolves attack worker pawns
-- Proper region-based terrain generation
-- Territory expansion system
-- Day system fully driving all timers
+**Current status: Full game audit complete ✅ — clean bill of health**
+- Zero critical/major bugs
+- One minor banner overlap fixed
+- All systems verified working end-to-end
+- Commit: 7041a18
 
-**After that: Phase C — BattleScene.js**
+**Known design observations (not bugs):**
+- Kingdom attack banners should jump the warning queue (currently FIFO)
+- Central building placement doesn't visibly expand territory (correct but confusing)
+
+**Next session target: Phase C — BattleScene.js**
 Completely isolated file, zero risk to existing systems.
+- Triggers when 10+ units on either side
+- Pre-battle formation phase (30 sec)
+- Real time combat with morale system
+- Outcome feeds back to world map
+- See Section 8 for full spec
+
+**After Phase C:**
+- Phase D — Economy depth (Market, Caravans, Blacksmith, Knights)
+- Phase E — Polish & Feel (sound, animations, full 9-stage progression)
+- Phase F — Late game (diplomacy, multiplayer consideration)
 
 ---
 

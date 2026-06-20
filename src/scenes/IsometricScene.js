@@ -408,6 +408,12 @@ export class IsometricScene extends GameScene {
     return { x: (col - row) * HW + OX + HW, y: (col + row) * HH + OY + HH };
   }
 
+  // South corner (front/bottom point) of a tile's diamond — the correct anchor
+  // for a building sprite with origin (0.5, 1.0) so it stands flush on the tile.
+  tileSouthCorner(col, row) {
+    return { x: (col - row) * HW + OX + HW, y: (col + row) * HH + OY + 2 * HH };
+  }
+
   // Inverse of tileCenter — which tile a world point falls in.
   screenToTile(wx, wy) {
     const a = (wx - OX - HW) / HW;
@@ -610,22 +616,27 @@ export class IsometricScene extends GameScene {
 
     const fp = this.footprintSize(b.typeKey);
     b._fp = fp;
-    // Mark the whole footprint as occupied / blocked (without spawning extra
-    // buildings) so multi-tile structures reserve their iso footprint.
+    // Mark the whole footprint as occupied / blocked (every tile a building
+    // covers — 4 for a Barracks, 9 for a Castle) and track the SOUTHERNMOST tile
+    // (largest col+row), which the sprite anchors to and depth-sorts by.
     b._cells = [];
+    let south = { c: b.col, r: b.row };
     for (const cell of this.footprintCells(b.typeKey, b.col, b.row)) {
       if (cell.c < 0 || cell.r < 0 || cell.c >= this.COLS || cell.r >= this.ROWS) continue;
       if (!this.buildings.grid[cell.r][cell.c]) this.buildings.grid[cell.r][cell.c] = b;
       b._cells.push(cell);
+      if (cell.c + cell.r > south.c + south.r) south = { c: cell.c, r: cell.r };
     }
+    b._southSum = south.c + south.r;
 
     const scale = fp === 3 ? 2.0 : fp === 2 ? 1.5 : 1.0;
     b.baseScale = scale;
-    // BUG 2 FIX: anchor at the base (0.5, 1.0) so the building stands up from the
-    // tile; positioned at the tile centre so its base sits on the diamond.
-    b.rect.setOrigin(0.5, 1.0).setScale(scale).setAngle(0);
-    b.rect.x = b.x;
-    b.rect.y = b.y;
+    // FIX 1-3: anchor (0.5, 1.0) at the SOUTH corner of the southernmost tile so
+    // the sprite stands flush over its whole footprint (no float / no sink).
+    const sc = this.tileSouthCorner(south.c, south.r);
+    b.x = sc.x;
+    b.y = sc.y;
+    b.rect.setOrigin(0.5, 1.0).setScale(scale).setAngle(0).setPosition(sc.x, sc.y);
     if (b.shadow) b.shadow.setVisible(false);
 
     const topOff = 14 + scale * 34;
@@ -646,8 +657,9 @@ export class IsometricScene extends GameScene {
 
     for (const b of this.buildings.buildings) {
       this.decorateBuilding(b);
-      const f = b._fp || 1;
-      const base = (b.col + b.row + (f - 1)) * DMUL;
+      // Depth from the SOUTHERNMOST occupied tile (largest col+row) so multi-tile
+      // buildings sort by their front edge. Scaled by DMUL to stay below the HUD.
+      const base = (b._southSum != null ? b._southSum : b.col + b.row + ((b._fp || 1) - 1)) * DMUL;
       b.rect.setDepth(base + BODY);
       if (b.hpBarBg) b.hpBarBg.setDepth(base + BARB);
       if (b.hpBar) b.hpBar.setDepth(base + BARF);
@@ -840,10 +852,16 @@ export class IsometricScene extends GameScene {
     this.ghostG.strokePath();
     this.ghostG.setVisible(true);
 
-    const ctr = this.tileCenter(tile.col, tile.row);
+    // Anchor the preview sprite where the building will actually land: the south
+    // corner of the southernmost footprint tile (matches decorateBuilding).
+    let south = { c: tile.col, r: tile.row };
+    for (const cell of this.footprintCells(this.placementType, tile.col, tile.row)) {
+      if (cell.c + cell.r > south.c + south.r) south = { c: cell.c, r: cell.r };
+    }
+    const sc = this.tileSouthCorner(south.c, south.r);
     if (this.ghostImg.texture.key !== this.placementType) this.ghostImg.setTexture(this.placementType);
     const scale = fp === 3 ? 2.0 : fp === 2 ? 1.5 : 1.0;
-    this.ghostImg.setScale(scale).setPosition(ctr.x, ctr.y).setTint(valid ? 0xffffff : 0xff6666).setVisible(true);
+    this.ghostImg.setScale(scale).setPosition(sc.x, sc.y).setTint(valid ? 0xffffff : 0xff6666).setVisible(true);
   }
 
   clearGhost() {
@@ -853,27 +871,21 @@ export class IsometricScene extends GameScene {
 
   // ---- Selection outline (iso diamond around the footprint) ----------------
 
-  // (FIX 4) The selection highlight must surround the VISIBLE building sprite
-  // and match its clickable hit area exactly. The building stands up from its
-  // tile (origin 0.5,1.0), so a ground-footprint diamond sat at the base —
-  // offset from the sprite body. Instead we outline the sprite's frame bounds,
-  // which IS the interactive hit area (so highlight == click target for every
-  // building, single- or multi-tile), plus a faint ground diamond for footprint
-  // context on multi-tile structures.
+  // (FIX 5) Selection highlight = a bright diamond on each tile the building
+  // occupies, sitting on the tile surface (not a floating rectangle).
   showSelection(b) {
     this.clearSelection();
     const g = this.add.graphics().setDepth(30);
-    const fp = this.footprintSize(b.typeKey);
-    if (fp > 1) {
-      const half = Math.floor(fp / 2);
-      const pts = this.regionDiamond(b.col - half, b.col - half + fp - 1, b.row - half, b.row - half + fp - 1);
-      g.lineStyle(1.5, 0xffffff, 0.4);
+    const cells = b._cells && b._cells.length ? b._cells : this.footprintCells(b.typeKey, b.col, b.row);
+    for (const cell of cells) {
+      const pts = this.regionDiamond(cell.c, cell.c, cell.r, cell.r);
+      g.fillStyle(0xffe23f, 0.14);
+      this.strokeDiamond(g, pts);
+      g.fillPath();
+      g.lineStyle(2.5, 0xffe23f, 0.95);
       this.strokeDiamond(g, pts);
       g.strokePath();
     }
-    const bnds = b.rect.getBounds(); // exactly the interactive sprite frame
-    g.fillStyle(0xffffff, 0.06).fillRect(bnds.x, bnds.y, bnds.width, bnds.height);
-    g.lineStyle(3, 0xffffff, 0.95).strokeRect(bnds.x, bnds.y, bnds.width, bnds.height);
     if (b.type.attack) {
       const rng = b.type.range * this.TILE;
       g.fillStyle(0x2980b9, 0.12).fillCircle(b.x, b.y, rng);
@@ -1064,20 +1076,40 @@ export class IsometricScene extends GameScene {
     }
   }
 
-  // (FIX 5) Threat banners are queued and shown ONE AT A TIME for 3s each
-  // (smaller than before). Reused by wildlife spawns and AI kingdom attacks.
-  threatWarning(text, color = 0xffd23f) {
+  // (FIX 5) Threat banners are queued and shown ONE AT A TIME for 3s each.
+  // (Audit fix) `priority` banners — AI kingdom attacks — jump the queue and
+  // show immediately, interrupting (then re-queueing) any lower banner showing.
+  threatWarning(text, color = 0xffd23f, priority = false) {
     this._warnQueue = this._warnQueue || [];
     if (this._warnLast === text || this._warnQueue.some((w) => w.text === text)) return; // dedupe
+    if (priority) {
+      this._warnQueue.unshift({ text, color }); // to the front of the line
+      if (this._warnActive) {
+        if (this._warnActiveItem) this._warnQueue.splice(1, 0, this._warnActiveItem); // resume the interrupted one after
+        this._cancelActiveWarning();
+      }
+      this._pumpWarnings();
+      return;
+    }
     if (this._warnQueue.length >= 3) this._warnQueue.shift(); // bound the backlog
     this._warnQueue.push({ text, color });
     this._pumpWarnings();
   }
 
+  _cancelActiveWarning() {
+    if (this._warnTimer) { this._warnTimer.remove(false); this._warnTimer = null; }
+    if (this._warnBanner) { this._warnBanner.destroy(); this._warnBanner = null; }
+    this._warnActive = false;
+    this._warnLast = null;
+    this._warnActiveItem = null;
+  }
+
   _pumpWarnings() {
     if (this._warnActive || !this._warnQueue || this._warnQueue.length === 0) return;
-    const { text, color } = this._warnQueue.shift();
+    const item = this._warnQueue.shift();
+    const { text, color } = item;
     this._warnActive = true;
+    this._warnActiveItem = item;
     this._warnLast = text;
     const hex = '#' + (color >>> 0).toString(16).padStart(6, '0');
     const t = this.add
@@ -1086,9 +1118,10 @@ export class IsometricScene extends GameScene {
       .setDepth(72)
       .setScrollFactor(0)
       .setAlpha(0);
+    this._warnBanner = t;
     this.tweens.add({ targets: t, alpha: 1, duration: 180 });
-    this.time.delayedCall(3000, () => {
-      this.tweens.add({ targets: t, alpha: 0, duration: 400, onComplete: () => { t.destroy(); this._warnActive = false; this._warnLast = null; this._pumpWarnings(); } });
+    this._warnTimer = this.time.delayedCall(3000, () => {
+      this.tweens.add({ targets: t, alpha: 0, duration: 400, onComplete: () => { t.destroy(); this._warnBanner = null; this._warnTimer = null; this._warnActive = false; this._warnActiveItem = null; this._warnLast = null; this._pumpWarnings(); } });
     });
   }
 
@@ -1233,9 +1266,10 @@ export class IsometricScene extends GameScene {
 
   // ---- Phase 6: multiple AI kingdoms --------------------------------------
 
-  // Wave banner when any kingdom launches an attack.
+  // Wave banner when any kingdom launches an attack — always shows immediately
+  // (priority), jumping ahead of any wildlife-spawn warnings in the queue.
   onKingdomAttack(kingdom) {
-    this.threatWarning(`${kingdom.cfg.name} is attacking!`, kingdom.cfg.color);
+    this.threatWarning(`${kingdom.cfg.name} is attacking!`, kingdom.cfg.color, true);
     const wt = this.hud && this.hud.wave;
     if (wt) { const x0 = wt.x; this.tweens.add({ targets: wt, x: x0 + 5, yoyo: true, repeat: 5, duration: 45, onComplete: () => (wt.x = x0) }); }
     this.fireHint('firstWave', 'Enemy attack incoming — select your warriors and right-click enemies to fight');

@@ -12,7 +12,9 @@ import Phaser from 'phaser';
 // Tints are a pure function of position (tintFor), so there's no giant state grid.
 
 const BASE_RADIUS = 8;     // tiles around the castle at game start
-const BUILDING_R = 2;      // +2 tiles of territory each building projects
+const BUILDING_R = 2;      // +2 tiles of territory each building projects locally
+const PER_BUILDING = 0.6;  // +radius the WHOLE border grows per building placed,
+                           // so even central placements visibly push it outward
 const TIER_BONUS = 15;     // +radius per settlement-tier upgrade
 const AI_RADIUS = 8;       // tiles of territory around an AI castle
 const SETTLE_R = 4;        // territory around a conquered neutral settlement
@@ -43,7 +45,7 @@ export class Territory {
     this.recompute();
   }
 
-  baseR() { return BASE_RADIUS + this.bonus; }
+  baseR() { return BASE_RADIUS + this.bonus + this.scene.buildings.placedCount() * PER_BUILDING; }
   addTierBonus() { this.bonus += TIER_BONUS; this.recompute(); }
   get controlledTiles() { return this._tileCount; }
   get hasContested() { return this._contested > 0; }
@@ -130,9 +132,9 @@ export class Territory {
     const castle = this.scene.buildings.castle;
     const cc = castle ? castle.col : Math.floor(this.N / 2);
     const cr = castle ? castle.row : Math.floor(this.N / 2);
-    const reach = this.baseR() + FOG + BUILDING_R + 2;
-    const c0 = Math.max(0, cc - reach), c1 = Math.min(this.N - 1, cc + reach);
-    const r0 = Math.max(0, cr - reach), r1 = Math.min(this.N - 1, cr + reach);
+    const reach = this.baseR() + FOG + BUILDING_R + 2; // baseR may be fractional
+    const c0 = Math.max(0, Math.floor(cc - reach)), c1 = Math.min(this.N - 1, Math.ceil(cc + reach));
+    const r0 = Math.max(0, Math.floor(cr - reach)), r1 = Math.min(this.N - 1, Math.ceil(cr + reach));
 
     this._tileCount = 0;
     this._contested = 0;
