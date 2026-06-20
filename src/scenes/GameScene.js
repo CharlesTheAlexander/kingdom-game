@@ -1265,6 +1265,12 @@ export class GameScene extends Phaser.Scene {
     this.spriteButton(x, y + 20, 38, 32, '−', '', b.workers > 0, () => this.removeWorker(b));
     this.spriteButton(x + 44, y + 20, 38, 32, '+', '', b.workers < b.type.maxWorkers && this.freeWorkers() > 0, () => this.addWorker(b));
     this.panelText(x + 92, y + 28, `${this.freeWorkers()} free`, { color: '#cfc1a6', size: '11px' });
+    // (Expansion Phase 5) happiness production modifier on production buildings.
+    if (this.population && b.type.produces && b.type.maxWorkers > 0) {
+      const lbl = this.population.prodLabel();
+      const col = this.population.prodMult >= 1.1 ? '#a6e22e' : this.population.prodMult < 1 ? '#ff8a5a' : '#cfc1a6';
+      this.panelText(x, y + 44, `Production: ${lbl}`, { color: col, size: '11px', bold: true });
+    }
   }
 
   // (Bug 4) Barracks level → training slots & unlocked unit types.

@@ -33,6 +33,7 @@ export function capture(scene) {
     expeditions: scene.expeditions ? scene.expeditions.state : null,
     caravans: scene.caravans ? (scene.caravans.routes || []).map((rt) => ({ from: rt.from && rt.from.name, to: rt.to && rt.to.name, resource: rt.resource, amount: rt.amount, progress: rt.progress, days: rt.days })) : [],
     progress: { artifacts: [...(scene.artifacts || [])], scrolls: scene.scrolls || 0, intelUntilDay: scene.intelUntilDay || 0, buffs: { ...(scene.buffs || {}) } },
+    population: scene.population && scene.population.serialize ? scene.population.serialize() : null,
     flags: { tut: safeParse(localStorage.getItem('kg_tut')) || {}, hints: scene._firedHints ? Object.keys(scene._firedHints) : [] },
     audio: scene.sfx ? { volume: scene.sfx.volume, muted: scene.sfx.muted } : null,
   };
@@ -139,6 +140,7 @@ export function applySave(scene, data) {
   });
   sect('troops', () => { if (scene.troops.restore) scene.troops.restore(data.troops); });
   sect('fog', () => { if (scene.territory && scene.territory.restoreFog) scene.territory.restoreFog(data.fog); });
+  sect('population', () => { if (data.population && scene.population) { scene.population.restore(data.population); scene.updatePopulationHud && scene.updatePopulationHud(); } });
   sect('diplomacy', () => {
     if (data.diplomacy && scene.diplomacy) {
       Object.assign(scene.diplomacy.rel, data.diplomacy.rel || {});

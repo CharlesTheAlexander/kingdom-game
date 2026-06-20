@@ -94,7 +94,9 @@ export class Building {
     this.prodTimer += 1;
     if (this.prodTimer < interval) return;
     this.prodTimer = 0;
-    const rate = this.currentOutput();
+    let rate = this.currentOutput();
+    // (Expansion Phase 5) happiness scales worker output (+10% happy / -20% / strike).
+    if (scene && scene.population && this.type.maxWorkers > 0) rate *= scene.population.prodMult;
     if (rate > 0) resources.add(this.type.produces, rate);
   }
 

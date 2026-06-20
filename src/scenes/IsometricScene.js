@@ -71,6 +71,7 @@ import { findPath } from '../systems/Pathfinding.js';
 import { registerUnitAnimations } from '../systems/Animations.js';
 import { sfx } from '../audio/SoundEngine.js';
 import * as SaveManager from '../systems/SaveManager.js';
+import { Population } from '../systems/Population.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -271,6 +272,7 @@ export class IsometricScene extends GameScene {
     this._chipPrev = {};
     this._menuOpen = false; this._menuEls = null; this._savingEls = null;
     this._confirmEls = null; this._tip = null; this._soundUI = null; this.movingBuilding = null;
+    this._popHud = null;
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -313,6 +315,7 @@ export class IsometricScene extends GameScene {
     this.nodes = new ResourceNodeManager(this);
     this.expeditions = new ExpeditionManager(this);
     this.wildlife = new WildlifeManager(this); // Phase 2 wildlife threats
+    this.population = new Population(this); // (Expansion Phase 5) population + happiness
     this.panelMode = 'build';
 
     // (Phase 5) Expedition rewards: special resources + permanent artifact buffs.
@@ -344,6 +347,7 @@ export class IsometricScene extends GameScene {
     this.buildHud();
     this.createDayCounter();
     this.createIronHud(); // UI overhaul: chip-based resource bar (hides old day counter)
+    this.createPopulationHud(); // (Expansion Phase 5) population + happiness indicator
     this.createCastleBar();
     // Lift the castle HP bar above the (now larger) iso keep.
     const cb = this.buildings.castle;
@@ -1108,6 +1112,37 @@ export class IsometricScene extends GameScene {
     }
   }
 
+  // ====================================================== POPULATION / HAPPINESS
+
+  createPopulationHud() {
+    const fix = (o) => o.setScrollFactor(0);
+    const w = 184, h = 24, x = (GAME_W - w) / 2, y = 60;
+    const bg = fix(this.add.rectangle(x, y, w, h, 0x10141c, 0.85).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
+    const popT = fix(this.add.text(x + 10, y + 6, 'Pop 10/14', { fontFamily: 'monospace', fontSize: '12px', color: '#dfe6ee', fontStyle: 'bold' }).setDepth(61));
+    const faceG = fix(this.add.graphics().setDepth(61));
+    const hapT = fix(this.add.text(x + w - 10, y + 6, '60%', { fontFamily: 'monospace', fontSize: '12px', color: '#dfe6ee', fontStyle: 'bold' }).setOrigin(1, 0).setDepth(61));
+    this._popHud = { bg, popT, faceG, hapT, x, y, w, h };
+    bg.on('pointerover', () => this.showTip(x + w / 2, y + h + 96, `Happiness ${this.population.happiness}%`, this.population.breakdown()));
+    bg.on('pointerout', () => this.hideTip());
+    this.updatePopulationHud();
+  }
+
+  updatePopulationHud() {
+    const u = this._popHud; if (!u || !this.population) return;
+    const p = this.population;
+    u.popT.setText(`Pop ${p.count}/${p.capacity()}`);
+    u.hapT.setText(`${p.happiness}%`);
+    const fx = u.x + u.w / 2 + 8, fy = u.y + u.h / 2;
+    const col = p.happiness >= 80 ? 0x4ad66b : p.happiness >= 50 ? 0xe6c84a : p.happiness >= 30 ? 0xe09040 : 0xd64a4a;
+    const g = u.faceG; g.clear();
+    g.fillStyle(col, 1).fillCircle(fx, fy, 8);
+    g.fillStyle(0x10141c, 1).fillCircle(fx - 3, fy - 2, 1.5).fillCircle(fx + 3, fy - 2, 1.5);
+    g.lineStyle(1.5, 0x10141c, 1);
+    if (p.happiness >= 50) { g.beginPath(); g.arc(fx, fy + 1, 4, 0.15 * Math.PI, 0.85 * Math.PI); g.strokePath(); }
+    else if (p.happiness >= 30) { g.beginPath(); g.moveTo(fx - 4, fy + 3); g.lineTo(fx + 4, fy + 3); g.strokePath(); }
+    else { g.beginPath(); g.arc(fx, fy + 6, 4, 1.15 * Math.PI, 1.85 * Math.PI); g.strokePath(); }
+  }
+
   // ============================================================ SAVE / LOAD UI
 
   createMenuButton() {
@@ -1814,6 +1849,7 @@ export class IsometricScene extends GameScene {
   updateHud() {
     super.updateHud();
     this.updateChips();
+    this.updatePopulationHud(); // (Phase 5)
     // (Phase 6) Top-bar threat readout reflects whichever kingdom is attacking.
     if (this.kingdoms && this.hud.aiStatus) {
       const atk = this.waveCoord.holder;
@@ -2094,6 +2130,7 @@ export class IsometricScene extends GameScene {
   // (priority), jumping ahead of any wildlife-spawn warnings in the queue.
   onKingdomAttack(kingdom) {
     sfx.play('enemy_attack_warning'); // (Polish Phase 2) war horn
+    this._lastAttackDay = this.gameDay; // (Phase 5) happiness: recent attack
     // (Bug 8) A new wave releases any held units so they resume auto-defense.
     if (this.troops) for (const u of this.troops.allUnits()) u.playerCommanded = false;
     this.threatWarning(`${kingdom.cfg.name} is attacking!`, kingdom.cfg.color, true);
@@ -2148,6 +2185,7 @@ export class IsometricScene extends GameScene {
   onBattleComplete(res) {
     this._inBattle = false;
     this.scene.resume();
+    if (res && res.victory) this._lastBattleWonDay = this.gameDay; else this._lastBattleLostDay = this.gameDay; // (Phase 5) happiness
     const c = this.buildings.castle;
     if (c) {
       for (const grp of res.army || []) {
@@ -2556,6 +2594,7 @@ export class IsometricScene extends GameScene {
     sfx.play('day_start'); // (Polish Phase 2) dawn bell
     this.updateSeason();
     this.updateWeather(); // (Polish Phase 4) switch snow/rain on season change
+    if (this.population) { this.population.onNewDay(); this.updatePopulationHud(); } // (Phase 5)
     // (Save system) Auto-save to slot 0 every N days.
     const freq = this._autoSaveEveryDays || 5;
     if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();
