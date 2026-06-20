@@ -3198,6 +3198,9 @@ export class IsometricScene extends GameScene {
     if (this.research) this.research.onNewDay(); // (Phase 5) research progress
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
     if (this.factions) this.factions.onNewDay(); // (Session-1 Phase 2) wandering factions daily
+    // (Session-1 Phase 3) Expire temporary world-event modifiers.
+    if (this._eventFarmUntil && this.gameDay >= this._eventFarmUntil) { this._eventFarmMult = 1; this._eventFarmUntil = 0; }
+    if (this._tempWorkerUntil && this.gameDay >= this._tempWorkerUntil) { this.resources.workersCap = Math.max(0, this.resources.workersCap - (this._tempWorkerBonus || 0)); this._tempWorkerBonus = 0; this._tempWorkerUntil = 0; }
     // (Save system) Auto-save to slot 0 every N days.
     const freq = this._autoSaveEveryDays || 5;
     if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();

@@ -101,6 +101,8 @@ export class Building {
     if (scene && this.typeKey === 'farm' && scene._seasonFarmMult) rate *= scene._seasonFarmMult;
     // (Expansion Phase 5) research: Advanced Farming / Mining Techniques.
     if (scene && this.typeKey === 'farm' && scene._researchFarmMult) rate *= scene._researchFarmMult;
+    // (Session-1 Phase 3) Temporary event modifier on farm output (e.g. drought).
+    if (scene && this.typeKey === 'farm' && scene._eventFarmMult) rate *= scene._eventFarmMult;
     if (scene && this.typeKey === 'mine' && scene._researchMineMult) rate *= scene._researchMineMult;
     // (Expansion Phase 4) Merchant trait: +15% Castle gold.
     if (scene && this.typeKey === 'castle' && scene.traitBonuses && scene.traitBonuses.goldMult) rate *= scene.traitBonuses.goldMult;

@@ -139,17 +139,20 @@ export class ExpeditionManager {
       if (castle) s.floatText(castle.x + Phaser.Math.Between(-24, 24), castle.y - 34, `+${amt} ${label}!`, '#dfe6ee');
     };
 
+    // (Session-1 Phase 3) "Iron deposits discovered" event doubles iron rewards.
+    const ironMul = (s._ironBonusUntil && s.gameDay < s._ironBonusUntil) ? 2 : 1;
     if (key === 'scout') {
       s.grantIntel(2); // reveal enemy army size for 2 days
       if (Math.random() < 0.25) s.awardArtifact();
     } else if (key === 'raid') {
-      give('iron', Phaser.Math.Between(20, 40));
+      give('iron', Phaser.Math.Between(20, 40) * ironMul);
       if (Math.random() < 0.4) s.troops.spawnMercenary(); // a mercenary joins
     } else {
-      give('iron', Phaser.Math.Between(40, 80));
+      give('iron', Phaser.Math.Between(40, 80) * ironMul);
       s.awardArtifact(); // guaranteed
       if (Math.random() < 0.35) s.grantScroll(); // rare scroll
     }
+    if (s.stats) s.stats.note('expeditions');
 
     if (losses > 0 && castle) s.floatText(castle.x, castle.y - 56, `Lost ${losses} soldier${losses > 1 ? 's' : ''} on the expedition`, '#ff8a80');
     this.marchIn(survivors);

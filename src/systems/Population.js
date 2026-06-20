@@ -59,7 +59,8 @@ export class Population {
     this.prodMult = this.happiness >= 70 ? 1.1 : this.happiness >= 40 ? 1.0 : this.happiness >= 20 ? 0.8 : 0;
 
     // --- Growth: +1 person every 3 days if fed and below capacity -------------
-    if (this.happiness >= 30 && food > 0 && this.count < cap) {
+    const growthPaused = s._growthPauseUntil && day < s._growthPauseUntil; // (Phase 3) plague
+    if (this.happiness >= 30 && food > 0 && this.count < cap && !growthPaused) {
       this._growthAcc += 1;
       if (this._growthAcc >= 3) { this._growthAcc = 0; this.count = Math.min(cap, this.count + 1); }
     } else {

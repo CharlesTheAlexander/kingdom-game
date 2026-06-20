@@ -45,7 +45,9 @@ export class Research {
     if (!this.current) return;
     const lib = this.library();
     if (!lib || lib.workers <= 0) return;
-    this.progress += lib.workers >= 2 ? 1.5 : 1;
+    // (Session-1 Phase 3) Wandering Scholar patronage speeds research.
+    const speed = this.scene._researchSpeedMult || 1;
+    this.progress += (lib.workers >= 2 ? 1.5 : 1) * speed;
     if (this.progress >= 3) this.complete();
   }
 

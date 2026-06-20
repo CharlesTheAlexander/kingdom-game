@@ -78,7 +78,79 @@ export class WorldEvents {
         ] },
       { id: 'victory', type: 'choice', title: 'Victory Celebration', cond: () => (s.gameDay - (s._lastBattleWonDay ?? -99)) <= 3, body: () => 'Your people celebrate the recent victory!',
         choices: [{ label: 'Celebrate', effect: () => { if (s.population) s.population.happiness = Math.min(100, s.population.happiness + 20); } }] },
+
+      // ===== (Session-1 Phase 3) 13 more events =====
+      // -- world news (auto banner) --
+      { id: 'ai_war', type: 'news', cond: () => (s.kingdoms || []).filter((k) => k.castleAlive).length >= 2,
+        effect: () => { const ks = (s.kingdoms || []).filter((k) => k.castleAlive); for (const k of ks.slice(0, 2)) { k.regrouping = true; k.waveTimer = 5 * (s.DAY_SECONDS || 300); } },
+        text: () => { const ks = (s.kingdoms || []).filter((k) => k.castleAlive); return `${ks[0].cfg.name} and ${ks[1].cfg.name} are at war with each other.`; } },
+      { id: 'drought', type: 'news', cond: () => (s.seasonHint && s.seasonHint(s.gameDay) === 'Summer'),
+        effect: () => { s._eventFarmMult = 0.85; s._eventFarmUntil = s.gameDay + 3; }, text: () => 'A great drought grips the southern plains. Farms suffer.' },
+      { id: 'iron_find', type: 'news', cond: () => s.gameDay >= 15,
+        effect: () => { s._ironBonusUntil = s.gameDay + 5; }, text: () => 'Iron deposits discovered in the eastern mountains. Iron expeditions yield double!' },
+      { id: 'renown', type: 'news', cond: () => s.reputation && Object.values(s.reputation.scores).some((v) => v >= 50),
+        effect: () => { if (s.population) s.population.addTempMod('Renown', 5, 3); }, text: () => "Your kingdom's reputation spreads across the continent." },
+
+      // -- player choice events --
+      { id: 'wounded', type: 'choice', title: 'Wounded Soldier', body: () => 'A badly wounded soldier from a destroyed village stumbles into your kingdom seeking refuge.',
+        choices: [
+          { label: 'Heal them (20 food)', enabled: () => s.resources.food >= 20, effect: () => { s.resources.food -= 20; const w = s.troops.spawnAt ? s.troops.spawnAt(s.buildings.castle.x, s.buildings.castle.y) : null; const u = s.troops.warriors[s.troops.warriors.length - 1]; if (u) { u.hp = 75; u.maxHp = Math.max(u.maxHp, 75); } if (s.reputation) s.reputation.add('protector', 5); } },
+          { label: 'Turn away', effect: () => { if (s.population) s.population.addTempMod('Turned away the wounded', -5, 3); } },
+        ] },
+      { id: 'rogue_archer', type: 'choice', title: 'The Rogue Archer', body: () => 'A skilled archer offers their services — but they are known to desert at the first sign of defeat.',
+        choices: [
+          { label: 'Hire (80 gold)', enabled: () => s.resources.gold >= 80, effect: () => { s.resources.gold -= 80; if (s.troops.spawnArcher) s.troops.spawnArcher(s.buildings.castle); const a = s.troops.archers[s.troops.archers.length - 1]; if (a) a.flaky = true; } },
+          { label: 'Decline', effect: () => {} },
+        ] },
+      { id: 'weapon_cache', type: 'choice', title: 'Ancient Weapon Cache', body: () => 'Farmers digging a new well found a cache of old weapons.',
+        choices: [
+          { label: 'Distribute to troops (+5 HP)', effect: () => { for (const w of s.troops.warriors) { w.maxHp += 5; w.hp += 5; } s.buffs.warriorBonusHp = (s.buffs.warriorBonusHp || 0) + 5; } },
+          { label: 'Sell them (150 gold)', effect: () => { s.resources.add('gold', 150); } },
+        ] },
+      { id: 'plague', type: 'choice', title: 'Plague Scare', body: () => 'Travelers report illness spreading near your borders.',
+        choices: [
+          { label: 'Quarantine (no caravans 3d)', effect: () => { s._quarantineUntil = s.gameDay + 3; } },
+          { label: 'Ignore', effect: () => { if (Math.random() < 0.4) s._growthPauseUntil = s.gameDay + 5; } },
+        ] },
+      { id: 'defector', type: 'choice', title: 'The Defector General', cond: () => s.diplomacy && (s.kingdoms || []).some((k) => k.castleAlive && s.diplomacy.get(k.cfg.key) <= -50),
+        body: () => `A general from ${this.rngKingdomName()} offers to share battle plans.`,
+        choices: [
+          { label: 'Accept (100 gold → intel 5d)', enabled: () => s.resources.gold >= 100, effect: () => { s.resources.gold -= 100; s.intelUntilDay = s.gameDay + 5; s.showToast && s.showToast('Enemy army composition revealed'); } },
+          { label: 'Refuse', effect: () => {} },
+        ] },
+      { id: 'harvest', type: 'choice', title: 'Harvest Festival', cond: () => (s.seasonHint && s.seasonHint(s.gameDay).indexOf('Autumn') >= 0),
+        body: () => 'Your farmers propose a three-day harvest festival.',
+        choices: [
+          { label: 'Host it (50 food)', enabled: () => s.resources.food >= 50, effect: () => { s.resources.food -= 50; if (s.population) { s.population.addTempMod('Harvest festival', 25, 5); s.population.count += 1; } } },
+          { label: 'Skip it', effect: () => {} },
+        ] },
+      { id: 'lost_merchant', type: 'choice', title: 'The Lost Merchant', body: () => 'A disoriented merchant claims to know the location of a forgotten trading post deep in the wilderness.',
+        choices: [
+          { label: 'Fund search (100 gold)', enabled: () => s.resources.gold >= 100, effect: () => { s.resources.gold -= 100; this.revealRandomSettlement(); } },
+          { label: 'Ignore', effect: () => {} },
+        ] },
+      { id: 'parade', type: 'choice', title: 'Military Parade', cond: () => (s._battlesWon || 0) >= 3,
+        body: () => 'Your soldiers request permission for a victory parade.',
+        choices: [
+          { label: 'Approve (25 gold)', enabled: () => s.resources.gold >= 25, effect: () => { s.resources.gold -= 25; if (s.population) s.population.addTempMod('Victory parade', 15, 3); if (s.reputation) s.reputation.add('conqueror', 5); } },
+          { label: 'Deny', effect: () => {} },
+        ] },
+      { id: 'scholar2', type: 'choice', title: 'The Wandering Scholar', body: () => 'A scholar seeks patronage from your kingdom.',
+        choices: [
+          { label: 'Patronage (150 gold)', enabled: () => s.resources.gold >= 150, effect: () => { s.resources.gold -= 150; s._researchSpeedMult = (s._researchSpeedMult || 1) * 1.25; s.showToast && s.showToast('Research is now faster'); } },
+          { label: 'Decline', effect: () => {} },
+        ] },
     ];
+  }
+
+  // (Session-1 Phase 3) Reveal fog around an undiscovered neutral settlement.
+  revealRandomSettlement() {
+    const s = this.scene;
+    const list = (s.settlements && s.settlements.list) || [];
+    const hidden = list.filter((st) => st.col != null && s.territory && !s.territory.explored[st.row] || (st.col != null && s.territory && s.territory.explored[st.row] && !s.territory.explored[st.row][st.col]));
+    const pick = (hidden.length ? Phaser.Utils.Array.GetRandom(hidden) : (list.length ? Phaser.Utils.Array.GetRandom(list) : null));
+    if (pick && pick.col != null && s.revealAround) { s.revealAround(pick.col, pick.row, 8); s.logEvent && s.logEvent(`A forgotten settlement was revealed: ${pick.name}`, 'yellow'); }
+    else this.revealRandomFog();
   }
 
   firstKingdom() { return (this.scene.kingdoms || []).find((k) => k.castleAlive) || null; }
@@ -125,10 +197,23 @@ export class WorldEvents {
     const s = this.scene;
     s._seasonFarmMult = 1; s._seasonFoodUpkeepMult = 1;
     let msg = '';
-    if (season.indexOf('Spring') >= 0) { msg = 'The thaw brings fresh growth. Resource nodes regenerate faster.'; }
+    if (season.indexOf('Spring') >= 0) {
+      msg = 'Migratory birds return. Hunters report abundant game.';
+      // (Session-1 Phase 3) Food nodes get a +20% seasonal windfall.
+      if (s.nodes && s.nodes.nodes) for (const n of s.nodes.nodes) if (n.type === 'food' && n.alive) { n.count = Math.round(n.count * 1.2); n.refreshLabel && n.refreshLabel(); }
+    }
     else if (season === 'Summer') { msg = 'A long dry summer. Farm output dips but trade is brisk.'; s._seasonFarmMult = 0.9; }
     else if (season.indexOf('Autumn') >= 0) { msg = 'Harvest season! Farms produce +25% food.'; s._seasonFarmMult = 1.25; }
-    else if (season === 'Winter') { msg = 'A bitter winter. Food consumption rises.'; s._seasonFoodUpkeepMult = 1.2; }
+    else if (season === 'Winter') {
+      msg = 'A bitter winter. Food consumption rises.'; s._seasonFoodUpkeepMult = 1.2;
+      // (Session-1 Phase 3) A wandering band seeks shelter from the cold.
+      this.queue.push({ id: 'winter_band', title: 'Shelter from the Cold', body: () => 'A wandering band seeks shelter in your kingdom from the cold.',
+        choices: [
+          { label: 'Let them in (+2 workers 5d, -10 food)', enabled: () => s.resources.food >= 10, effect: () => { s.resources.food -= 10; s.resources.workersCap += 2; s._tempWorkerBonus = (s._tempWorkerBonus || 0) + 2; s._tempWorkerUntil = s.gameDay + 5; } },
+          { label: 'Turn away', effect: () => {} },
+        ] });
+      this.refreshMessenger();
+    }
     if (msg) { this.showBanner(`${season}: ${msg}`); s.logEvent && s.logEvent(`Season — ${msg}`, 'yellow'); }
   }
 
