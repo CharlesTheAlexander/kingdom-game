@@ -79,6 +79,7 @@ import { Research } from '../systems/Research.js';
 import { WinConditions } from '../systems/WinConditions.js';
 import { Ruins } from '../systems/Ruins.js';
 import { WanderingFactions } from '../systems/WanderingFactions.js';
+import { Discovery } from '../systems/Discovery.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -282,6 +283,7 @@ export class IsometricScene extends GameScene {
     this._popHud = null; this._kingName = null; this._kingTitle = null; this._kingEls = null; this._logEls = null;
     this._logBtnBadge = null; this._logOpen = false; this._pauseBtn = null; this._paused = false; // (Phase 7) reset on restart
     this._endScreenEls = null; this._speedBeforeEnd = null; this._repExpanded = false; // (Audit FIX 2/5) reset on restart
+    this._discEls = null; this._promptEls = null; // (Session-1) reset transient discovery/caravan UI
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -392,6 +394,7 @@ export class IsometricScene extends GameScene {
     this.territory = new Territory(this); // Phase 4: territory + fog of war
     this.ruins = new Ruins(this); // (Session-1 Phase 1) ancient ruins
     this.factions = new WanderingFactions(this); // (Session-1 Phase 2) caravans/tribes/pilgrims
+    this.discovery = new Discovery(this); // (Session-1 Phase 4) location histories
     // (Phase 7) Reveal a generous 20-tile starting radius around the castle.
     if (this.buildings.castle) this.revealAround(this.buildings.castle.col, this.buildings.castle.row, 20);
     this.setupInput();
@@ -494,6 +497,24 @@ export class IsometricScene extends GameScene {
     this.isGameOver = true; // (Audit FIX 2) richer defeat screen replaces the minimal one
     this.showEndScreen(false, 'Your castle has fallen');
     this.routeCameras();
+  }
+
+  // (Session-1 Phase 4) Brief discovery card, bottom-center, auto-dismissing.
+  showDiscovery(type, name, history) {
+    const fix = (o) => o.setScrollFactor(0).setDepth(96);
+    if (this._discEls) this._discEls.forEach((o) => o.destroy());
+    const W = 520, H = 70, x = (GAME_W - W) / 2, y = this.PANEL_Y - H - 18, els = [];
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x16120a, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    const LETTER = { settlement: 'S', ruin: 'R', camp: 'G', castle: 'K', biome: 'B', tribe: 'T' };
+    const icon = { settlement: 0x8ab0e6, ruin: 0xffe066, camp: 0xcc4444, castle: 0xd6a4ff, biome: 0x66cc88, tribe: 0xe08a2a }[type] || 0xffffff;
+    els.push(fix(this.add.circle(x + 26, y + H / 2, 14, icon, 0.9)));
+    els.push(fix(this.add.text(x + 26, y + H / 2, LETTER[type] || '*', { fontFamily: 'monospace', fontSize: '14px', color: '#1a1a1a', fontStyle: 'bold' }).setOrigin(0.5)));
+    els.push(fix(this.add.text(x + 52, y + 10, `Discovered: ${name}`, { fontFamily: 'monospace', fontSize: '14px', color: '#ffe9b0', fontStyle: 'bold' })));
+    els.push(fix(this.add.text(x + 52, y + 30, history, { fontFamily: 'monospace', fontSize: '11px', color: '#e8e0cc', wordWrap: { width: W - 70 }, lineSpacing: 2 })));
+    this._discEls = els;
+    this.logEvent && this.logEvent(`Discovered: ${name}`, 'gold');
+    this.routeCameras && this.routeCameras();
+    this.time.delayedCall(5000, () => { if (this._discEls === els) { els.forEach((o) => o.destroy()); this._discEls = null; } });
   }
 
   // (Audit FIX 2) Shared VICTORY / DEFEAT overlay with a stats panel.
@@ -3307,6 +3328,7 @@ export class IsometricScene extends GameScene {
     if (this.territory) this.territory.update(dt); // Phase 4: fog reveal around units
     if (this.ruins) this.ruins.update(); // (Session-1 Phase 1) ruin discovery
     if (this.factions) this.factions.update(dt); // (Session-1 Phase 2) wandering factions
+    if (this.discovery) this.discovery.update(); // (Session-1 Phase 4) location discovery
 
     const trainingOpen = this.selectedBuilding && this.selectedBuilding.typeKey === 'barracks' && this.selectedBuilding.slots.length > 0;
     if (((this.panelMode === 'expedition' || this.panelMode === 'kingdoms') && !this.selectedBuilding) || trainingOpen) {
