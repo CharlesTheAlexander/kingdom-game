@@ -39,6 +39,8 @@ export function capture(scene) {
     king: { kingdom: scene.kingdomName, ruler: scene.rulerName, trait: scene.kingTrait },
     reputation: scene.reputation && scene.reputation.serialize ? scene.reputation.serialize() : null,
     research: scene.research && scene.research.serialize ? scene.research.serialize() : null,
+    winConditions: scene.winConditions && scene.winConditions.serialize ? scene.winConditions.serialize() : null,
+    stats: { battlesWon: scene._battlesWon || 0 },
     flags: { tut: safeParse(localStorage.getItem('kg_tut')) || {}, hints: scene._firedHints ? Object.keys(scene._firedHints) : [] },
     audio: scene.sfx ? { volume: scene.sfx.volume, muted: scene.sfx.muted } : null,
   };
@@ -133,7 +135,7 @@ export function applySave(scene, data) {
   sect('castle', () => { if (data.castle && scene.buildings.castle) { scene.buildings.castle.hp = data.castle.hp; scene.buildings.castle.level = data.castle.level || 1; } });
   sect('buildings', () => {
     for (const bd of data.buildings || []) {
-      const b = scene.buildings.place(bd.type, bd.col, bd.row);
+      const b = scene.buildings.place(bd.type, bd.col, bd.row, { ignoreStage: true }); // saved state is authoritative
       if (!b) continue;
       b.level = bd.level || 1;
       b.hp = bd.hp != null ? bd.hp : b.hp;
@@ -159,6 +161,7 @@ export function applySave(scene, data) {
     if (scene.updateKingdomTitle) scene.updateKingdomTitle();
   });
   sect('research', () => { if (data.research && scene.research) scene.research.restore(data.research); });
+  sect('winConditions', () => { if (data.winConditions && scene.winConditions) scene.winConditions.restore(data.winConditions); if (data.stats) scene._battlesWon = data.stats.battlesWon || 0; });
   sect('diplomacy', () => {
     if (data.diplomacy && scene.diplomacy) {
       if (scene.diplomacy.restore) scene.diplomacy.restore(data.diplomacy);

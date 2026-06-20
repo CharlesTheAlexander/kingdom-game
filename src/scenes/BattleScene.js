@@ -110,6 +110,16 @@ export class BattleScene extends Phaser.Scene {
 
   init(data) { this.cfg = data || {}; }
 
+  // (Audit FIX 4) Subtitle reflects who initiated: defending vs attacking, and
+  // names a neutral settlement when assaulting one.
+  battleSubtitle() {
+    const label = FACTION_LABEL[this.faction] || this.faction;
+    if (this.cfg.playerDefending) return `Defending against the ${label}`;
+    const ctx = this.cfg.context || {};
+    if (ctx.kind === 'settlement' && ctx.ref && ctx.ref.name) return `Assaulting ${ctx.ref.name}`;
+    return `Attacking the ${label}`;
+  }
+
   create() {
     const terrain = this.cfg.terrainType || 'plains';
     this.pal = TERRAIN[terrain] || TERRAIN.plains;
@@ -238,7 +248,7 @@ export class BattleScene extends Phaser.Scene {
 
     // --- Pre-battle headline -------------------------------------------------
     this.title = this.add.text(GAME_W / 2, 14, this.pal.name, { fontFamily: 'monospace', fontSize: '26px', color: '#ffe9a8', fontStyle: 'bold', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5, 0).setDepth(41);
-    this.subtitle = this.add.text(GAME_W / 2, 46, `Defending against the ${FACTION_LABEL[this.faction] || this.faction}`, { fontFamily: 'monospace', fontSize: '14px', color: '#e7d6b0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(41);
+    this.subtitle = this.add.text(GAME_W / 2, 46, this.battleSubtitle(), { fontFamily: 'monospace', fontSize: '14px', color: '#e7d6b0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(41);
     this.countdown = this.add.text(GAME_W / 2, 74, '', { fontFamily: 'monospace', fontSize: '22px', color: '#ffd24a', fontStyle: 'bold', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5, 0).setDepth(41);
     this.banner = this.add.text(GAME_W / 2, GAME_H - 96, 'Choose a formation — battle begins automatically', { fontFamily: 'monospace', fontSize: '14px', color: '#fff', backgroundColor: '#000000aa', padding: { x: 10, y: 5 } }).setOrigin(0.5, 1).setDepth(41);
 

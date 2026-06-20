@@ -31,8 +31,8 @@ class ResourceNode {
     this.spr = scene.add.sprite(x, y, this.texKey, 0).setOrigin(0.5, this.def.oy).setScale(this.def.scale).setDepth(2);
     if (this.def.anim && scene.anims.exists(this.def.anim)) this.spr.play(this.def.anim);
     this.spr.setInteractive();
-    this.spr.on('pointerover', () => { if (this.alive) this.spr.setTint(0xffff66); }); // glow on hover
-    this.spr.on('pointerout', () => this.spr.clearTint());
+    this.spr.on('pointerover', () => { this._hover = true; if (this.alive) this.spr.setTint(0xffff66); }); // glow on hover
+    this.spr.on('pointerout', () => { this._hover = false; this.spr.clearTint(); });
 
     // Centered directly above the node sprite. Scrolls WITH the world (default
     // scrollFactor 1); depth 35 keeps it above the screen-fixed vignette but
@@ -205,5 +205,19 @@ export class ResourceNodeManager {
 
   update(dtMs) {
     for (const n of this.nodes) n.update(dtMs);
+    this.updateLabelVisibility();
+  }
+
+  // (Audit FIX 6) Node quantity labels declutter the world when zoomed out:
+  // hidden below 0.7 zoom, fading in from 0.7→0.8, fully shown at ≥0.8 — but a
+  // hovered node always shows its label regardless of zoom.
+  updateLabelVisibility() {
+    const cam = this.scene.cameras && this.scene.cameras.main;
+    if (!cam) return;
+    const zoomAlpha = Phaser.Math.Clamp((cam.zoom - 0.7) / 0.1, 0, 1);
+    for (const n of this.nodes) {
+      if (!n.alive || !n.label) continue; // depleted nodes are faded out by their own tween
+      n.label.setAlpha(n._hover ? 1 : zoomAlpha);
+    }
   }
 }

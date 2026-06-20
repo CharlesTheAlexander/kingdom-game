@@ -76,6 +76,7 @@ import { ArmyManager } from '../systems/ArmyManager.js';
 import { WorldEvents } from '../systems/WorldEvents.js';
 import { Reputation, TRAITS, defaultBonuses } from '../systems/Reputation.js';
 import { Research } from '../systems/Research.js';
+import { WinConditions } from '../systems/WinConditions.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -278,6 +279,7 @@ export class IsometricScene extends GameScene {
     this._confirmEls = null; this._tip = null; this._soundUI = null; this.movingBuilding = null;
     this._popHud = null; this._kingName = null; this._kingTitle = null; this._kingEls = null; this._logEls = null;
     this._logBtnBadge = null; this._logOpen = false; this._pauseBtn = null; this._paused = false; // (Phase 7) reset on restart
+    this._endScreenEls = null; this._speedBeforeEnd = null; this._repExpanded = false; // (Audit FIX 2/5) reset on restart
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -333,6 +335,7 @@ export class IsometricScene extends GameScene {
     this.armyMgr = new ArmyManager(this); // (Expansion) armies on the map
     this.worldEvents = new WorldEvents(this); // (Expansion Phase 3) events + messenger
     this.research = new Research(this); // (Expansion Phase 5) research tree
+    this.winConditions = new WinConditions(this); // (Audit FIX 2) victory paths
     this._eventLog = this._eventLog || [];
     this.panelMode = 'build';
 
@@ -483,8 +486,76 @@ export class IsometricScene extends GameScene {
   // over, so route its (screen-fixed) elements to the uiCamera immediately —
   // otherwise the main camera also renders them, zoomed (BUG 1 regression).
   triggerGameOver() {
-    super.triggerGameOver();
+    if (this.isGameOver) return;
+    this.isGameOver = true; // (Audit FIX 2) richer defeat screen replaces the minimal one
+    this.showEndScreen(false, 'Your castle has fallen');
     this.routeCameras();
+  }
+
+  // (Audit FIX 2) Shared VICTORY / DEFEAT overlay with a stats panel.
+  // victory=true → gold "VICTORY" + path name + Continue/New Game.
+  // victory=false → red "DEFEAT" + reason + Try Again.
+  gatherEndStats() {
+    const wc = this.winConditions;
+    const title = (this.reputation && this.reputation.title(this.kingdomName)) || (this.kingTrait && TRAITS[this.kingTrait] ? TRAITS[this.kingTrait].name : '—');
+    return [
+      ['Days survived', String(this.gameDay)],
+      ['Battles won', String(this._battlesWon || 0)],
+      ['Settlements controlled', wc ? `${wc.playerControlled()} / ${wc.totalSettlements()}` : '—'],
+      ['Population reached', String(this.population ? this.population.count : 0)],
+      ['Research completed', String(this.research ? this.research.completed.size : 0)],
+      ['Kingdom title', title],
+    ];
+  }
+
+  showEndScreen(victory, subtitle) {
+    if (this._endScreenEls) return; // already showing
+    this._speedBeforeEnd = this.gameSpeed;
+    this.gameSpeed = 0; // freeze all timers
+    const fix = (o) => o.setScrollFactor(0).setDepth(200);
+    const els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, victory ? 0x06140a : 0x140606, 0.82).setOrigin(0, 0).setInteractive()));
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 210, victory ? 'VICTORY' : 'DEFEAT', { fontFamily: 'monospace', fontSize: '72px', color: victory ? '#ffd24a' : '#e74c3c', fontStyle: 'bold', stroke: '#000', strokeThickness: 8 }).setOrigin(0.5)));
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 150, victory ? `${subtitle} Victory` : subtitle, { fontFamily: 'monospace', fontSize: '22px', color: victory ? '#ffe9a8' : '#ffb0a8', fontStyle: 'bold', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5)));
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 112, `The Kingdom of ${this.kingdomName} under ${this.rulerName}`, { fontFamily: 'monospace', fontSize: '14px', color: '#cfc1a6' }).setOrigin(0.5)));
+    // Stats panel.
+    const stats = this.gatherEndStats();
+    const pw = 460, ph = 30 + stats.length * 26, pxx = GAME_W / 2 - pw / 2, pyy = GAME_H / 2 - 80;
+    els.push(fix(this.add.rectangle(pxx, pyy, pw, ph, 0x12101a, 0.96).setOrigin(0, 0).setStrokeStyle(2, victory ? 0xc9a14a : 0x8a2a2a, 0.9)));
+    stats.forEach(([k, v], i) => {
+      const ry = pyy + 16 + i * 26;
+      els.push(fix(this.add.text(pxx + 18, ry, k, { fontFamily: 'monospace', fontSize: '14px', color: '#cfc1a6' }).setOrigin(0, 0.5)));
+      els.push(fix(this.add.text(pxx + pw - 18, ry, v, { fontFamily: 'monospace', fontSize: '14px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(1, 0.5)));
+    });
+    // Buttons.
+    const mkBtn = (cx, label, bg, onClick) => {
+      const w = 200, h = 44, x = cx - w / 2, y = GAME_H / 2 + ph - 20;
+      const b = fix(this.add.rectangle(x, y, w, h, bg).setOrigin(0, 0).setStrokeStyle(2, 0xf0e6c8, 0.9).setInteractive({ useHandCursor: true }));
+      els.push(b);
+      els.push(fix(this.add.text(x + w / 2, y + h / 2, label, { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5)));
+      b.on('pointerover', () => b.setFillStyle(Phaser.Display.Color.IntegerToColor(bg).lighten(12).color));
+      b.on('pointerout', () => b.setFillStyle(bg));
+      b.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('button_click'); onClick(); });
+    };
+    if (victory) {
+      mkBtn(GAME_W / 2 - 115, 'Continue Playing', 0x1f5b3a, () => this.dismissEndScreen());
+      mkBtn(GAME_W / 2 + 115, 'New Game', 0x5c1a1a, () => this.startNewGame());
+    } else {
+      mkBtn(GAME_W / 2, 'Try Again', 0x2d4a6b, () => this.scene.restart());
+    }
+    this._endScreenEls = els;
+    this.routeCameras && this.routeCameras();
+  }
+
+  dismissEndScreen() {
+    if (this._endScreenEls) { this._endScreenEls.forEach((o) => o.destroy()); this._endScreenEls = null; }
+    this.gameSpeed = this._speedBeforeEnd != null ? this._speedBeforeEnd : 1; // resume
+    this._speedBeforeEnd = null;
+  }
+
+  startNewGame() {
+    try { for (let i = 0; i < 3; i++) SaveManager.deleteSlot(i); localStorage.removeItem('kg_king'); localStorage.removeItem('kg_tut'); } catch (e) {}
+    this.scene.restart();
   }
 
   // Slice the "finished" frame out of each construction sheet into a standalone
@@ -1186,7 +1257,7 @@ export class IsometricScene extends GameScene {
     if (!BuildingTypes.library) return;
     const c = this.buildings.castle; if (!c) return;
     for (let dc = 3; dc <= 8; dc++) {
-      const b = this.buildings.place('library', c.col + dc, c.row - 2);
+      const b = this.buildings.place('library', c.col + dc, c.row - 2, { ignoreStage: true }); // Scholar gift bypasses gating
       if (b) { this.decorateBuilding(b); break; }
     }
   }
@@ -1207,6 +1278,10 @@ export class IsometricScene extends GameScene {
 
   // One-time kingdom creation screen (names + starting trait).
   showKingCreation() {
+    // (Audit FIX 1) Freeze the whole simulation while the player reads/chooses —
+    // no gold accrues, no days pass, no enemies move during creation.
+    this._speedBeforeCreation = this.gameSpeed;
+    this.gameSpeed = 0;
     const fix = (o) => o.setScrollFactor(0);
     const els = []; const W = 640, H = 460, px = (GAME_W - W) / 2, py = (GAME_H - H) / 2;
     els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.9).setOrigin(0, 0).setDepth(150).setInteractive()));
@@ -1251,6 +1326,9 @@ export class IsometricScene extends GameScene {
     const t = TRAITS[trait]; if (t && t.oneTime) try { t.oneTime(this); } catch (e) { console.error('[Trait] oneTime failed', e); }
     if (this._kingInputs) { this._kingInputs.forEach((el) => el.remove()); this._kingInputs = null; }
     this._typing = false;
+    // (Audit FIX 1) Resume the simulation at the previous speed (default 1x).
+    this.gameSpeed = this._speedBeforeCreation != null ? this._speedBeforeCreation : 1;
+    this._speedBeforeCreation = null;
     els.forEach((o) => o.destroy()); this._kingEls = null;
     this.updateKingdomTitle();
     this.logEvent && this.logEvent(`${this.kingdomName} founded under ${this.rulerName} (${t ? t.name : '—'})`, 'green');
@@ -2464,7 +2542,7 @@ export class IsometricScene extends GameScene {
   onBattleComplete(res) {
     this._inBattle = false;
     this.scene.resume();
-    if (res && res.victory) this._lastBattleWonDay = this.gameDay; else this._lastBattleLostDay = this.gameDay; // (Phase 5) happiness
+    if (res && res.victory) { this._lastBattleWonDay = this.gameDay; this._battlesWon = (this._battlesWon || 0) + 1; } else this._lastBattleLostDay = this.gameDay; // (Phase 5) happiness; (Audit FIX 2) battle tally
     const c = this.buildings.castle;
     if (c) {
       for (const grp of res.army || []) {
@@ -2554,6 +2632,7 @@ export class IsometricScene extends GameScene {
     this.armyMgr.setUnitsFromBattle(army, res.army);
     if (res && res.victory) {
       this._lastBattleWonDay = this.gameDay;
+      this._battlesWon = (this._battlesWon || 0) + 1; // (Audit FIX 2) battle tally
       this.armyMgr.addMorale(army, 15);
       if (res.loot) { this.resources.add('gold', res.loot.gold || 0); if (res.loot.iron) this.resources.add('iron', res.loot.iron); }
       if (this.reputation) this.reputation.add('conqueror', 10);
@@ -2732,15 +2811,27 @@ export class IsometricScene extends GameScene {
     );
     const scouted = this.intelActive();
     this.panelText(14, this.PANEL_Y + 6, `AI KINGDOMS — DIPLOMACY${scouted ? '   (scouted)' : ''}`, { bold: true, color: '#ffe9b0' });
-    // (Phase 4) Reputation mini-bars top-right of the panel.
+    // (Audit FIX 5) Reputation moved out of the header into a collapsible section
+    // so the bars no longer overlap the first kingdom row. Collapsed by default;
+    // when expanded it floats in a clean box above the panel.
     if (this.reputation) {
-      const reps = [['Conqueror', 'conqueror', 0xc0392b], ['Merchant', 'merchant', 0xf1c40f], ['Protector', 'protector', 0x3498db], ['Destroyer', 'destroyer', 0x8e44ad]];
-      reps.forEach(([lbl, key, col], i) => {
-        const rx = 380 + (i % 2) * 180, ry = this.PANEL_Y + 6 + Math.floor(i / 2) * 14;
-        this.panelText(rx, ry, lbl, { color: '#cfc1a6', size: '10px' });
-        this.panel.add(this.add.rectangle(rx + 74, ry + 5, 90, 7, 0x000000, 0.5).setOrigin(0, 0.5).setScrollFactor(0));
-        this.panel.add(this.add.rectangle(rx + 74, ry + 5, 90 * (this.reputation.scores[key] / 100), 7, col).setOrigin(0, 0.5).setScrollFactor(0));
-      });
+      const tx = 300, ty = this.PANEL_Y + 5;
+      const tog = this.add.rectangle(tx, ty, 172, 16, 0x2a2030, 0.95).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(1, 0xc9a14a, 0.6).setInteractive({ useHandCursor: true });
+      this.panel.add(tog);
+      this.panel.add(this.add.text(tx + 8, ty + 2, `${this._repExpanded ? '▾' : '▸'} Your Reputation`, { fontFamily: 'monospace', fontSize: '11px', color: '#ffe9b0', fontStyle: 'bold' }).setScrollFactor(0));
+      tog.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this._repExpanded = !this._repExpanded; this.refreshPanel(); });
+      if (this._repExpanded) {
+        const reps = [['Conqueror', 'conqueror', 0xc0392b], ['Merchant', 'merchant', 0xf1c40f], ['Protector', 'protector', 0x3498db], ['Destroyer', 'destroyer', 0x8e44ad]];
+        const bw = 308, bh = 86, bx = GAME_W - bw - 12, by = this.PANEL_Y - bh - 8;
+        this.panel.add(this.add.rectangle(bx, by, bw, bh, 0x12101a, 0.98).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(2, 0xc9a14a, 0.9));
+        this.panel.add(this.add.text(bx + 10, by + 6, 'YOUR REPUTATION', { fontFamily: 'monospace', fontSize: '12px', color: '#ffe9b0', fontStyle: 'bold' }).setScrollFactor(0));
+        reps.forEach(([lbl, key, col], i) => {
+          const rx = bx + 12 + (i % 2) * 150, ry = by + 28 + Math.floor(i / 2) * 27;
+          this.panel.add(this.add.text(rx, ry, lbl, { fontFamily: 'monospace', fontSize: '10px', color: '#cfc1a6' }).setScrollFactor(0));
+          this.panel.add(this.add.rectangle(rx, ry + 13, 132, 7, 0x000000, 0.5).setOrigin(0, 0).setScrollFactor(0));
+          this.panel.add(this.add.rectangle(rx, ry + 13, 132 * Phaser.Math.Clamp(this.reputation.scores[key] / 100, 0, 1), 7, col).setOrigin(0, 0).setScrollFactor(0));
+        });
+      }
     }
     const base = this.PANEL_Y + 24, rowH = 34;
     this.kingdoms.forEach((k, idx) => {
@@ -2856,7 +2947,8 @@ export class IsometricScene extends GameScene {
     this.seasonOverlay = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(34);
     // (Polish Phase 3) Sky bodies — stars, sun, moon — drawn above the overlay.
     this._stars = [];
-    for (let i = 0; i < 24; i++) this._stars.push({ x: Phaser.Math.Between(16, GAME_W - 16), y: Phaser.Math.Between(58, Math.round(GAME_H * 0.42)), r: Phaser.Math.FloatBetween(0.7, 1.8), ph: Math.random() * 6.28 });
+    // (Audit FIX 7) More, brighter stars for a clearer night sky.
+    for (let i = 0; i < 40; i++) this._stars.push({ x: Phaser.Math.Between(16, GAME_W - 16), y: Phaser.Math.Between(58, Math.round(GAME_H * 0.42)), r: Phaser.Math.FloatBetween(0.9, 2.4), ph: Math.random() * 6.28 });
     this.skyG = this.add.graphics().setScrollFactor(0).setDepth(36);
     this.updateSeason();
   }
@@ -2869,9 +2961,9 @@ export class IsometricScene extends GameScene {
       [0.10, 0xfff2d8, 0.00], // morning — clear
       [0.58, 0xfff2d8, 0.00], // day — clear
       [0.70, 0xffa64a, 0.15], // late afternoon — warming
-      [0.80, 0x6a4a8c, 0.30], // dusk — orange-purple
-      [0.88, 0x0a1430, 0.44], // night onset — deep navy (terrain stays ~0.6 visible)
-      [1.00, 0x0a1430, 0.46], // deep night
+      [0.80, 0x5a3f80, 0.36], // dusk — orange-purple (Audit FIX 7: darker)
+      [0.88, 0x060e24, 0.60], // night onset — deep navy (Audit FIX 7: noticeably darker)
+      [1.00, 0x060e24, 0.64], // deep night
     ];
     let a = KF[0], b = KF[KF.length - 1];
     for (let i = 0; i < KF.length - 1; i++) { if (phase >= KF[i][0] && phase <= KF[i + 1][0]) { a = KF[i]; b = KF[i + 1]; break; } }
@@ -2887,7 +2979,7 @@ export class IsometricScene extends GameScene {
     const s = this.seasonHint(this.gameDay);
     const map = {
       'Early Spring': [0x66ff88, 0.0], 'Late Spring': [0x66ff88, 0.0],
-      Summer: [0xffd070, 0.07], 'Early Autumn': [0xd07a20, 0.09], 'Late Autumn': [0xc06010, 0.11], Winter: [0x6f93c8, 0.12],
+      Summer: [0xffd070, 0.07], 'Early Autumn': [0xd07a20, 0.09], 'Late Autumn': [0xc06010, 0.11], Winter: [0xbcd6f0, 0.20], // (Audit FIX 7) stronger white-blue winter cast
     };
     const [col, a] = map[s] || [0x000000, 0];
     this.seasonOverlay.fillColor = col;
@@ -2906,11 +2998,12 @@ export class IsometricScene extends GameScene {
       g.fillStyle(0xbfd4ec, 1); g.fillRect(0, 0, 2, 10); g.generateTexture('wx_rain', 2, 10); g.destroy();
     }
     // Screen-fixed emitters above the world but below the HUD; both start idle.
+    // (Audit FIX 7) Denser, slightly larger snow for a clearly visible winter.
     this.snowEmitter = this.add.particles(0, 0, 'wx_snow', {
       x: { min: -20, max: GAME_W + 20 }, y: -12, lifespan: 6500,
       speedY: { min: 25, max: 55 }, speedX: { min: -18, max: 18 },
-      scale: { min: 0.45, max: 1.15 }, alpha: { start: 0.9, end: 0.5 },
-      quantity: 2, frequency: 95, maxParticles: 150,
+      scale: { min: 0.6, max: 1.5 }, alpha: { start: 0.95, end: 0.55 },
+      quantity: 3, frequency: 70, maxParticles: 250,
     }).setScrollFactor(0).setDepth(38);
     this.rainEmitter = this.add.particles(0, 0, 'wx_rain', {
       x: { min: -40, max: GAME_W + 120 }, y: -12, lifespan: 1500,
@@ -2935,7 +3028,7 @@ export class IsometricScene extends GameScene {
     this._weather = want;
     const fadeOut = (em) => { if (!em) return; this.tweens.add({ targets: em, alpha: 0, duration: 1200, onComplete: () => em.stop() }); };
     const fadeIn = (em) => { if (!em) return; em.start(); this.tweens.add({ targets: em, alpha: 1, duration: 1500 }); };
-    if (want === 'snow') { fadeOut(this.rainEmitter); fadeIn(this.snowEmitter); sfx.stopAmbient('rain'); sfx.startAmbient('wind', 'wind'); }
+    if (want === 'snow') { fadeOut(this.rainEmitter); fadeIn(this.snowEmitter); sfx.stopAmbient('rain'); sfx.startAmbient('wind', 'wind', 0.16); } // (Audit FIX 7) louder winter wind
     else if (want === 'rain') { fadeOut(this.snowEmitter); fadeIn(this.rainEmitter); sfx.stopAmbient('wind'); sfx.startAmbient('rain', 'rain'); }
     else { fadeOut(this.snowEmitter); fadeOut(this.rainEmitter); sfx.stopAmbient('wind'); sfx.stopAmbient('rain'); }
     this.updateSnowCaps(want === 'snow');
@@ -2947,7 +3040,8 @@ export class IsometricScene extends GameScene {
       if (!b.alive) continue;
       if (on && !b._snowCap) {
         const cy = b.y - (b.baseScale || 1) * 40;
-        const cap = this.add.ellipse(b.x, cy, (b.baseScale || 1) * 30, (b.baseScale || 1) * 11, 0xf4f8ff, 0.9).setDepth(4);
+        // (Audit FIX 7) Thicker, brighter roof snow stripe.
+        const cap = this.add.ellipse(b.x, cy, (b.baseScale || 1) * 34, (b.baseScale || 1) * 17, 0xffffff, 0.97).setDepth(4);
         cap.setData('owner', b);
         b._snowCap = cap;
       } else if (!on && b._snowCap) { b._snowCap.destroy(); b._snowCap = null; }
@@ -2991,7 +3085,10 @@ export class IsometricScene extends GameScene {
     g.clear();
     if (night > 0.02) {
       for (const s of this._stars) {
-        const tw = 0.6 + 0.4 * Math.sin(this.time.now * 0.004 + s.ph);
+        const tw = 0.7 + 0.3 * Math.sin(this.time.now * 0.004 + s.ph);
+        // (Audit FIX 7) faint halo + brighter core so stars read clearly.
+        g.fillStyle(0xbcd0ff, night * tw * 0.35);
+        g.fillCircle(s.x, s.y, s.r + 1.4);
         g.fillStyle(0xffffff, night * tw);
         g.fillCircle(s.x, s.y, s.r);
       }
@@ -3004,9 +3101,11 @@ export class IsometricScene extends GameScene {
       g.fillStyle(0xffe07a, sunA); g.fillCircle(sx, sy, 13);
     }
     if (night > 0.05) {
-      const mx = GAME_W * 0.5, my = 74;
-      g.fillStyle(0xeaf0ff, night); g.fillCircle(mx, my, 12);
-      g.fillStyle(this.atmosphereAt(phase).color, night); g.fillCircle(mx + 5, my - 3, 11); // carve crescent
+      // (Audit FIX 7) Larger, brighter moon with a soft halo.
+      const mx = GAME_W * 0.5, my = 78;
+      g.fillStyle(0xdfe8ff, night * 0.22); g.fillCircle(mx, my, 28); // halo
+      g.fillStyle(0xf2f6ff, night); g.fillCircle(mx, my, 16);
+      g.fillStyle(this.atmosphereAt(phase).color, night); g.fillCircle(mx + 6, my - 4, 14); // carve crescent
     }
   }
 
@@ -3038,10 +3137,11 @@ export class IsometricScene extends GameScene {
     b._torchY = b.y - (14 + (b.baseScale || 1) * 34) + 8; // a little below the building's top
     b._torchF = 0.9;
     const t = this.add.container(0, 0).setScrollFactor(0).setDepth(37).setVisible(false);
-    const glow = this.add.circle(0, 0, 13, 0xff7a1a, 0.6).setBlendMode(Phaser.BlendModes.ADD);
-    const glow2 = this.add.circle(0, 0, 7, 0xffc24a, 0.7).setBlendMode(Phaser.BlendModes.ADD);
-    const flame = this.add.ellipse(0, -2, 9, 15, 0xffb030);
-    const core = this.add.ellipse(0, -1, 4.5, 9, 0xfff0b0);
+    // (Audit FIX 7) Larger, brighter torch glow so night reads warmer.
+    const glow = this.add.circle(0, 0, 20, 0xff7a1a, 0.7).setBlendMode(Phaser.BlendModes.ADD);
+    const glow2 = this.add.circle(0, 0, 11, 0xffc24a, 0.85).setBlendMode(Phaser.BlendModes.ADD);
+    const flame = this.add.ellipse(0, -2, 11, 18, 0xffb030);
+    const core = this.add.ellipse(0, -1, 5.5, 11, 0xfff0b0);
     t.add([glow, glow2, flame, core]);
     b._torch = t;
   }
@@ -3055,6 +3155,7 @@ export class IsometricScene extends GameScene {
     if (this.worldEvents) this.worldEvents.onNewDay(); // (Expansion Phase 3) world events
     if (this.reputation) { this.reputation.onNewDay(); this.updateKingdomTitle(); } // (Phase 4)
     if (this.research) this.research.onNewDay(); // (Phase 5) research progress
+    if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
     // (Save system) Auto-save to slot 0 every N days.
     const freq = this._autoSaveEveryDays || 5;
     if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();

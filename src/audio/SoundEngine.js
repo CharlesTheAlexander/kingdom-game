@@ -157,11 +157,11 @@ class SoundEngine {
 
   // --- looping ambient beds (Phase 4 weather) ------------------------------
 
-  startAmbient(name, kind) {
+  startAmbient(name, kind, vol = 0.1) {
     if (!this.ctx || this._ambients[name]) return;
     const g = this.ctx.createGain();
     g.gain.value = 0;
-    g.gain.setTargetAtTime(0.1, this.ctx.currentTime, 2); // gentle fade-in
+    g.gain.setTargetAtTime(vol, this.ctx.currentTime, 2); // gentle fade-in (Audit FIX 7: per-ambient volume)
     g.connect(this.master);
     let node;
     if (kind === 'wind') {

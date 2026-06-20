@@ -236,8 +236,19 @@ export class BuildingManager {
     return { ok: true };
   }
 
-  place(typeKey, col, row) {
+  // (Audit FIX 8) Stage-gating is enforced here as well as in the build palette,
+  // so no caller (or future code path) can place a tier-locked building early.
+  // `opts.ignoreStage` lets save-load and the Scholar starting Library bypass it,
+  // since those are authoritative placements.
+  place(typeKey, col, row, opts = {}) {
     if (this.isOccupied(col, row)) return null;
+    const type = BuildingTypes[typeKey];
+    if (!opts.ignoreStage && type && type.stageUnlock && this.scene.currentStage && this.scene.currentStage() < type.stageUnlock) {
+      const reqTier = this.scene.TIERS && this.scene.TIERS.find((t) => t.stage >= type.stageUnlock);
+      const stageName = reqTier ? reqTier.name : `stage ${type.stageUnlock}`;
+      if (this.scene.showToast) this.scene.showToast(`${type.name} requires ${stageName}`);
+      return null;
+    }
     const b = new Building(this.scene, typeKey, col, row);
     this.grid[row][col] = b;
     this.buildings.push(b);
