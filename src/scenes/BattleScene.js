@@ -1,5 +1,19 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H } from './GameScene.js';
+import { registerUnitAnimations, playLoop, playOnce } from '../systems/Animations.js';
+import { sfx } from '../audio/SoundEngine.js';
+
+// (Polish Phase 1) idle texture -> { walk, attack } animation keys for battle units.
+const ANIM_SET = {
+  blue_warrior_idle: { run: 'blue_warrior_run', atk: 'blue_warrior_attack' },
+  warrior_idle: { run: 'red_warrior_run', atk: 'red_warrior_attack' },
+  yellow_warrior_idle: { run: 'yellow_warrior_run', atk: 'yellow_warrior_attack' },
+  purple_warrior_idle: { run: 'purple_warrior_run', atk: 'purple_warrior_attack' },
+  goblin_idle: { run: 'goblin_run', atk: 'goblin_attack' },
+  blue_archer_idle: { run: 'blue_archer_run', atk: 'blue_archer_shoot' },
+  red_archer_idle: { run: 'red_archer_idle', atk: 'red_archer_shoot' },
+  monk_idle: { run: 'monk_run', atk: null },
+};
 
 // BattleScene (Phase 1 + UI overhaul Phase 3) — a separate strategic battle
 // scene. IsometricScene launches it (paused underneath) when a combat involves
@@ -50,6 +64,8 @@ class BUnit {
     const px = type === 'knight' ? 64 : 56;
     this.shadow = scene.add.ellipse(x, y + 22, px * 0.5, px * 0.2, 0x000000, 0.28).setDepth(8);
     this.spr = scene.add.sprite(x, y, scene.textures.exists(tex) ? tex : 'blue_warrior_idle', 0).setScale(px / 192).setDepth(10);
+    // (Polish Phase 1) walk + attack animation states keyed off the idle texture.
+    this.anims = { idle: this.spr.texture.key, run: ANIM_SET[this.spr.texture.key] ? ANIM_SET[this.spr.texture.key].run : null, atk: ANIM_SET[this.spr.texture.key] ? ANIM_SET[this.spr.texture.key].atk : null };
     if (this.spr.texture.frameTotal > 1 && scene.anims.exists(this.spr.texture.key)) this.spr.play(this.spr.texture.key);
     this.spr.setFlipX(side === 'player'); // players (right) face left; enemies (left) face right
     this.hpW = 30;
@@ -68,6 +84,7 @@ class BUnit {
   die() {
     if (!this.alive) return;
     this.alive = false;
+    sfx.playThrottled(this.side === 'player' ? 'soldier_dies' : 'enemy_dies', 110); // (Polish Phase 2)
     this.scene.onUnitDeath(this);
     this.hpBg.destroy(); this.hpFill.destroy();
     this.scene.tweens.add({ targets: this.shadow, alpha: 0, duration: 500, onComplete: () => this.shadow.destroy() });
@@ -98,6 +115,7 @@ export class BattleScene extends Phaser.Scene {
     this.pal = TERRAIN[terrain] || TERRAIN.plains;
     this.faction = this.cfg.enemyFaction || 'red';
 
+    registerUnitAnimations(this); // (Polish Phase 1) ensure walk/attack/shoot anims exist
     this.drawBattlefield();
 
     this.units = [];
@@ -398,6 +416,7 @@ export class BattleScene extends Phaser.Scene {
 
   startBattle() {
     this.phase = 'battle';
+    sfx.play('battle_start'); // (Polish Phase 2)
     this.countdown.setScale(1);
     this.countdown.setText('');
     this.title.setText('BATTLE!');
@@ -427,7 +446,10 @@ export class BattleScene extends Phaser.Scene {
     // Monk: follow nearest injured friendly and heal.
     if (u.heal > 0) {
       const w = this.healTarget(u);
-      if (w) { if (Phaser.Math.Distance.Between(u.x, u.y, w.x, w.y) > 30) this.moveTo(u, w.x, w.y, u.speed * moraleMul, dt); else { w.hp = Math.min(w.maxHp, w.hp + u.heal * dt); w.hpFill.width = w.hpW * (w.hp / w.maxHp); } }
+      if (w) {
+        if (Phaser.Math.Distance.Between(u.x, u.y, w.x, w.y) > 30) { this.moveTo(u, w.x, w.y, u.speed * moraleMul, dt); playLoop(u.spr, u.anims.run || u.anims.idle); }
+        else { w.hp = Math.min(w.maxHp, w.hp + u.heal * dt); w.hpFill.width = w.hpW * (w.hp / w.maxHp); if (u.atkCd <= 0) { u.atkCd = 1; playOnce(u.spr, 'monk_heal', u.anims.idle); } else playLoop(u.spr, u.anims.idle); }
+      } else playLoop(u.spr, u.anims.idle);
       u.sync(); return;
     }
 
@@ -438,12 +460,19 @@ export class BattleScene extends Phaser.Scene {
           u.atkCd = 0.5;
           if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(u.dmg * 0.5); } }
           else foe.takeDamage(u.dmg * 0.5);
-          if (u.range > 0) this.projectile(u.x, u.y, foe.x, foe.y);
+          if (u.range > 0) { this.projectile(u.x, u.y, foe.x, foe.y); sfx.playThrottled('arrow_shoot', 120); }
+          else sfx.playThrottled('sword_hit', 130);
+          playOnce(u.spr, u.anims.atk, u.anims.idle); // (Polish Phase 1) swing / shoot
+        } else {
+          playLoop(u.spr, u.anims.idle);
         }
       }
     } else if (u.cmd !== 'hold' && !u.hold) {
       // Knights/tanks draw aggro is implicit (they advance and intercept by being front).
       this.moveTo(u, foe.x, foe.y, u.speed * moraleMul, dt);
+      playLoop(u.spr, u.anims.run || u.anims.idle);
+    } else {
+      playLoop(u.spr, u.anims.idle);
     }
     u.sync();
   }
@@ -485,6 +514,7 @@ export class BattleScene extends Phaser.Scene {
     this.cmdBtns.forEach((b) => b.hide());
     const victory = kind === 'victory' || kind === 'rout_enemy';
     const retreated = kind === 'retreat';
+    sfx.play(victory ? 'victory' : 'defeat'); // (Polish Phase 2)
     // Survivors by type.
     const survivors = {};
     let keepFrac = victory ? 1 : retreated ? 0.6 : 0.4;

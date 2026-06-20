@@ -68,6 +68,8 @@ import { GoblinCampManager } from '../systems/GoblinCamps.js';
 import { Diplomacy } from '../systems/Diplomacy.js';
 import { Caravans } from '../systems/Caravans.js';
 import { findPath } from '../systems/Pathfinding.js';
+import { registerUnitAnimations } from '../systems/Animations.js';
+import { sfx } from '../audio/SoundEngine.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -87,6 +89,15 @@ const TERRAIN_DEPTH = -10;
 const TOP_BAR = 50;      // screen-space HUD band (matches GameScene)
 const PANEL_H = 130;
 const DAY_MS = 300000;   // one game day = 5 real minutes (scaled by game speed)
+
+// (Polish Phase 5) Compact a resource value so it never clips its HUD chip:
+// up to 9999 shown in full, 10k–99.9k as "12.3k", 100k+ as "123k".
+export function fmtNum(n) {
+  n = Math.floor(n || 0);
+  if (n >= 100000) return Math.round(n / 1000) + 'k';
+  if (n >= 10000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return '' + n;
+}
 
 export class IsometricScene extends GameScene {
   constructor() {
@@ -180,6 +191,22 @@ export class IsometricScene extends GameScene {
     this.load.spritesheet('blue_archer_idle', `${UNITS}/Blue Units/Archer/Archer_Idle.png`, { frameWidth: 192, frameHeight: 192 });
     this.load.spritesheet('monk_idle', `${UNITS}/Blue Units/Monk/Idle.png`, { frameWidth: 192, frameHeight: 192 });
     this.load.spritesheet('heal_effect', `${UNITS}/Blue Units/Monk/Heal_Effect.png`, { frameWidth: 192, frameHeight: 192 });
+
+    // --- (Polish Phase 1) Extra animation frames: attack / shoot / heal / tool work ---
+    this.load.spritesheet('blue_warrior_attack', `${UNITS}/Blue Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('red_warrior_attack', `${UNITS}/Red Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('yellow_warrior_attack', `${UNITS}/Yellow Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('purple_warrior_attack', `${UNITS}/Purple Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('goblin_attack', `${UNITS}/Black Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('blue_archer_run', `${UNITS}/Blue Units/Archer/Archer_Run.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('blue_archer_shoot', `${UNITS}/Blue Units/Archer/Archer_Shoot.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('red_archer_shoot', `${UNITS}/Red Units/Archer/Archer_Shoot.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('monk_run', `${UNITS}/Blue Units/Monk/Run.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('monk_heal', `${UNITS}/Blue Units/Monk/Heal.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('pawn_run_axe', `${UNITS}/Blue Units/Pawn/Pawn_Run Axe.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('pawn_run_pickaxe', `${UNITS}/Blue Units/Pawn/Pawn_Run Pickaxe.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('pawn_interact_axe', `${UNITS}/Blue Units/Pawn/Pawn_Interact Axe.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('pawn_interact_pickaxe', `${UNITS}/Blue Units/Pawn/Pawn_Interact Pickaxe.png`, { frameWidth: 192, frameHeight: 192 });
 
     // --- Particle FX ---
     this.load.spritesheet('explosion', `${FX}/Explosion_01.png`, { frameWidth: 192, frameHeight: 192 });
@@ -286,6 +313,7 @@ export class IsometricScene extends GameScene {
     this.makeSkyGrade();
     this.makeVignette();
     this.createDayNightOverlay();
+    this.createWeather(); // (Polish Phase 4) snow / rain particles
 
     this.buildings.place('castle', Math.floor(N / 2), Math.floor(N / 2));
     this.decorateBuilding(this.buildings.castle);
@@ -317,9 +345,15 @@ export class IsometricScene extends GameScene {
     this.setupCamera();
     this.createMinimap();
     this.createKingdomsButton(); // Phase 6: open the kingdom status panel
+    this.sfx = sfx; // expose for debugging / systems
+    this.createSoundControl(); // (Polish Phase 2) master volume / mute
+    // Browsers start the audio context suspended; unlock on the first gesture.
+    this.input.once('pointerdown', () => sfx.unlock());
+    this.input.keyboard.once('keydown', () => sfx.unlock());
     this.wildlife.spawnInitial(); // Phase 2: wildlife present from day 1
     this.createNPCs(); // Phase 8: decorative villagers
     this.refreshPanel();
+    this.updateWeather(); // (Polish Phase 4) apply weather for the starting season
 
     if (this._startZoom) this.cameras.main.setZoom(Phaser.Math.Clamp(this._startZoom, 0.3, 2));
     if (!this._noIntro) this.showWelcomePanel();
@@ -409,6 +443,7 @@ export class IsometricScene extends GameScene {
   // format already used (idle = 8 frames, run = 6 frames).
   createAnimations() {
     super.createAnimations();
+    registerUnitAnimations(this); // (Polish Phase 1) attack / shoot / heal / tool anims
     const mk = (key, end, rate) => {
       if (this.anims.exists(key)) return;
       this.anims.create({ key, frames: this.anims.generateFrameNumbers(key, { start: 0, end }), frameRate: rate, repeat: -1 });
@@ -846,11 +881,13 @@ export class IsometricScene extends GameScene {
     if (b) {
       this.decorateBuilding(b);
       this.placeFX(b);
+      sfx.play('building_placed'); // (Polish Phase 2)
       this.territoryPulse(); // (Phase 8) always pulse so placement is felt
       if (typeKey === 'watchtower') this.revealAround(b.col, b.row, def.revealRadius || 8);
       if (this.territory) this.territory.recompute();
       this.placementType = null; // (Phase 5) auto-exit placement mode after placing
       this.clearGhost();
+      if (this._weather === 'snow') this.updateSnowCaps(true); // (Phase 4) snow-cap new winter builds
       this.time.delayedCall(450, () => this.showTutorial(2)); // Phase 2: stage 2 after first building
     }
     this.refreshPanel();
@@ -962,8 +999,43 @@ export class IsometricScene extends GameScene {
       }
     });
     this.input.on('wheel', (p, over, dx, dy) => {
+      if (this._overSound) return; // (Polish Phase 2) scroll over the speaker adjusts volume, not zoom
       cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.3, 2));
     });
+  }
+
+  // (Polish Phase 2) Top-right speaker control: click to mute, scroll to set volume.
+  createSoundControl() {
+    const fix = (o) => o.setScrollFactor(0);
+    const x = GAME_W - 92, y = 60, w = 84, h = 22;
+    const bg = fix(this.add.rectangle(x, y, w, h, 0x10141c, 0.85).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
+    const g = fix(this.add.graphics().setDepth(61));
+    this._soundUI = { bg, g, x, y, w, h };
+    this.drawSoundControl();
+    bg.on('pointerover', () => { this._overSound = true; });
+    bg.on('pointerout', () => { this._overSound = false; });
+    bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.unlock(); sfx.toggleMute(); this.drawSoundControl(); });
+    bg.on('wheel', (p, dx, dy) => { sfx.unlock(); sfx.setVolume(sfx.volume - Math.sign(dy) * 0.1); if (sfx.muted && sfx.volume > 0) sfx.toggleMute(); this.drawSoundControl(); });
+  }
+
+  drawSoundControl() {
+    const u = this._soundUI; if (!u) return;
+    const g = u.g; g.clear();
+    const ix = u.x + 12, iy = u.y + u.h / 2;
+    // Speaker body (drawn).
+    g.fillStyle(0xdfe6ee, 1);
+    g.fillRect(ix - 8, iy - 4, 4, 8);
+    g.beginPath(); g.moveTo(ix - 4, iy - 4); g.lineTo(ix + 2, iy - 9); g.lineTo(ix + 2, iy + 9); g.lineTo(ix - 4, iy + 4); g.closePath(); g.fillPath();
+    if (sfx.muted || sfx.volume <= 0) {
+      g.lineStyle(2, 0xff6b6b, 1); g.beginPath(); g.moveTo(ix + 6, iy - 6); g.lineTo(ix + 14, iy + 6); g.strokePath(); g.beginPath(); g.moveTo(ix + 14, iy - 6); g.lineTo(ix + 6, iy + 6); g.strokePath();
+    } else {
+      // Volume bars (5 segments fill by volume).
+      const segs = 5, fillN = Math.round(sfx.volume * segs);
+      for (let i = 0; i < segs; i++) {
+        g.fillStyle(i < fillN ? 0x6ad0ff : 0x39455a, 1);
+        g.fillRect(u.x + 30 + i * 9, iy - 1 - i, 6, 3 + i * 2);
+      }
+    }
   }
 
   // ---- Input (left-click place / box-select; covers the whole iso world) ---
@@ -1090,6 +1162,7 @@ export class IsometricScene extends GameScene {
     const next = this.TIERS[this.tierIndex + 1];
     if (!this.resources.spend(next.cost)) return;
     this.tierIndex += 1;
+    sfx.play('tier_upgrade'); // (Polish Phase 2)
 
     const castle = this.buildings.castle;
     if (castle) {
@@ -1238,6 +1311,7 @@ export class IsometricScene extends GameScene {
   spawnArrow(x1, y1, x2, y2) {
     const arrow = this.add.rectangle(x1, y1, 8, 3, 0xffe066).setDepth(30).setRotation(Math.atan2(y2 - y1, x2 - x1));
     this.tweens.add({ targets: arrow, x: x2, y: y2, duration: 220, onComplete: () => arrow.destroy() });
+    sfx.playThrottled('arrow_shoot', 90); // (Polish Phase 2)
   }
 
   placeFX(b) {
@@ -1384,7 +1458,7 @@ export class IsometricScene extends GameScene {
     this._chipPrev = this._chipPrev || {};
     const set = (key, val) => {
       const ch = this.chips[key]; if (!ch) return;
-      ch.value.setText(`${val}`);
+      ch.value.setText(fmtNum(val)); // (Polish Phase 5) abbreviate big numbers so they don't clip
       const prev = this._chipPrev[key];
       if (prev !== undefined && Math.abs(val - prev) >= 2 && !ch._crit) {
         ch.bg.setFillStyle(val > prev ? 0x1e3a24 : 0x3a1e22, 0.95);
@@ -1658,6 +1732,7 @@ export class IsometricScene extends GameScene {
   // Wave banner when any kingdom launches an attack — always shows immediately
   // (priority), jumping ahead of any wildlife-spawn warnings in the queue.
   onKingdomAttack(kingdom) {
+    sfx.play('enemy_attack_warning'); // (Polish Phase 2) war horn
     this.threatWarning(`${kingdom.cfg.name} is attacking!`, kingdom.cfg.color, true);
     const wt = this.hud && this.hud.wave;
     if (wt) { const x0 = wt.x; this.tweens.add({ targets: wt, x: x0 + 5, yoyo: true, repeat: 5, duration: 45, onComplete: () => (wt.x = x0) }); }
@@ -1775,6 +1850,7 @@ export class IsometricScene extends GameScene {
   }
 
   onTabClick(mode) {
+    sfx.play('ui_click'); // (Polish Phase 2)
     this.selectedBuilding = null; this.clearSelection(); this.placementType = null; this.clearGhost(); this.hideTip();
     if (mode === 'caravans' && !(this.caravans && this.caravans.sites().length >= 2)) { this.showToast('Conquer a settlement first (need 2+ sites)'); return; }
     this.panelMode = mode;
@@ -1882,6 +1958,7 @@ export class IsometricScene extends GameScene {
   // Spread units around the target; carry the target castle for attack orders.
   commandUnits(tx, ty, attackAI, castle) {
     const n = this.selectedUnits.length;
+    if (n > 0) sfx.play('unit_command'); // (Polish Phase 2)
     this.selectedUnits.forEach((u, i) => {
       let ox = 0, oy = 0;
       if (n > 1) {
@@ -1900,7 +1977,30 @@ export class IsometricScene extends GameScene {
     this.dnOverlay = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x0a1430, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(35);
     // (Phase 8) Subtle seasonal cast over the world (below the night overlay).
     this.seasonOverlay = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(34);
+    // (Polish Phase 3) Sky bodies — stars, sun, moon — drawn above the overlay.
+    this._stars = [];
+    for (let i = 0; i < 24; i++) this._stars.push({ x: Phaser.Math.Between(16, GAME_W - 16), y: Phaser.Math.Between(58, Math.round(GAME_H * 0.42)), r: Phaser.Math.FloatBetween(0.7, 1.8), ph: Math.random() * 6.28 });
+    this.skyG = this.add.graphics().setScrollFactor(0).setDepth(36);
     this.updateSeason();
+  }
+
+  // (Polish Phase 3) Smooth atmosphere colour + darkness across the full day:
+  // dawn (warm) → day (clear) → dusk (orange-purple) → night (deep navy).
+  atmosphereAt(phase) {
+    const KF = [
+      [0.00, 0xff8a4a, 0.32], // dawn — warm orange-pink
+      [0.10, 0xfff2d8, 0.00], // morning — clear
+      [0.58, 0xfff2d8, 0.00], // day — clear
+      [0.70, 0xffa64a, 0.15], // late afternoon — warming
+      [0.80, 0x6a4a8c, 0.30], // dusk — orange-purple
+      [0.88, 0x0a1430, 0.44], // night onset — deep navy (terrain stays ~0.6 visible)
+      [1.00, 0x0a1430, 0.46], // deep night
+    ];
+    let a = KF[0], b = KF[KF.length - 1];
+    for (let i = 0; i < KF.length - 1; i++) { if (phase >= KF[i][0] && phase <= KF[i + 1][0]) { a = KF[i]; b = KF[i + 1]; break; } }
+    const t = (phase - a[0]) / Math.max(1e-6, b[0] - a[0]);
+    const c = Phaser.Display.Color.Interpolate.ColorWithColor(Phaser.Display.Color.IntegerToColor(a[1]), Phaser.Display.Color.IntegerToColor(b[1]), 100, Math.round(t * 100));
+    return { color: Phaser.Display.Color.GetColor(c.r, c.g, c.b), alpha: a[2] + (b[2] - a[2]) * t };
   }
 
   // (Phase 8) Seasonal terrain tint: spring (none), summer (warm), autumn
@@ -1915,6 +2015,66 @@ export class IsometricScene extends GameScene {
     const [col, a] = map[s] || [0x000000, 0];
     this.seasonOverlay.fillColor = col;
     this.tweens.add({ targets: this.seasonOverlay, alpha: a, duration: 800 });
+  }
+
+  // ---- (Polish Phase 4) Seasonal weather: snow in Winter, rain in Spring/Autumn
+
+  createWeather() {
+    if (!this.textures.exists('wx_snow')) {
+      const g = this.make.graphics({ x: 0, y: 0, add: false });
+      g.fillStyle(0xffffff, 1); g.fillCircle(4, 4, 3); g.generateTexture('wx_snow', 8, 8); g.destroy();
+    }
+    if (!this.textures.exists('wx_rain')) {
+      const g = this.make.graphics({ x: 0, y: 0, add: false });
+      g.fillStyle(0xbfd4ec, 1); g.fillRect(0, 0, 2, 10); g.generateTexture('wx_rain', 2, 10); g.destroy();
+    }
+    // Screen-fixed emitters above the world but below the HUD; both start idle.
+    this.snowEmitter = this.add.particles(0, 0, 'wx_snow', {
+      x: { min: -20, max: GAME_W + 20 }, y: -12, lifespan: 6500,
+      speedY: { min: 25, max: 55 }, speedX: { min: -18, max: 18 },
+      scale: { min: 0.45, max: 1.15 }, alpha: { start: 0.9, end: 0.5 },
+      quantity: 2, frequency: 95, maxParticles: 150,
+    }).setScrollFactor(0).setDepth(38);
+    this.rainEmitter = this.add.particles(0, 0, 'wx_rain', {
+      x: { min: -40, max: GAME_W + 120 }, y: -12, lifespan: 1500,
+      speedY: { min: 380, max: 470 }, speedX: { min: -130, max: -90 },
+      scale: { min: 0.7, max: 1.0 }, alpha: { start: 0.5, end: 0.18 }, rotate: -16,
+      quantity: 3, frequency: 35, maxParticles: 200,
+    }).setScrollFactor(0).setDepth(38);
+    this.snowEmitter.stop(); this.rainEmitter.stop();
+    this.snowEmitter.setAlpha(0); this.rainEmitter.setAlpha(0);
+    this._weather = 'clear';
+  }
+
+  weatherForSeason(season) {
+    if (season === 'Winter') return 'snow';
+    if (season.indexOf('Spring') >= 0 || season.indexOf('Autumn') >= 0) return 'rain';
+    return 'clear';
+  }
+
+  updateWeather() {
+    const want = this.weatherForSeason(this.seasonHint(this.gameDay));
+    if (want === this._weather) return;
+    this._weather = want;
+    const fadeOut = (em) => { if (!em) return; this.tweens.add({ targets: em, alpha: 0, duration: 1200, onComplete: () => em.stop() }); };
+    const fadeIn = (em) => { if (!em) return; em.start(); this.tweens.add({ targets: em, alpha: 1, duration: 1500 }); };
+    if (want === 'snow') { fadeOut(this.rainEmitter); fadeIn(this.snowEmitter); sfx.stopAmbient('rain'); sfx.startAmbient('wind', 'wind'); }
+    else if (want === 'rain') { fadeOut(this.snowEmitter); fadeIn(this.rainEmitter); sfx.stopAmbient('wind'); sfx.startAmbient('rain', 'rain'); }
+    else { fadeOut(this.snowEmitter); fadeOut(this.rainEmitter); sfx.stopAmbient('wind'); sfx.stopAmbient('rain'); }
+    this.updateSnowCaps(want === 'snow');
+  }
+
+  // White snow caps on building roofs during Winter (visual accumulation).
+  updateSnowCaps(on) {
+    for (const b of this.buildings.buildings) {
+      if (!b.alive) continue;
+      if (on && !b._snowCap) {
+        const cy = b.y - (b.baseScale || 1) * 40;
+        const cap = this.add.ellipse(b.x, cy, (b.baseScale || 1) * 30, (b.baseScale || 1) * 11, 0xf4f8ff, 0.9).setDepth(4);
+        cap.setData('owner', b);
+        b._snowCap = cap;
+      } else if (!on && b._snowCap) { b._snowCap.destroy(); b._snowCap = null; }
+    }
   }
 
   createDayCounter() {
@@ -1935,16 +2095,81 @@ export class IsometricScene extends GameScene {
       this.onNewDay(eat);
     }
     const phase = this.dayTimer / DAY_MS;
-    const bright = Math.sin(Math.PI * Phaser.Math.Clamp(phase, 0, 1)); // 1 at noon, 0 at dawn/dusk
-    const dark = 1 - bright;
-    if (this.dnOverlay) {
-      this.dnOverlay.setAlpha(dark * 0.5);
-      this.dnOverlay.fillColor = dark > 0.55 ? 0x0a1430 : 0x241a2e;
-    }
+    const atmo = this.atmosphereAt(phase);
+    if (this.dnOverlay) { this.dnOverlay.fillColor = atmo.color; this.dnOverlay.setAlpha(atmo.alpha); }
+    // Night-ness (stars/moon) spans dusk→dawn; torch-ness starts a little earlier.
+    let night = phase >= 0.85 ? (phase - 0.85) / 0.10 : phase < 0.08 ? 1 - phase / 0.08 : 0;
+    let torch = phase >= 0.78 ? (phase - 0.78) / 0.07 : phase < 0.10 ? 1 - phase / 0.10 : 0;
+    night = Phaser.Math.Clamp(night, 0, 1);
+    torch = Phaser.Math.Clamp(torch, 0, 1);
+    this._nightness = night;
+    this.drawSkyBodies(phase, night);
+    this.updateTorches(torch, gdelta);
     if (this.hud && this.hud.day) this.hud.day.setText(`Day ${this.gameDay}`);
   }
 
+  // Stars (twinkling), an arcing sun (east→west by day), and a night moon.
+  drawSkyBodies(phase, night) {
+    const g = this.skyG; if (!g) return;
+    g.clear();
+    if (night > 0.02) {
+      for (const s of this._stars) {
+        const tw = 0.6 + 0.4 * Math.sin(this.time.now * 0.004 + s.ph);
+        g.fillStyle(0xffffff, night * tw);
+        g.fillCircle(s.x, s.y, s.r);
+      }
+    }
+    const sunA = Phaser.Math.Clamp(1 - night * 1.4, 0, 1);
+    if (sunA > 0.02 && phase < 0.86) {
+      const p = Phaser.Math.Clamp(phase / 0.85, 0, 1);
+      const sx = GAME_W * (0.92 - p * 0.84), sy = 120 - Math.sin(Math.PI * p) * 72;
+      g.fillStyle(0xfff3c0, sunA * 0.4); g.fillCircle(sx, sy, 20);
+      g.fillStyle(0xffe07a, sunA); g.fillCircle(sx, sy, 13);
+    }
+    if (night > 0.05) {
+      const mx = GAME_W * 0.5, my = 74;
+      g.fillStyle(0xeaf0ff, night); g.fillCircle(mx, my, 12);
+      g.fillStyle(this.atmosphereAt(phase).color, night); g.fillCircle(mx + 5, my - 3, 11); // carve crescent
+    }
+  }
+
+  // (Polish Phase 3) Per-building torches: invisible by day, flickering warm at
+  // night. Rendered screen-fixed ABOVE the night overlay (projected from the
+  // building's world position) so they actually glow instead of being darkened.
+  updateTorches(torch, gdelta) {
+    this._torchFlick = (this._torchFlick || 0) + gdelta;
+    const flick = this._torchFlick > 90;
+    if (flick) this._torchFlick = 0;
+    const cam = this.cameras.main;
+    for (const b of this.buildings.buildings) {
+      if (!b.alive) continue;
+      if (!b._torch && torch > 0.01) this.addTorch(b);
+      if (!b._torch) continue;
+      if (torch <= 0.01) { b._torch.setVisible(false); continue; }
+      const sx = (b.x - cam.scrollX) * cam.zoom;
+      const sy = (b._torchY - cam.scrollY) * cam.zoom;
+      const on = sx > -20 && sx < GAME_W + 20 && sy > -20 && sy < GAME_H + 20;
+      if (flick) b._torchF = Phaser.Math.FloatBetween(0.75, 1.0);
+      b._torch.setVisible(on).setPosition(sx, sy).setScale(cam.zoom).setAlpha(torch * (b._torchF || 0.9));
+    }
+  }
+
+  addTorch(b) {
+    b._torchY = b.y - (14 + (b.baseScale || 1) * 34) + 8; // a little below the building's top
+    b._torchF = 0.9;
+    const t = this.add.container(0, 0).setScrollFactor(0).setDepth(37).setVisible(false);
+    const glow = this.add.circle(0, 0, 13, 0xff7a1a, 0.6).setBlendMode(Phaser.BlendModes.ADD);
+    const glow2 = this.add.circle(0, 0, 7, 0xffc24a, 0.7).setBlendMode(Phaser.BlendModes.ADD);
+    const flame = this.add.ellipse(0, -2, 9, 15, 0xffb030);
+    const core = this.add.ellipse(0, -1, 4.5, 9, 0xfff0b0);
+    t.add([glow, glow2, flame, core]);
+    b._torch = t;
+  }
+
   onNewDay(eat) {
+    sfx.play('day_start'); // (Polish Phase 2) dawn bell
+    this.updateSeason();
+    this.updateWeather(); // (Polish Phase 4) switch snow/rain on season change
     const c = this.buildings.castle;
     // (Phase 5) Artifact daily yields: Farmer's Almanac (+food/farm),
     // Miner's Compass (+stone/mine).
@@ -2074,6 +2299,7 @@ export class IsometricScene extends GameScene {
         finished = true;
       }
       if (finished) {
+        sfx.play('unit_trained'); // (Polish Phase 2)
         b.slots = b.slots.filter((s) => s.timeLeft > 0);
         if (this.selectedBuilding === b) this.refreshPanel();
       }
@@ -2081,6 +2307,8 @@ export class IsometricScene extends GameScene {
 
     for (const b of this.buildings.buildings) {
       if (!b.alive && b._floatIcon) { b._floatIcon.destroy(); b._floatIcon = null; this.hideBuildingName(b); } // (Phase 6) clean up icons of dying buildings
+      if (!b.alive && b._torch) { b._torch.destroy(); b._torch = null; } // (Phase 3) clean up torches
+      if (!b.alive && b._snowCap) { b._snowCap.destroy(); b._snowCap = null; } // (Phase 4) clean up snow caps
     }
     if (this.buildings.reap()) {
       if (this.selectedBuilding && !this.selectedBuilding.alive) {

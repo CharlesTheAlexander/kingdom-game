@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import { playLoop } from './Animations.js';
+import { sfx } from '../audio/SoundEngine.js';
 
 // Visual worker pawns (Phase 2 manual-allocation rewrite).
 // Each pawn is either ASSIGNED to a building (matching that building's allocated
@@ -9,19 +11,20 @@ import Phaser from 'phaser';
 
 const SCALE = 32 / 192;
 
-// produces-type -> { node type to harvest, sprite to carry it home with }
+// produces-type -> { node to harvest, walk-out anim (tool), interact anim, carry-home anim }
+// (Polish Phase 1) tool matches the resource: axe=wood, pickaxe=stone, meat=food.
 const GATHER = {
-  wood: { node: 'wood', carry: 'pawn_run_wood' },
-  stone: { node: 'stone', carry: 'pawn_run_gold' }, // no "carry stone" art; gold stand-in
-  food: { node: 'food', carry: 'pawn_run_meat' },
+  wood: { node: 'wood', walk: 'pawn_run_axe', interact: 'pawn_interact_axe', carry: 'pawn_run_wood' },
+  stone: { node: 'stone', walk: 'pawn_run_pickaxe', interact: 'pawn_interact_pickaxe', carry: 'pawn_run_gold' }, // no "carry stone" art; gold stand-in
+  food: { node: 'food', walk: 'pawn_run_meat', interact: 'pawn_idle', carry: 'pawn_run_meat' },
 };
 
 // (FIX 1) Idle/freelance gathering yields per trip, by node type. Gold nodes are
 // excluded — gold comes from the Castle/expeditions, not freelancers.
 const FREELANCE = {
-  wood: { carry: 'pawn_run_wood', res: 'wood', amt: 3 },
-  stone: { carry: 'pawn_run_gold', res: 'stone', amt: 2 },
-  food: { carry: 'pawn_run_meat', res: 'food', amt: 4 },
+  wood: { carry: 'pawn_run_wood', res: 'wood', amt: 3, walk: 'pawn_run_axe', interact: 'pawn_interact_axe' },
+  stone: { carry: 'pawn_run_gold', res: 'stone', amt: 2, walk: 'pawn_run_pickaxe', interact: 'pawn_interact_pickaxe' },
+  food: { carry: 'pawn_run_meat', res: 'food', amt: 4, walk: 'pawn_run_meat', interact: 'pawn_idle' },
 };
 const FREELANCE_TYPES = ['wood', 'stone', 'food'];
 
@@ -46,6 +49,8 @@ class Pawn {
     this.workTimer = 0;
     this.targetNode = null;
     this.carryAnim = 'pawn_run_wood';
+    this.walkAnim = 'pawn_run'; // (Polish Phase 1) tool-matched walk to node
+    this.interactAnim = 'pawn_idle'; // gather pose at the node
     this.carryRes = null;
     this.freelance = false; // (FIX 1) idle worker gathering on its own
     this.freelanceAmt = 0;
@@ -53,11 +58,7 @@ class Pawn {
     this.pickNewGoal();
   }
 
-  play(key) {
-    if (this.curAnim === key) return;
-    this.curAnim = key;
-    if (this.scene.anims.exists(key)) this.spr.play(key);
-  }
+  play(key) { playLoop(this.spr, key); }
 
   setMove(tx, ty, dur, anim) {
     this.sx = this.x;
@@ -87,8 +88,10 @@ class Pawn {
         // Gathering building → walk out to the resource node.
         this.targetNode = node;
         this.carryAnim = g.carry;
+        this.walkAnim = g.walk;
+        this.interactAnim = g.interact;
         this.carryRes = b.type.produces;
-        this.setMove(node.x, node.y, 3 + Math.random(), 'pawn_run');
+        this.setMove(node.x, node.y, 3 + Math.random(), g.walk);
         this.state = 'toNode';
         return;
       }
@@ -108,9 +111,11 @@ class Pawn {
       this.freelance = true;
       this.targetNode = node;
       this.carryAnim = m.carry;
+      this.walkAnim = m.walk;
+      this.interactAnim = m.interact;
       this.carryRes = m.res;
       this.freelanceAmt = m.amt;
-      this.setMove(node.x, node.y, 3 + Math.random(), 'pawn_run');
+      this.setMove(node.x, node.y, 3 + Math.random(), m.walk);
       this.state = 'toNode';
       return;
     }
@@ -147,7 +152,7 @@ class Pawn {
           this.targetNode.harvest();
           this.state = 'gathering';
           this.workTimer = this.freelance ? 3 : 1.2; // (FIX 1) freelancers gather 3s
-          this.play('pawn_idle');
+          this.play(this.interactAnim); // (Polish Phase 1) chop/mine pose at the node
         } else {
           this.pickNewGoal();
         }
@@ -163,6 +168,7 @@ class Pawn {
             this.scene.floatText(this.homeX + Phaser.Math.Between(-14, 14), this.homeY - 26, `+2 ${label}`, '#aee9ff');
           }
           this.scene.tweens.add({ targets: this.spr, scaleX: SCALE * 1.25, scaleY: SCALE * 0.8, yoyo: true, duration: 120 });
+          sfx.playThrottled('resource_collected', 140); // (Polish Phase 2)
         }
         this.pickNewGoal();
       }

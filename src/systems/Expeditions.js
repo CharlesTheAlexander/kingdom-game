@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { sfx } from '../audio/SoundEngine.js';
 
 // Expedition system (Phase 5 redesign + FIX 3/6). Workers gather the BASIC
 // resources; expeditions only ever return SPECIAL rewards — Iron, Artifacts,
@@ -16,9 +17,10 @@ import Phaser from 'phaser';
 const SEC_PER_DAY = 300; // matches IsometricScene DAY_MS (300000ms)
 
 const DEFS = {
-  scout: { name: 'Scouting Party', cost: 2, days: 0.5, maxSlots: 2, reward: 'Reveal enemy army · maybe an Artifact' },
-  raid: { name: 'Raid Enemy Camp', cost: 5, days: 1, maxSlots: 2, reward: '20-40 Iron · maybe a Mercenary · 30% lose 1' },
-  campaign: { name: 'Major Campaign', cost: 10, days: 2, maxSlots: 1, reward: '40-80 Iron · Artifact · maybe a Scroll · 50% lose 2-3' },
+  // (Polish Phase 5) reward strings kept short so they fit the expedition card.
+  scout: { name: 'Scouting Party', cost: 2, days: 0.5, maxSlots: 2, reward: 'Reveal enemy army · maybe Artifact' },
+  raid: { name: 'Raid Enemy Camp', cost: 5, days: 1, maxSlots: 2, reward: '20-40 Iron · Mercenary? · 30% loss' },
+  campaign: { name: 'Major Campaign', cost: 10, days: 2, maxSlots: 1, reward: '40-80 Iron · Artifact · Scroll · risky' },
 };
 
 const WSCALE = 36 / 192;
@@ -72,6 +74,7 @@ export class ExpeditionManager {
 
   resolve(key) {
     const def = this.defs[key];
+    sfx.play('expedition_return'); // (Polish Phase 2)
 
     let losses = 0;
     if (key === 'raid' && Math.random() < 0.3) losses = 1;

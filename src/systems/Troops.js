@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import { playLoop, playOnce } from './Animations.js';
+import { sfx } from '../audio/SoundEngine.js';
 
 // Blue warrior troops (Phase 4). Trained at the Barracks; they idle in a loose
 // cluster near their barracks and automatically engage incoming enemies. The
@@ -68,6 +70,7 @@ class Warrior {
     this.knight = !!opts.knight;
     this.idleAnim = opts.idle || 'blue_warrior_idle';
     this.runAnim = opts.run || 'blue_warrior_run';
+    this.atkAnim = opts.attack || 'blue_warrior_attack'; // (Polish Phase 1) melee swing
     // (Phase 4) small idle offset so warriors don't rest on exact coordinates.
     this.idleOX = Phaser.Math.Between(-4, 4);
     this.idleOY = Phaser.Math.Between(-4, 4);
@@ -80,11 +83,7 @@ class Warrior {
     }
   }
 
-  play(key) {
-    if (this.curAnim === key) return;
-    this.curAnim = key;
-    if (this.scene.anims.exists(key)) this.spr.play(key);
-  }
+  play(key) { playLoop(this.spr, key); }
 
   update(dt, enemies) {
     if (!this.alive) return;
@@ -108,7 +107,10 @@ class Warrior {
         this.spr.setFlipX(this.target.x < this.x); // (Phase 5) face the enemy
         const dmgMul = this.scene.buffs ? this.scene.buffs.warriorDamage : 1; // Whetstone artifact
         this.target.takeDamage(this.dps * dt * dmgMul);
-        this.play(this.idleAnim);
+        // (Polish Phase 1) swing the sword on a cadence, idle between swings.
+        this._atkCd = (this._atkCd || 0) - dt;
+        if (this._atkCd <= 0) { this._atkCd = 0.7; playOnce(this.spr, this.atkAnim, this.idleAnim); sfx.playThrottled('sword_hit', 130); }
+        else this.play(this.idleAnim);
       }
     } else {
       // No enemies: drift back toward the (slightly offset) home point and idle.
@@ -141,6 +143,7 @@ class Warrior {
 
   die() {
     this.alive = false;
+    sfx.playThrottled('soldier_dies', 120); // (Polish Phase 2)
     if (this.scene.dustAt) this.scene.dustAt(this.x, this.y); // Phase 5 death FX
     this.spr.destroy();
     if (this.label) this.label.destroy();
@@ -186,11 +189,7 @@ class Archer {
     if (scene.anims.exists('blue_archer_idle')) this.spr.play('blue_archer_idle');
   }
 
-  play(key) {
-    if (this.curAnim === key) return;
-    this.curAnim = key;
-    if (this.scene.anims.exists(key)) this.spr.play(key);
-  }
+  play(key) { playLoop(this.spr, key); }
 
   sync() {
     this.spr.x = this.x;
@@ -199,7 +198,7 @@ class Archer {
 
   update(dt, enemies) {
     if (!this.alive) return;
-    if (runCommand(this, dt, 60, 'blue_archer_idle', 'blue_archer_idle')) return;
+    if (runCommand(this, dt, 60, 'blue_archer_run', 'blue_archer_idle')) return;
     let best = null;
     let bd = Infinity;
     for (const e of enemies) {
@@ -217,7 +216,12 @@ class Archer {
       if (this.shootTimer >= 0.6) {
         this.shootTimer = 0;
         this.scene.spawnArrow(this.x, this.y, best.x, best.y);
+        playOnce(this.spr, 'blue_archer_shoot', 'blue_archer_idle'); // (Polish Phase 1)
+      } else {
+        this.play('blue_archer_idle');
       }
+    } else {
+      this.play('blue_archer_idle');
     }
   }
 
@@ -250,11 +254,7 @@ class Monk {
     if (scene.anims.exists('monk_idle')) this.spr.play('monk_idle');
   }
 
-  play(key) {
-    if (this.curAnim === key) return;
-    this.curAnim = key;
-    if (this.scene.anims.exists(key)) this.spr.play(key);
-  }
+  play(key) { playLoop(this.spr, key); }
 
   sync() {
     this.spr.x = this.x;
@@ -263,7 +263,7 @@ class Monk {
 
   update(dt, enemies, troops) {
     if (!this.alive) return;
-    if (runCommand(this, dt, 60, 'monk_idle', 'monk_idle')) return;
+    if (runCommand(this, dt, 60, 'monk_run', 'monk_idle')) return;
     let w = null;
     let bd = Infinity;
     for (const ww of troops.warriors) {
@@ -280,6 +280,7 @@ class Monk {
         this.x += Math.cos(ang) * 62 * dt;
         this.y += Math.sin(ang) * 62 * dt;
         this.spr.setFlipX(w.x < this.x);
+        this.play('monk_run'); // (Polish Phase 1)
       } else if (w.hp < w.maxHp * 0.8) {
         const healMul = this.scene.buffs ? this.scene.buffs.monkHeal : 1; // Healer's Tome artifact
         w.hp = Math.min(w.maxHp, w.hp + 5 * dt * healMul);
@@ -287,8 +288,15 @@ class Monk {
         if (this.healTimer >= 1) {
           this.healTimer = 0;
           this.healEffect(w.x, w.y);
+          playOnce(this.spr, 'monk_heal', 'monk_idle'); // (Polish Phase 1) cast pose
+        } else {
+          this.play('monk_idle');
         }
+      } else {
+        this.play('monk_idle');
       }
+    } else {
+      this.play('monk_idle');
     }
     this.spr.x = this.x;
     this.spr.y = this.y;
@@ -396,7 +404,7 @@ export class TroopManager {
     const home = this.scene.buildings.barracks ? this.scene.buildings.barracks : (this.scene.buildings.buildings.find((b) => b.typeKey === 'barracks') || this.scene.buildings.castle);
     const hx = home.x + Phaser.Math.Between(-24, 24);
     const hy = home.y + Phaser.Math.Between(20, 36);
-    const m = new Warrior(this.scene, hx, hy, hx, hy, { mercenary: true, label: 'Mercenary', idle: 'yellow_warrior_idle', run: 'yellow_warrior_run' });
+    const m = new Warrior(this.scene, hx, hy, hx, hy, { mercenary: true, label: 'Mercenary', idle: 'yellow_warrior_idle', run: 'yellow_warrior_run', attack: 'yellow_warrior_attack' });
     this.warriors.push(m);
     const c = this.scene.buildings.castle;
     if (c && this.scene.floatText) this.scene.floatText(c.x, c.y - 44, 'A Mercenary joined your army!', '#ffe066');

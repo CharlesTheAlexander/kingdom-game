@@ -62,6 +62,7 @@ import { ResourceNodeManager } from '../systems/ResourceNodes.js';
 import { ExpeditionManager } from '../systems/Expeditions.js';
 import { AIKingdom } from '../systems/AIKingdom.js';
 import { findPath } from '../systems/Pathfinding.js';
+import { sfx } from '../audio/SoundEngine.js';
 import { BuildingTypes, PLACEABLE, MAX_LEVEL, formatCost } from '../data/BuildingTypes.js';
 
 const TILE = 48;
@@ -614,6 +615,7 @@ export class GameScene extends Phaser.Scene {
 
   selectUnits(list) {
     this.deselectAllUnits();
+    if (list && list.length) sfx.play('unit_select'); // (Polish Phase 2)
     this.selectedUnits = list;
     for (const u of list) {
       const ring = this.add.ellipse(u.x, u.y + 12, 24, 11, 0x2ecc71, 0.35).setDepth(6).setStrokeStyle(2, 0x2ecc71, 0.9);
@@ -704,6 +706,7 @@ export class GameScene extends Phaser.Scene {
 
   selectBuilding(b) {
     if (this.isGameOver) return;
+    sfx.play('building_select'); // (Polish Phase 2)
     this.placementType = null;
     this.clearGhost();
     this.selectedBuilding = b;
@@ -1016,6 +1019,7 @@ export class GameScene extends Phaser.Scene {
       bg.on('pointerout', () => bg.setFillStyle(fill));
       bg.on('pointerdown', (p, lx, ly, ev) => {
         ev.stopPropagation();
+        sfx.play('button_click'); // (Polish Phase 2)
         // Defer so we never rebuild/destroy this button mid input-dispatch.
         this.time.delayedCall(0, onClick);
       });

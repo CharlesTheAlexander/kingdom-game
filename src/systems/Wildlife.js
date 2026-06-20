@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { sfx } from '../audio/SoundEngine.js';
 
 // Wildlife threat system (Phase 2). A layered, low-intensity danger that exists
 // from day 1 — separate from the AI kingdom waves (which only start on day 3).
@@ -313,6 +314,7 @@ export class WildlifeManager {
     for (let i = 0; i < n && this.wolfCount() < MAX_WOLVES && this.count() < MAX_WILDLIFE; i++) {
       this.units.push(new Wolf(this.scene, p.x + Phaser.Math.Between(-30, 30), p.y + Phaser.Math.Between(-20, 20)));
     }
+    sfx.play('wolf_spawn'); // (Polish Phase 2)
     this.scene.threatWarning('⚠ Wolves spotted prowling the northern forest', 0xff8a80);
   }
 
@@ -335,6 +337,7 @@ export class WildlifeManager {
     }
     if (party.members.length) {
       this.goblinParties.push(party);
+      sfx.play('goblin_raid'); // (Polish Phase 2)
       this.scene.threatWarning('⚠ Goblin raid incoming from the West!', 0x6cff8a);
     }
   }

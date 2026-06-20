@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { BuildingTypes, MAX_LEVEL, upgradeCost, outputMultiplier } from '../data/BuildingTypes.js';
+import { sfx } from '../audio/SoundEngine.js';
 
 // A single placed building: its visuals, HP, level and per-tick behaviour.
 export class Building {
@@ -143,6 +144,7 @@ export class Building {
 
   destroy() {
     this.alive = false;
+    sfx.play('building_destroyed'); // (Polish Phase 2)
     if (this.scene.explosionAt) this.scene.explosionAt(this.x, this.y); // Phase 5 FX
     this.shadow.destroy();
     this.rect.destroy();

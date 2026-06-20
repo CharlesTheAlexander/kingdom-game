@@ -1,5 +1,6 @@
 // Enemies and the wave scheduler.
 import Phaser from 'phaser';
+import { sfx } from '../audio/SoundEngine.js';
 
 const CASTLE_DPS = 10; // damage an enemy deals to the castle per second on contact
 const ENEMY_SPEED = 55; // pixels per second
@@ -104,6 +105,7 @@ export class Enemy {
   destroy() {
     if (!this.alive) return;
     this.alive = false;
+    sfx.playThrottled('enemy_dies', 110); // (Polish Phase 2)
     // (Phase 7) dust puff + 0.5s fade-out on death.
     if (this.scene.dustAt) this.scene.dustAt(this.x, this.y);
     this.hpBarBg.destroy();
