@@ -645,3 +645,76 @@ save system and the army-on-map system. This session delivered the save system
 (the other marquee feature — troops→armies, map movement, supply, AI armies,
 BattleScene HP handoff), world events + messengers, king identity + reputation,
 research tree, and the larger map/exploration/diplomacy/endgame content.
+
+---
+
+## SECTION 18: MAJOR EXPANSION — ARMIES, EVENTS, KING IDENTITY, RESEARCH, DIPLOMACY, QOL ✅
+
+Delivered the remaining marquee features from the expansion doc in seven phases.
+All phases ship building clean (`npm run build`), with a full automated Day 0→25
+audit + real-time loop run passing at stable FPS and **zero console errors**.
+
+**1. Army system (`src/systems/ArmyManager.js`)** ✅
+- Player forms named armies from the unassigned troop pool (warrior/archer/monk/
+  knight/mercenary, each with its own HP); armies carry food supply + morale.
+- Armies are first-class map objects: float `col/row`, terrain-based march speed
+  (`MARCH_SPEED` per biome), depth-9999 faction-colored icons, selectable rings.
+- `marchTo` / `update(gdelta)` move armies in real time; `onNewDay` drains supply
+  (morale falls when starving), `sendSupplies` / `addMorale` recover them.
+- Base cap of 3 player armies (a trait can raise it via `traitBonuses.armyCap`).
+  Serialize/restore for saves.
+
+**2. Army combat + AI armies on the map** ✅
+- Player armies attack neutral settlements and AI castles; engagements hand off to
+  `BattleScene` (`{playerArmy, enemyArmy, terrainType, onComplete}`) and write the
+  surviving unit counts back via `setUnitsFromBattle`. Conquest grants reputation.
+- AI kingdoms now field real marching armies: `AIKingdom.launchWave()` spawns an
+  army that marches on the player (legacy edge-spawn kept only as a fallback).
+  Interception checks trigger army-vs-army battles. Armies drawn on the Continent
+  view too.
+
+**3. World events + messenger (`src/systems/WorldEvents.js`)** ✅
+- 15 events (news + branching `choice` events) plus seasonal modifiers; a 7-day
+  random roll with a 20-day cooldown, threat-warning banners, and a messenger
+  panel to resolve choices (artifacts, fog reveals, gold, troops, etc.).
+- Goblin spawns respect an event-granted truce window. Serialize/restore.
+
+**4. King identity + reputation (`src/systems/Reputation.js`)** ✅
+- First-ever start shows a king-creation screen (DOM inputs over the canvas):
+  kingdom name, ruler name, and 1 of 6 traits (warlord / merchant / builder /
+  diplomat / explorer / scholar), each with passive bonuses + a one-time effect.
+- Reputation tracks conqueror / merchant / protector / destroyer; the highest gives
+  the ruler a title shown in the HUD. Trait bonuses applied at use sites (produce,
+  upkeep, market, fog, army cap, free research). Persisted in saves.
+
+**5. Research tree (`src/systems/Research.js`)** ✅
+- A Library building unlocks a 9-tech tree across 3 branches (military / economy /
+  exploration) with prerequisites. Library workers advance the current tech daily.
+- Effects split into `once` (saved via buffs/troops) and idempotent `flag` effects
+  (re-applied on load). Visual tree panel with branch colors + progress bars.
+
+**6. Diplomacy expansion (`src/systems/Diplomacy.js`)** ✅
+- Treaties per kingdom: **Trade Agreement** (+30 rel → +20 gold/day), **Military
+  Alliance** (+60 rel, 200 gold → reinforcements when you're attacked), and
+  **Vassalage** (Conqueror 50+, neutral relations → +50 gold/day tribute, or war if
+  refused). Treaties shown as colored badges; Break Treaty available.
+- **Coalition warfare:** when 2+ kingdoms sit at ≤ −80, a "coalition is forming"
+  warning fires 3 days before all hostile kingdoms march **simultaneously**.
+- Treaties + coalition state serialize/restore.
+
+**7. Quality-of-life** ✅
+- **Notifications log** (📜 button + unread badge): last 50 events, color-coded,
+  click-outside / ✕ to close.
+- **Pause** (⏸ by the speed control / Space) freezes the whole simulation
+  (`gameSpeed → 0`).
+- **Hotkeys:** Space pause · B/E/K/A/R switch panels · M menu · L log · Tab continent
+  · S quick-save · Esc cancel.
+- **Army quick-select:** keys 1–3 select a player army and pan the camera to it.
+
+**Audit (Phase 8):** automated 25-day simulation (all `onNewDay` systems), world-event
++ coalition stress, a 12s real-time run at 3× with a marching army, and a
+save→reload→load round-trip — all green, console clean, FPS stable (~44 headless).
+
+**Decisions logged:** all army combat routes through BattleScene regardless of size;
+armies auto-name; some trait effects simplified; DOM `<input>` used for king
+creation; coalition reuses each kingdom's `launchWave` for the synchronized assault.
