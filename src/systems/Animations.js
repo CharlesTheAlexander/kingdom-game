@@ -20,8 +20,16 @@ const LOOPS = [
   ['pawn_run_axe', 5, 12], ['pawn_run_pickaxe', 5, 12], ['pawn_interact_axe', 5, 9], ['pawn_interact_pickaxe', 5, 9],
 ];
 const ONCE = [
-  ['blue_warrior_attack', 3, 13], ['red_warrior_attack', 3, 13], ['yellow_warrior_attack', 3, 13], ['purple_warrior_attack', 3, 13], ['goblin_attack', 3, 13],
   ['blue_archer_shoot', 7, 16], ['red_archer_shoot', 7, 16], ['monk_heal', 10, 16],
+];
+// Combined melee swing: Attack1 frames then Attack2 frames, played as one
+// one-shot (the spec's Attack1 → Attack2 → Idle). [animKey, sheet1, sheet2].
+const COMBO_ATTACKS = [
+  ['blue_warrior_attack', 'blue_warrior_attack', 'blue_warrior_attack2'],
+  ['red_warrior_attack', 'red_warrior_attack', 'red_warrior_attack2'],
+  ['yellow_warrior_attack', 'yellow_warrior_attack', 'yellow_warrior_attack2'],
+  ['purple_warrior_attack', 'purple_warrior_attack', 'purple_warrior_attack2'],
+  ['goblin_attack', 'goblin_attack', 'goblin_attack2'],
 ];
 
 // Create every unit animation once per scene (idempotent; skips missing textures).
@@ -31,6 +39,12 @@ export function registerUnitAnimations(scene) {
   }
   for (const [key, end, fps] of ONCE) {
     if (scene.textures.exists(key) && !scene.anims.exists(key)) scene.anims.create({ key, frames: scene.anims.generateFrameNumbers(key, { start: 0, end }), frameRate: fps, repeat: 0 });
+  }
+  for (const [key, s1, s2] of COMBO_ATTACKS) {
+    if (scene.anims.exists(key) || !scene.textures.exists(s1)) continue;
+    const f1 = scene.anims.generateFrameNumbers(s1, { start: 0, end: 3 });
+    const f2 = scene.textures.exists(s2) ? scene.anims.generateFrameNumbers(s2, { start: 0, end: 3 }) : [];
+    scene.anims.create({ key, frames: f1.concat(f2), frameRate: 14, repeat: 0 });
   }
 }
 

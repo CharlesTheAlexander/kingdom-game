@@ -99,6 +99,12 @@ export function fmtNum(n) {
   return '' + n;
 }
 
+// (Polish) Clip an over-long name with an ellipsis so labels never overflow.
+export function ellipsize(s, max) {
+  s = '' + (s || '');
+  return s.length > max ? s.slice(0, Math.max(1, max - 1)) + '…' : s;
+}
+
 export class IsometricScene extends GameScene {
   constructor() {
     // NOTE: GameScene's constructor hardcodes super('GameScene') and ignores its
@@ -198,6 +204,12 @@ export class IsometricScene extends GameScene {
     this.load.spritesheet('yellow_warrior_attack', `${UNITS}/Yellow Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
     this.load.spritesheet('purple_warrior_attack', `${UNITS}/Purple Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
     this.load.spritesheet('goblin_attack', `${UNITS}/Black Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
+    // Attack2 frames — the combined Attack1→Attack2 swing (see Animations.js).
+    this.load.spritesheet('blue_warrior_attack2', `${UNITS}/Blue Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('red_warrior_attack2', `${UNITS}/Red Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('yellow_warrior_attack2', `${UNITS}/Yellow Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('purple_warrior_attack2', `${UNITS}/Purple Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet('goblin_attack2', `${UNITS}/Black Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
     this.load.spritesheet('blue_archer_run', `${UNITS}/Blue Units/Archer/Archer_Run.png`, { frameWidth: 192, frameHeight: 192 });
     this.load.spritesheet('blue_archer_shoot', `${UNITS}/Blue Units/Archer/Archer_Shoot.png`, { frameWidth: 192, frameHeight: 192 });
     this.load.spritesheet('red_archer_shoot', `${UNITS}/Red Units/Archer/Archer_Shoot.png`, { frameWidth: 192, frameHeight: 192 });
@@ -756,7 +768,7 @@ export class IsometricScene extends GameScene {
   showBuildingName(b) {
     if (!b || !b.alive) return;
     this.hideBuildingName(b);
-    const name = (BuildingTypes[b.typeKey] && BuildingTypes[b.typeKey].name) || b.typeKey;
+    const name = ellipsize((BuildingTypes[b.typeKey] && BuildingTypes[b.typeKey].name) || b.typeKey, 18);
     const lbl = this.add.text(b.x, b.y - (14 + (b.baseScale || 1) * 34) - 40, name, { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 }).setOrigin(0.5).setDepth(20);
     b._nameLbl = lbl;
     b._nameTimer = this.time.delayedCall(2000, () => this.hideBuildingName(b));
