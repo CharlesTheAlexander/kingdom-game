@@ -26,7 +26,7 @@ export function capture(scene) {
     buildings: scene.buildings.serialize ? scene.buildings.serialize().filter((b) => b.type !== 'castle') : [],
     troops: scene.troops.serialize ? scene.troops.serialize() : [],
     fog: scene.territory && scene.territory.serializeFog ? scene.territory.serializeFog() : null,
-    diplomacy: scene.diplomacy ? { rel: { ...scene.diplomacy.rel }, nap: { ...scene.diplomacy.nap }, ally: { ...scene.diplomacy.ally } } : null,
+    diplomacy: scene.diplomacy && scene.diplomacy.serialize ? scene.diplomacy.serialize() : (scene.diplomacy ? { rel: { ...scene.diplomacy.rel }, nap: { ...scene.diplomacy.nap }, ally: { ...scene.diplomacy.ally } } : null),
     kingdoms: (scene.kingdoms || []).map((k) => ({ key: k.cfg.key, castleAlive: k.castleAlive, castleHp: k.castleHp, barracksCount: k.barracksCount, waveTimer: k.waveTimer, waveNumber: k.waveNumber, startDay: k.startDay, regrouping: k.regrouping, rebuildTimer: k.rebuildTimer })),
     settlements: scene.settlements && scene.settlements.serialize ? scene.settlements.serialize() : [],
     nodes: scene.nodes && scene.nodes.serialize ? scene.nodes.serialize() : [],
@@ -161,9 +161,12 @@ export function applySave(scene, data) {
   sect('research', () => { if (data.research && scene.research) scene.research.restore(data.research); });
   sect('diplomacy', () => {
     if (data.diplomacy && scene.diplomacy) {
-      Object.assign(scene.diplomacy.rel, data.diplomacy.rel || {});
-      Object.assign(scene.diplomacy.nap, data.diplomacy.nap || {});
-      Object.assign(scene.diplomacy.ally, data.diplomacy.ally || {});
+      if (scene.diplomacy.restore) scene.diplomacy.restore(data.diplomacy);
+      else {
+        Object.assign(scene.diplomacy.rel, data.diplomacy.rel || {});
+        Object.assign(scene.diplomacy.nap, data.diplomacy.nap || {});
+        Object.assign(scene.diplomacy.ally, data.diplomacy.ally || {});
+      }
     }
   });
   sect('kingdoms', () => {

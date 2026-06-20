@@ -2296,6 +2296,8 @@ export class IsometricScene extends GameScene {
   onKingdomAttack(kingdom) {
     sfx.play('enemy_attack_warning'); // (Polish Phase 2) war horn
     this._lastAttackDay = this.gameDay; // (Phase 5) happiness: recent attack
+    // (Phase 6) Allied kingdoms send reinforcements when we're attacked.
+    if (this.diplomacy && this.diplomacy.onPlayerAttacked) this.diplomacy.onPlayerAttacked();
     // (Bug 8) A new wave releases any held units so they resume auto-defense.
     if (this.troops) for (const u of this.troops.allUnits()) u.playerCommanded = false;
     this.threatWarning(`${kingdom.cfg.name} is attacking!`, kingdom.cfg.color, true);
@@ -2651,17 +2653,41 @@ export class IsometricScene extends GameScene {
       else this.panel.add(this.add.rectangle(cx, barY, (bw / 2) * (-rel / 100), 11, 0xd64a4a).setOrigin(1, 0).setScrollFactor(0));
       this.panel.add(this.add.rectangle(cx, barY - 3, 2, 17, 0xffffff, 0.9).setOrigin(0.5, 0).setScrollFactor(0));
       this.panelText(cx, y + 4, `${rel > 0 ? '+' : ''}${rel}`, { color: rel < 0 ? '#ff9a8a' : rel > 0 ? '#9af0a0' : '#dcd2bf', size: '11px', bold: true }).setOrigin(0.5, 0).setScrollFactor(0);
-      // Action buttons — high contrast, 32px tall, effect on line 2 (Bug 7).
-      const napped = this.diplomacy && this.diplomacy.nap[key];
+      // (Phase 6) Active-treaty badges under the status label.
+      const tr = this.diplomacy ? this.diplomacy.tr(key) : {};
+      const badges = [];
+      if (tr.trade) badges.push(['Trade', 0xf1c40f]);
+      if (tr.alliance) badges.push(['Ally', 0x4ad66b]);
+      if (tr.vassal) badges.push(['Vassal', 0x9b59b6]);
+      badges.forEach(([lbl, col], bi) => {
+        const bxx = 196 + bi * 56;
+        this.panel.add(this.add.rectangle(bxx, y + 25, 52, 12, col, 0.85).setOrigin(0, 0).setStrokeStyle(1, 0x000000, 0.5).setScrollFactor(0));
+        this.panel.add(this.add.text(bxx + 26, y + 25, lbl, { fontFamily: 'monospace', fontSize: '9px', color: '#1a1a1a', fontStyle: 'bold' }).setOrigin(0.5, 0).setScrollFactor(0));
+      });
+      // Action buttons — three slots, 116px wide each (Phase 6 treaties).
+      const hasTreaty = tr.trade || tr.alliance || tr.vassal;
       const canTribute = this.diplomacy && this.resources.gold >= 50;
-      this.diploButton(500, y + 1, 176, 32, 'Send Tribute', '50g → +20 relations', 0x1a5c2a, 0x278a3f, !!canTribute, () => this.diplomacy.sendTribute(key));
-      if (napped) {
-        this.diploButton(684, y + 1, 176, 32, this.diplomacy.ally[key] ? 'Allied' : 'Pact ✓', 'at peace', 0x1a2e5c, 0x1a2e5c, false, null);
-      } else if (rel >= 50) {
-        const cost = rel >= 80 ? 200 : 100;
-        this.diploButton(684, y + 1, 176, 32, 'Propose Trade', `${cost}g → alliance`, 0x1a2e5c, 0x274488, this.resources.gold >= cost, () => this.diplomacy.acceptPact(key));
+      this.diploButton(458, y + 1, 116, 32, 'Tribute', '50g → +20', 0x1a5c2a, 0x278a3f, !!canTribute, () => this.diplomacy.sendTribute(key));
+      // Slot 2 — best available treaty upgrade.
+      const rep = this.reputation ? this.reputation.scores.conqueror : 0;
+      if (tr.alliance) {
+        this.diploButton(580, y + 1, 116, 32, 'Allied', 'at war = aid', 0x1a2e5c, 0x1a2e5c, false, null);
+      } else if (rel >= 60) {
+        this.diploButton(580, y + 1, 116, 32, 'Alliance', '200g → ally', 0x1a3a6c, 0x274488, this.resources.gold >= 200, () => this.diplomacy.proposeAlliance(key));
+      } else if (rel >= 30 && !tr.trade) {
+        this.diploButton(580, y + 1, 116, 32, 'Trade', '→ +20g/day', 0x6c5a1a, 0x8a7522, true, () => this.diplomacy.proposeTrade(key));
+      } else if (rep >= 50 && rel >= -20 && rel <= 20 && !tr.vassal) {
+        this.diploButton(580, y + 1, 116, 32, 'Vassalize', 'Conqueror 50+', 0x4a2a6c, 0x6a3a9c, true, () => this.diplomacy.demandVassal(key));
+      } else if (tr.trade) {
+        this.diploButton(580, y + 1, 116, 32, 'Trading', '+20g/day', 0x4a3f1a, 0x4a3f1a, false, null);
       } else {
-        this.diploButton(684, y + 1, 176, 32, 'Declare War', '→ -100 relations', 0x5c1a1a, 0x8a2a2a, !!this.diplomacy, () => this.diplomacy.declareWar(key));
+        this.diploButton(580, y + 1, 116, 32, '—', 'no treaty', 0x33333a, 0x33333a, false, null);
+      }
+      // Slot 3 — break treaty if any active, else declare war.
+      if (hasTreaty) {
+        this.diploButton(702, y + 1, 116, 32, 'Break', '→ -10 rel', 0x5c4a1a, 0x8a722a, true, () => this.diplomacy.breakTreaty(key));
+      } else {
+        this.diploButton(702, y + 1, 116, 32, 'War', '→ -100 rel', 0x5c1a1a, 0x8a2a2a, !!this.diplomacy, () => this.diplomacy.declareWar(key));
       }
     });
     this.spriteButton(GAME_W - 84, this.PANEL_Y + 4, 76, 20, 'Back', '', true, () => { this.panelMode = 'build'; this.refreshPanel(); });
