@@ -281,7 +281,7 @@ export class WildlifeManager {
 
   // Spawn a starting wolf pack + a boar so the world feels alive on day 1.
   spawnInitial() {
-    this.spawnWolfPack();
+    this.spawnWolfPack(false); // (Critic #2 fix) no alarm/SFX on the day-1 spawn — keep the opening calm
     this.spawnBoar();
   }
 
@@ -306,7 +306,7 @@ export class WildlifeManager {
 
   // (FIX 2) Wolves spawn only in the north forest (rows 0-10), >= 12 tiles from
   // the castle, capped at 4 on the map.
-  spawnWolfPack() {
+  spawnWolfPack(announce = true) {
     if (this.wolfCount() >= MAX_WOLVES) return;
     const p = this.regionPoint(['north'], { rowMax: 49, minTiles: WOLF_MIN_DIST });
     if (!p) return;
@@ -314,8 +314,10 @@ export class WildlifeManager {
     for (let i = 0; i < n && this.wolfCount() < MAX_WOLVES && this.count() < MAX_WILDLIFE; i++) {
       this.units.push(new Wolf(this.scene, p.x + Phaser.Math.Between(-30, 30), p.y + Phaser.Math.Between(-20, 20)));
     }
-    sfx.play('wolf_spawn'); // (Polish Phase 2)
-    this.scene.threatWarning('⚠ Wolves spotted prowling the northern forest', 0xff8a80);
+    if (announce) {
+      sfx.play('wolf_spawn'); // (Polish Phase 2)
+      this.scene.threatWarning('⚠ Wolves spotted prowling the northern forest', 0xff8a80);
+    }
   }
 
   spawnGoblinRaid() {

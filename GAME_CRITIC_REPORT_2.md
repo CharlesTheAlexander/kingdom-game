@@ -99,3 +99,17 @@ prototype. There is **no critical or high-severity issue** to fix — the Step 1
 changes introduced no regressions, no console errors, and no new overflow. The two
 MEDIUM items (dim opening, day-1 wolf alarm) are quick onboarding-feel fixes and
 are addressed in the next step.
+
+---
+
+## Step 4 — fixes applied
+
+- **MEDIUM #1 (dim opening):** the day clock now starts mid-morning
+  (`dayTimer = DAY_MS * 0.22`) so the first view is bright daylight, not dim dawn.
+- **MEDIUM #2 (day-1 wolf alarm):** `spawnInitial()` now spawns the opening wolf
+  pack silently (`spawnWolfPack(false)`) — no banner, no growl — keeping the
+  opening calm. Wolves still exist and later packs announce normally.
+
+LOW items left as documented (per the session rules). Full playthrough re-run
+after the fixes: **zero console errors** on fresh load, idle, combat, night, and
+click interaction.

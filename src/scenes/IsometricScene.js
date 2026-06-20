@@ -265,7 +265,9 @@ export class IsometricScene extends GameScene {
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
-    this.dayTimer = 0;
+    // (Critic #2 fix) Start mid-morning in bright daylight rather than at the dim
+    // dawn (phase 0), so the player's first look at their kingdom is well-lit.
+    this.dayTimer = DAY_MS * 0.22;
 
     // Dev-only verification hooks (?nointro skips the welcome modal, ?zoom=0.6
     // starts zoomed out, ?day=N starts on a later day to test AI/wildlife timing).
