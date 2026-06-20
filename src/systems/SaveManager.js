@@ -41,6 +41,7 @@ export function capture(scene) {
     research: scene.research && scene.research.serialize ? scene.research.serialize() : null,
     winConditions: scene.winConditions && scene.winConditions.serialize ? scene.winConditions.serialize() : null,
     stats: { battlesWon: scene._battlesWon || 0 },
+    kingdomStats: scene.stats && scene.stats.serialize ? scene.stats.serialize() : null,
     ruins: scene.ruins && scene.ruins.serialize ? scene.ruins.serialize() : null,
     factions: scene.factions && scene.factions.serialize ? scene.factions.serialize() : null,
     discovery: scene.discovery && scene.discovery.serialize ? scene.discovery.serialize() : null,
@@ -170,6 +171,7 @@ export function applySave(scene, data) {
   sect('factions', () => { if (data.factions && scene.factions) scene.factions.restore(data.factions); });
   sect('discovery', () => { if (data.discovery && scene.discovery) scene.discovery.restore(data.discovery); });
   sect('tax', () => { if (data.taxIndex != null) { scene.taxIndex = data.taxIndex; scene.applyTax && scene.applyTax(); } });
+  sect('kingdomStats', () => { if (data.kingdomStats && scene.stats) scene.stats.restore(data.kingdomStats); });
   sect('diplomacy', () => {
     if (data.diplomacy && scene.diplomacy) {
       if (scene.diplomacy.restore) scene.diplomacy.restore(data.diplomacy);

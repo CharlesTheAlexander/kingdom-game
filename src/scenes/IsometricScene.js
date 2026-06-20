@@ -80,6 +80,7 @@ import { WinConditions } from '../systems/WinConditions.js';
 import { Ruins } from '../systems/Ruins.js';
 import { WanderingFactions } from '../systems/WanderingFactions.js';
 import { Discovery } from '../systems/Discovery.js';
+import { KingdomStats } from '../systems/KingdomStats.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -283,7 +284,7 @@ export class IsometricScene extends GameScene {
     this._popHud = null; this._kingName = null; this._kingTitle = null; this._kingEls = null; this._logEls = null;
     this._logBtnBadge = null; this._logOpen = false; this._pauseBtn = null; this._paused = false; // (Phase 7) reset on restart
     this._endScreenEls = null; this._speedBeforeEnd = null; this._repExpanded = false; // (Audit FIX 2/5) reset on restart
-    this._discEls = null; this._promptEls = null; this._taxText = null; // (Session-1) reset transient UI
+    this._discEls = null; this._promptEls = null; this._taxText = null; this._statsEls = null; // (Session-1) reset transient UI
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -319,6 +320,7 @@ export class IsometricScene extends GameScene {
     this.tierIndex = 0;
 
     this.resources = new Resources();
+    this.stats = new KingdomStats(this); // (Session-1 Phase 6) all-time stats (wraps resources.add)
     this.buildings = new BuildingManager(this, N, N);
     this.waves = new WaveManager(this, 60);
     this.pawns = new PawnManager(this);
@@ -434,6 +436,7 @@ export class IsometricScene extends GameScene {
     this._autoSaveEveryDays = 5;
     this.createMenuButton();
     this.createLogButton();   // (Expansion Phase 7) notifications log
+    this.createStatsButton(); // (Session-1 Phase 6) statistics panel
     this.createPauseButton(); // (Expansion Phase 7) pause control
     this.setupHotkeys();      // (Expansion Phase 7) keyboard shortcuts
     this.input.keyboard.on('keydown-S', (e) => { if (this._typing) return; this.quickSave(); });
@@ -1424,6 +1427,87 @@ export class IsometricScene extends GameScene {
     bg.on('pointerout', () => bg.setFillStyle(0x10141c, 0.9));
     bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('ui_click'); this.toggleLog(); });
     this.updateLogBadge();
+  }
+
+  // (Session-1 Phase 6) Stats button (top-left, beside the log) + full overlay.
+  createStatsButton() {
+    const fix = (o) => o.setScrollFactor(0);
+    const bg = fix(this.add.rectangle(96, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
+    const g = fix(this.add.graphics().setDepth(61));
+    g.fillStyle(0x8ab0e6, 1); g.fillRect(104, 24, 4, 8); g.fillRect(110, 20, 4, 12); g.fillRect(116, 16, 4, 16); g.fillRect(122, 22, 4, 10);
+    bg.on('pointerover', () => bg.setFillStyle(0x1c2330, 0.95));
+    bg.on('pointerout', () => bg.setFillStyle(0x10141c, 0.9));
+    bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('ui_click'); this.toggleStats(); });
+  }
+  toggleStats() { if (this._statsEls) this.closeStats(); else this.openStats(); }
+  closeStats() { if (this._statsEls) { this._statsEls.forEach((o) => o.destroy()); this._statsEls = null; } }
+  openStats() {
+    this.closeStats();
+    const fix = (o) => o.setScrollFactor(0).setDepth(118);
+    const st = this.stats ? this.stats.s : null;
+    const els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.78).setOrigin(0, 0).setInteractive()));
+    const W = 760, H = 600, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x12101a, 0.99).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(x + 20, y + 14, 'KINGDOM STATISTICS', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold' })));
+    const closeBg = fix(this.add.rectangle(x + W - 32, y + 14, 24, 24, 0x5c1a1a, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0xf0e6c8, 0.6).setInteractive({ useHandCursor: true }));
+    els.push(closeBg, fix(this.add.text(x + W - 20, y + 26, 'X', { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    closeBg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.closeStats(); });
+
+    const sect = (cx, cy, title, rows) => {
+      els.push(fix(this.add.text(cx, cy, title, { fontFamily: 'monospace', fontSize: '14px', color: '#ffd24a', fontStyle: 'bold' })));
+      rows.forEach((r, i) => {
+        const ry = cy + 20 + i * 17;
+        els.push(fix(this.add.text(cx, ry, r[0], { fontFamily: 'monospace', fontSize: '12px', color: '#cfc1a6' })));
+        els.push(fix(this.add.text(cx + 220, ry, String(r[1]), { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0, 0)));
+      });
+    };
+    const title = (this.reputation && this.reputation.title(this.kingdomName)) || (this.kingTrait && TRAITS[this.kingTrait] ? TRAITS[this.kingTrait].name : '—');
+    const g = st ? st.gathered : { wood: 0, stone: 0, food: 0, gold: 0, iron: 0 };
+    const settleOwned = this.settlements ? this.settlements.ownedCount() : 0;
+    const settleTotal = this.settlements ? this.settlements.total() : 0;
+    const techDone = this.research ? this.research.completed.size : 0;
+    const L = x + 24, Rc = x + 400; let ly = y + 56;
+    sect(L, ly, 'YOUR KINGDOM', [
+      ['Kingdom', this.kingdomName], ['Ruler', this.rulerName], ['Title', title],
+      ['Days survived', this.gameDay], ['Settlement stage', `${this.currentStage()}/9`],
+      ['Population', `${this.population ? this.population.count : 0} (peak ${this.population ? this.population.peak : 0})`],
+    ]);
+    sect(Rc, ly, 'MILITARY', [
+      ['Battles won', st ? st.battlesWon : 0], ['Battles lost', st ? st.battlesLost : 0],
+      ['Soldiers trained', st ? st.soldiersTrained : 0], ['Enemies defeated', st ? st.enemiesDefeated : 0],
+      ['Settlements conquered', `${settleOwned}/${settleTotal}`],
+    ]);
+    ly = y + 200;
+    sect(L, ly, 'ECONOMY', [
+      ['Wood gathered', Math.round(g.wood)], ['Stone gathered', Math.round(g.stone)],
+      ['Food gathered', Math.round(g.food)], ['Gold gathered', Math.round(g.gold)], ['Iron gathered', Math.round(g.iron)],
+      ['Market trades', st ? st.marketTrades : 0], ['Caravan trades', st ? st.caravanTrades : 0],
+      ['Caravans delivered', st ? st.caravansDelivered : 0], ['Expeditions', st ? st.expeditions : 0],
+    ]);
+    sect(Rc, ly, 'RESEARCH', [
+      ['Technologies', `${techDone}/9`],
+      ...(this.research ? this.research.techs().filter((t) => this.research.completed.has(t.id)).map((t) => ['  ✓ ' + t.name, '']) : []),
+    ]);
+    ly = y + 400;
+    sect(L, ly, 'DIPLOMACY', (this.kingdoms || []).map((k) => [k.cfg.name, `${this.diplomacy ? this.diplomacy.get(k.cfg.key) : 0}  ${this.diplomacy && this.diplomacy.tr(k.cfg.key).alliance ? '(ally)' : this.diplomacy && this.diplomacy.tr(k.cfg.key).vassal ? '(vassal)' : this.diplomacy && this.diplomacy.tr(k.cfg.key).trade ? '(trade)' : ''}`]));
+    sect(Rc, ly, 'DISCOVERIES', [
+      ['Ruins explored', `${this.ruins ? this.ruins.exploredCount() : 0}/${this.ruins ? this.ruins.list.length : 0}`],
+      ['Settlements found', `${this.discovery ? this.discovery.settlementsDiscovered() : 0}/${settleTotal}`],
+      ['Biomes explored', `${this.discovery ? this.discovery.biomesExplored() : 0}/4`],
+    ]);
+    // Reputation bars at the bottom
+    if (this.reputation) {
+      const reps = [['Conqueror', 'conqueror', 0xc0392b], ['Merchant', 'merchant', 0xf1c40f], ['Protector', 'protector', 0x3498db], ['Destroyer', 'destroyer', 0x8e44ad]];
+      reps.forEach(([lbl, key, col], i) => {
+        const rx = x + 24 + (i % 4) * 180, ry = y + H - 40;
+        els.push(fix(this.add.text(rx, ry - 12, lbl, { fontFamily: 'monospace', fontSize: '10px', color: '#cfc1a6' })));
+        els.push(fix(this.add.rectangle(rx, ry, 150, 8, 0x000000, 0.5).setOrigin(0, 0)));
+        els.push(fix(this.add.rectangle(rx, ry, 150 * Phaser.Math.Clamp(this.reputation.scores[key] / 100, 0, 1), 8, col).setOrigin(0, 0)));
+      });
+    }
+    this._statsEls = els;
+    this.routeCameras && this.routeCameras();
   }
 
   updateLogBadge() {
@@ -2469,7 +2553,7 @@ export class IsometricScene extends GameScene {
       // (Phase 4) Merchant trait + reputation improve what you receive.
       const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0) + ((this._researchMarketMult || 1) - 1);
       this.spriteButton(x, this.PANEL_Y + 30, 132, 40, label.split(' → ')[0] + '→', label.split(' → ')[1], can, () => {
-        this.resources.spend(give); for (const [r, v] of Object.entries(get)) this.resources.add(r, Math.round(v * mult)); if (this.reputation) this.reputation.add('merchant', 3); this.refreshPanel();
+        this.resources.spend(give); for (const [r, v] of Object.entries(get)) this.resources.add(r, Math.round(v * mult)); if (this.reputation) this.reputation.add('merchant', 3); if (this.stats) this.stats.note('marketTrades'); this.refreshPanel();
       });
       x += 136;
     }
@@ -2624,6 +2708,7 @@ export class IsometricScene extends GameScene {
     const playerArmy = this.troops.snapshot();
     const pTotal = playerArmy.reduce((s, g) => s + g.count, 0);
     if (pTotal + enemies.length < 10) return false;
+    this._lastEnemyCount = enemies.length; // (Phase 6) stats
     this._inBattle = true;
     try { SaveManager.save(this, 0); } catch (e) {} // (Save system) auto-save before BattleScene
     const enemyArmy = this.enemyArmyFrom(enemies);
@@ -2642,7 +2727,7 @@ export class IsometricScene extends GameScene {
   onBattleComplete(res) {
     this._inBattle = false;
     this.scene.resume();
-    if (res && res.victory) { this._lastBattleWonDay = this.gameDay; this._battlesWon = (this._battlesWon || 0) + 1; } else this._lastBattleLostDay = this.gameDay; // (Phase 5) happiness; (Audit FIX 2) battle tally
+    if (res && res.victory) { this._lastBattleWonDay = this.gameDay; this._battlesWon = (this._battlesWon || 0) + 1; if (this.stats) { this.stats.note('battlesWon'); this.stats.note('enemiesDefeated', (this._lastEnemyCount || 0)); } } else { this._lastBattleLostDay = this.gameDay; if (this.stats) this.stats.note('battlesLost'); } // (Phase 5) happiness; (Audit FIX 2) battle tally; (Phase 6) stats
     const c = this.buildings.castle;
     if (c) {
       for (const grp of res.army || []) {
@@ -2714,6 +2799,8 @@ export class IsometricScene extends GameScene {
 
   startArmyBattle(playerArmy, enemyUnits, ctx) {
     if (this._inBattle) return;
+    ctx = ctx || {};
+    ctx.enemyCount = (enemyUnits || []).reduce((s, u) => s + (u.count || 0), 0); // (Phase 6) stats
     this._inBattle = true;
     try { SaveManager.save(this, 0); } catch (e) {}
     this._battleArmy = playerArmy;
@@ -2733,6 +2820,7 @@ export class IsometricScene extends GameScene {
     if (res && res.victory) {
       this._lastBattleWonDay = this.gameDay;
       this._battlesWon = (this._battlesWon || 0) + 1; // (Audit FIX 2) battle tally
+      if (this.stats) { this.stats.note('battlesWon'); this.stats.note('enemiesDefeated', (ctx && ctx.enemyCount) || 0); }
       this.armyMgr.addMorale(army, 15);
       if (res.loot) { this.resources.add('gold', res.loot.gold || 0); if (res.loot.iron) this.resources.add('iron', res.loot.iron); }
       if (this.reputation) this.reputation.add('conqueror', 10);
@@ -3404,6 +3492,7 @@ export class IsometricScene extends GameScene {
         else if (slot.type === 'knight') this.troops.spawnKnight(b);
         else this.troops.spawn(b);
         finished = true;
+        if (this.stats) this.stats.note('soldiersTrained'); // (Phase 6)
       }
       if (finished) {
         sfx.play('unit_trained'); // (Polish Phase 2)
