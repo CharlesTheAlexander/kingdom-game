@@ -775,6 +775,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   announce(text) {
+    // Audit fix: clear any in-flight announcement so two close-together upgrades
+    // don't overlap into garbled text / doubled white flashes.
+    if (this._announceLabel && this._announceLabel.active) this._announceLabel.destroy();
     const flash = this.add.rectangle(0, 0, GAME_W, GAME_H, 0xffffff, 1).setOrigin(0, 0).setDepth(90).setScrollFactor(0);
     this.tweens.add({ targets: flash, alpha: 0, duration: 450, onComplete: () => flash.destroy() });
     const label = this.add
@@ -782,7 +785,9 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(91)
       .setScrollFactor(0);
+    this._announceLabel = label;
     this.time.delayedCall(3000, () => {
+      if (!label.active) return;
       this.tweens.add({ targets: label, alpha: 0, duration: 500, onComplete: () => label.destroy() });
     });
   }
