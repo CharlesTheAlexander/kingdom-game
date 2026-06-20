@@ -42,6 +42,10 @@ export class Building {
     this.rect.y += Phaser.Math.Between(-3, 3);
     this.rect.on('pointerdown', (p, lx, ly, ev) => {
       if (!p.leftButtonDown()) return; // right-click is reserved for unit move commands
+      // (Bug 2 fix) While placing or moving a building, do NOT let this sprite
+      // swallow the click — let it fall through to the world tile handler so the
+      // 8 tiles around the (large) castle stay placeable.
+      if (scene.placementType || scene.movingBuilding) return;
       ev.stopPropagation();
       scene.selectBuilding(this);
     });

@@ -631,6 +631,7 @@ export class GameScene extends Phaser.Scene {
         u.selRing.destroy();
         u.selRing = null;
       }
+      u.playerCommanded = false; // (Bug 8) deselecting releases the hold → resume auto-defense
     }
     this.selectedUnits = [];
     this.updateSelBadge();
@@ -1277,11 +1278,12 @@ export class GameScene extends Phaser.Scene {
     return 5 * this.buildings.countOfType('barracks');
   }
 
-  // Living soldiers + units currently in training.
+  // Living soldiers + units in training + soldiers away on expeditions.
   soldierTotal() {
     let inTraining = 0;
     for (const b of this.buildings.buildings) if (b.typeKey === 'barracks') inTraining += b.slots.length;
-    return this.troops.count + inTraining;
+    const deployed = this.expeditions && this.expeditions.deployedSoldiers ? this.expeditions.deployedSoldiers() : 0; // (Bug 5)
+    return this.troops.count + inTraining + deployed;
   }
 
   trainUnit(barracks, type) {

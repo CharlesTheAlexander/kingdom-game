@@ -53,7 +53,7 @@ export const BuildingTypes = {
   market: {
     key: 'market', name: 'Market', cost: { gold: 100, wood: 60 }, maxWorkers: 1, hp: 120,
     footprint: 2, placeable: true, stageUnlock: 4,
-    desc: 'Trade resources at fixed ratios. 1 trade per day. Needs 1 worker.',
+    desc: 'Trade resources at fixed ratios, as often as you like. Needs 1 worker.',
   },
   blacksmith: {
     key: 'blacksmith', name: 'Blacksmith', cost: { gold: 80, stone: 60, iron: 20 }, maxWorkers: 2, hp: 150,

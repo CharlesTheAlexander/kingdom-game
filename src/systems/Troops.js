@@ -93,8 +93,10 @@ class Warrior {
     if (!this.target || !this.target.alive) {
       this.target = this.nearestEnemy(enemies, AUTO_ACQUIRE);
     }
-    // Drop the chase if it pulls us too far from home (return to defend).
-    if (this.target && Phaser.Math.Distance.Between(this.homeX, this.homeY, this.x, this.y) > LEASH) {
+    // (Bug 4/8) The home leash only applies to AUTO-defending units. A unit the
+    // player explicitly sent somewhere ignores the leash, so it will engage an
+    // enemy garrison / building far from home instead of running back.
+    if (!this.playerCommanded && this.target && Phaser.Math.Distance.Between(this.homeX, this.homeY, this.x, this.y) > LEASH) {
       this.target = null;
     }
 
@@ -112,6 +114,9 @@ class Warrior {
         if (this._atkCd <= 0) { this._atkCd = 0.7; playOnce(this.spr, this.atkAnim, this.idleAnim); sfx.playThrottled('sword_hit', 130); }
         else this.play(this.idleAnim);
       }
+    } else if (this.playerCommanded) {
+      // (Bug 8) Hold the position the player ordered — do NOT run back home.
+      this.play(this.idleAnim);
     } else {
       // No enemies: drift back toward the (slightly offset) home point and idle.
       const hx = this.homeX + this.idleOX;

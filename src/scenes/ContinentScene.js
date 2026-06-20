@@ -48,13 +48,23 @@ export class ContinentScene extends Phaser.Scene {
     this.resText = this.add.text(GAME_W - 16, 40, '', { fontFamily: 'monospace', fontSize: '12px', color: '#e3c27a', align: 'right', lineSpacing: 3 }).setOrigin(1, 0);
     this.tip = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', backgroundColor: '#000000cc', padding: { x: 6, y: 4 } }).setOrigin(0.5, 1).setDepth(50).setVisible(false);
 
-    const btn = this.add.rectangle(GAME_W / 2, GAME_H - 34, 220, 40, 0x2d6cb0).setStrokeStyle(2, 0xf0e6c8, 0.8).setInteractive({ useHandCursor: true });
-    this.add.text(GAME_W / 2, GAME_H - 34, 'Return to Kingdom  (Tab)', { fontFamily: 'monospace', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
+    // (Bug 3) Always reset the close guards on (re)entry so we can never start
+    // a session already flagged as "closing" and become unable to leave.
+    this._closing = false;
+    this._finished = false;
+
+    // (Bug 3) Always-on-top, always-clickable "Return to Kingdom" button.
+    const btn = this.add.rectangle(GAME_W / 2, GAME_H - 34, 260, 40, 0x2d6cb0).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }).setDepth(200);
+    this.add.text(GAME_W / 2, GAME_H - 34, 'Return to Kingdom  (Tab / Esc)', { fontFamily: 'monospace', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
     btn.on('pointerover', () => btn.setFillStyle(0x3d83cf));
     btn.on('pointerout', () => btn.setFillStyle(0x2d6cb0));
     btn.on('pointerdown', () => this.close());
 
-    this.input.keyboard.on('keydown-TAB', (e) => { e.preventDefault(); this.close(); });
+    // (Bug 3) Tab closes (with fade); Escape is a guaranteed instant escape hatch
+    // that bypasses the fade and the _closing guard entirely.
+    this.input.keyboard.on('keydown-TAB', (e) => { if (e && e.preventDefault) e.preventDefault(); this.close(); });
+    this.input.keyboard.on('keydown-ESC', (e) => { if (e && e.preventDefault) e.preventDefault(); this.forceClose(); });
+    this.input.keyboard.on('keydown-ESCAPE', (e) => { if (e && e.preventDefault) e.preventDefault(); this.forceClose(); });
     this.input.on('pointermove', (p) => this.onHover(p));
     this.input.on('pointerdown', (p) => this.onClick(p));
 
@@ -264,18 +274,42 @@ export class ContinentScene extends Phaser.Scene {
     if (target) this.close(target);
   }
 
+  // (Bug 3) Normal close: fade out, then hand back to the world. A fallback timer
+  // guarantees the hand-off even if the fade-complete event never fires, so the
+  // player can never get stuck on a faded continent screen.
   close(focus) {
     if (this._closing) return;
     this._closing = true;
-    const iso = this.iso;
-    if (focus) { const w = iso.tileCenter(focus.col, focus.row); iso.cameras.main.centerOn(w.x, w.y); }
-    // (Phase 7) Fade out the continent, then fade the local view back in.
-    this.cameras.main.fadeOut(200, 8, 12, 18);
-    this.cameras.main.once('camerafadeoutcomplete', () => {
+    this._focus = focus || null;
+    const finish = () => this.finishClose();
+    try {
+      this.cameras.main.fadeOut(180, 8, 12, 18);
+      this.cameras.main.once('camerafadeoutcomplete', finish);
+      this.time.delayedCall(500, finish); // fallback if the event is missed
+    } catch (e) {
+      finish(); // if the fade itself throws, hand back immediately
+    }
+  }
+
+  // (Bug 3) Guaranteed escape hatch (Escape key): instant, ignores the _closing
+  // guard and the fade entirely.
+  forceClose() {
+    this._closing = true;
+    this.finishClose();
+  }
+
+  // (Bug 3) The single, idempotent hand-back to IsometricScene. Wrapped so a
+  // failure in any one step still resumes + stops the scene.
+  finishClose() {
+    if (this._finished) return;
+    this._finished = true;
+    const iso = this.iso || this.scene.get('IsometricScene');
+    try { if (this._focus && iso) { const w = iso.tileCenter(this._focus.col, this._focus.row); iso.cameras.main.centerOn(w.x, w.y); } } catch (e) {}
+    try {
       this.scene.resume('IsometricScene');
-      if (iso.cameras && iso.cameras.main) iso.cameras.main.fadeIn(240, 8, 12, 18);
-      this.scene.stop();
-    });
+      if (iso && iso.cameras && iso.cameras.main) iso.cameras.main.fadeIn(220, 8, 12, 18);
+    } catch (e) {}
+    try { this.scene.stop(); } catch (e) {}
   }
 
   update(time, delta) {

@@ -36,6 +36,14 @@ export class ExpeditionManager {
   activeCount(key) { return this.state[key].length; }
   maxSlots(key) { return this.defs[key].maxSlots; }
 
+  // (Bug 5) Total soldiers currently away on expeditions — they still count
+  // toward the soldier cap so the player can't over-train while parties are out.
+  deployedSoldiers() {
+    let n = 0;
+    for (const key of Object.keys(this.state)) for (const slot of this.state[key]) n += slot.cost || this.defs[key].cost;
+    return n;
+  }
+
   // Days remaining for each running slot of a type (for the panel readout).
   slotDays(key) { return this.state[key].map((slot) => Math.max(0, slot.timeLeft / SEC_PER_DAY)); }
 
@@ -55,7 +63,7 @@ export class ExpeditionManager {
     }
     this.scene.troops.detach(def.cost); // soldiers leave the muster
     this.marchOff(def.cost);
-    this.state[key].push({ timeLeft: def.days * SEC_PER_DAY });
+    this.state[key].push({ timeLeft: def.days * SEC_PER_DAY, cost: def.cost }); // (Bug 5) remember the party size
     this.scene.refreshPanel();
   }
 
