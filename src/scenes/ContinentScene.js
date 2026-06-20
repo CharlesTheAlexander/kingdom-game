@@ -61,8 +61,31 @@ export class ContinentScene extends Phaser.Scene {
     this.rebuildMap();
     this.cameras.main.fadeIn(220, 12, 16, 24);
 
+    this.showContinentTutorial();
+
     // Mark which tiles the local fog has revealed (for hiding undiscovered sites).
     this._refresh = 0;
+  }
+
+  // (UI overhaul Phase 2) Stage 4 of the staged tutorial — shown the first time
+  // the player opens the continent view, then never again (localStorage).
+  showContinentTutorial() {
+    let seen = {};
+    try { seen = JSON.parse(localStorage.getItem('kg_tut') || '{}'); } catch (e) {}
+    if (seen[4]) return;
+    seen[4] = true;
+    try { localStorage.setItem('kg_tut', JSON.stringify(seen)); } catch (e) {}
+    const W = 540, H = 110, cx = GAME_W / 2, top = GAME_H - 34 - 20 - H - 14;
+    const els = [];
+    els.push(this.add.rectangle(cx, top + H / 2, W, H, 0x1a140c, 0.97).setStrokeStyle(2, 0xc9a14a, 0.95).setDepth(60));
+    els.push(this.add.text(cx - W / 2 + 18, top + 12, '📜 The Continent', { fontFamily: 'monospace', fontSize: '16px', color: '#ffe9b0', fontStyle: 'bold' }).setDepth(61));
+    els.push(this.add.text(cx - W / 2 + 18, top + 36, 'This is your continent. Your territory glows; enemy kingdoms sit in the far corners; neutral settlements can be conquered. Press Tab or the button below to return.', { fontFamily: 'monospace', fontSize: '12px', color: '#f0e6d0', wordWrap: { width: W - 36 }, lineSpacing: 3 }).setDepth(61));
+    const bg = this.add.rectangle(cx + W / 2 - 70, top + H - 20, 110, 26, 0x2d6cb0).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }).setDepth(61);
+    els.push(bg);
+    els.push(this.add.text(cx + W / 2 - 70, top + H - 20, 'Got it →', { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(62));
+    bg.on('pointerover', () => bg.setFillStyle(0x3d83cf));
+    bg.on('pointerout', () => bg.setFillStyle(0x2d6cb0));
+    bg.on('pointerdown', (p, lx, ly, ev) => { if (ev) ev.stopPropagation(); els.forEach((o) => o.destroy()); });
   }
 
   // Tile (c,r) -> on-screen point on the continent map.
@@ -91,9 +114,26 @@ export class ContinentScene extends Phaser.Scene {
     const castle = iso.buildings.castle;
     const baseR = iso.territory ? iso.territory.baseR() : 8;
     const explored = iso.territory ? iso.territory.explored : null;
+    // (Phase 7) Base biome colour, with neighbour blending to soften the hard
+    // rectangular biome seams and a cheap positional noise for texture.
+    const biomeAt = (c, r) => (c < 0 || r < 0 || c >= N || r >= N) ? null : (iso.terrainType[r][c] === 'water' ? WATER : (BIOME[iso.biomeGrid[r][c]] || BIOME.middle));
+    const avg4 = (base, a, b, d, e) => {
+      let rr = (base >> 16) & 255, gg = (base >> 8) & 255, bb = base & 255, n = 1;
+      for (const x of [a, b, d, e]) { if (x == null) continue; rr += (x >> 16) & 255; gg += (x >> 8) & 255; bb += x & 255; n++; }
+      return (Math.round(rr / n) << 16) | (Math.round(gg / n) << 8) | Math.round(bb / n);
+    };
+    const shade = (col, f) => {
+      const rr = Phaser.Math.Clamp(Math.round(((col >> 16) & 255) * (1 + f)), 0, 255);
+      const gg = Phaser.Math.Clamp(Math.round(((col >> 8) & 255) * (1 + f)), 0, 255);
+      const bb = Phaser.Math.Clamp(Math.round((col & 255) * (1 + f)), 0, 255);
+      return (rr << 16) | (gg << 8) | bb;
+    };
     for (let r = 0; r < N; r++) {
       for (let c = 0; c < N; c++) {
-        let col = iso.terrainType[r][c] === 'water' ? WATER : (BIOME[iso.biomeGrid[r][c]] || BIOME.middle);
+        let col = biomeAt(c, r);
+        col = blend(col, avg4(col, biomeAt(c - 1, r), biomeAt(c + 1, r), biomeAt(c, r - 1), biomeAt(c, r + 1)), 0.35);
+        const hsh = ((c * 73856093) ^ (r * 19349663)) >>> 0;
+        col = shade(col, (((hsh % 16) - 8) / 8) * 0.05);
         // Unexplored area is dimmed (the geography is known but unscouted).
         const seen = !explored || explored[r][c] || (castle && Phaser.Math.Distance.Between(c, r, castle.col, castle.row) <= baseR + 16);
         if (!seen) col = blend(col, 0x10141c, 0.66);
@@ -145,6 +185,13 @@ export class ContinentScene extends Phaser.Scene {
     // Player castle — blue crown.
     const c = iso.buildings.castle;
     if (c) {
+      // (Phase 7) Warm-gold outline marking the area shown in the local view.
+      const half = 15;
+      const a = this.toScreen(c.col - half, c.row - half);
+      const b = this.toScreen(c.col + half, c.row + half);
+      g.lineStyle(2, 0xe6c87a, 0.85);
+      g.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      this.iconText.add(this.add.text((a.x + b.x) / 2, a.y - 4, 'local view', { fontFamily: 'monospace', fontSize: '11px', color: '#ffe9b0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 1));
       const p = this.toScreen(c.col, c.row);
       g.fillStyle(0x2aa0ff, 1).fillTriangle(p.x - 8, p.y + 6, p.x + 8, p.y + 6, p.x, p.y - 9);
       g.lineStyle(2, 0xffffff, 0.9).strokeTriangle(p.x - 8, p.y + 6, p.x + 8, p.y + 6, p.x, p.y - 9);
@@ -218,10 +265,17 @@ export class ContinentScene extends Phaser.Scene {
   }
 
   close(focus) {
+    if (this._closing) return;
+    this._closing = true;
     const iso = this.iso;
     if (focus) { const w = iso.tileCenter(focus.col, focus.row); iso.cameras.main.centerOn(w.x, w.y); }
-    this.scene.resume('IsometricScene');
-    this.scene.stop();
+    // (Phase 7) Fade out the continent, then fade the local view back in.
+    this.cameras.main.fadeOut(200, 8, 12, 18);
+    this.cameras.main.once('camerafadeoutcomplete', () => {
+      this.scene.resume('IsometricScene');
+      if (iso.cameras && iso.cameras.main) iso.cameras.main.fadeIn(240, 8, 12, 18);
+      this.scene.stop();
+    });
   }
 
   update(time, delta) {

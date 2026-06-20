@@ -291,8 +291,8 @@ export class IsometricScene extends GameScene {
     this.decorateBuilding(this.buildings.castle);
 
     this.buildHud();
-    this.createIronHud(); // Phase 5: Iron readout in the resource bar
     this.createDayCounter();
+    this.createIronHud(); // UI overhaul: chip-based resource bar (hides old day counter)
     this.createCastleBar();
     // Lift the castle HP bar above the (now larger) iso keep.
     const cb = this.buildings.castle;
@@ -311,6 +311,8 @@ export class IsometricScene extends GameScene {
     this.settlements = new SettlementManager(this); // Phase B: neutral settlements
     this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
     this.territory = new Territory(this); // Phase 4: territory + fog of war
+    // (Phase 7) Reveal a generous 20-tile starting radius around the castle.
+    if (this.buildings.castle) this.revealAround(this.buildings.castle.col, this.buildings.castle.row, 20);
     this.setupInput();
     this.setupCamera();
     this.createMinimap();
@@ -320,12 +322,7 @@ export class IsometricScene extends GameScene {
     this.refreshPanel();
 
     if (this._startZoom) this.cameras.main.setZoom(Phaser.Math.Clamp(this._startZoom, 0.3, 2));
-    if (this._noIntro) {
-      this.time.delayedCall(900, () => this.fireHint('start', 'Assign workers to buildings to start producing resources'));
-    } else {
-      this.showWelcomePanel();
-      this.time.delayedCall(900, () => this.fireHint('start', 'Assign workers to buildings to start producing resources'));
-    }
+    if (!this._noIntro) this.showWelcomePanel();
 
     this.setupUICamera();
 
@@ -686,6 +683,64 @@ export class IsometricScene extends GameScene {
     if (b.hpBar) { b.hpBar.x = b.x - (b.hpBarWidth || 40) / 2; b.hpBar.y = b.y - topOff; }
     if (b.levelText) b.levelText.setPosition(b.x + 18, b.y - topOff + 4);
     if (b.workerIcon) b.workerIcon.setPosition(b.x, b.y - topOff - 14);
+
+    // (UI overhaul Phase 6) Floating identity icon + hover name label.
+    this.addBuildingIcon(b, topOff);
+    if (b.rect && !b._hoverWired) {
+      b._hoverWired = true;
+      b.rect.on('pointerover', () => this.showBuildingName(b));
+      b.rect.on('pointerout', () => this.hideBuildingName(b));
+    }
+  }
+
+  // (Phase 6) A small bobbing icon above buildings that reuse another sprite, so
+  // their function reads at a glance. Hidden while the building is selected.
+  addBuildingIcon(b, topOff) {
+    if (b._floatIcon) return;
+    const KIND = { market: 'coin', blacksmith: 'hammer', watchtower: 'eye', tavern: 'mug' };
+    const kind = KIND[b.typeKey];
+    if (!kind) return;
+    const iy = b.y - topOff - 22;
+    const g = this.add.graphics().setPosition(b.x, iy);
+    this.drawBuildingGlyph(g, kind);
+    g.setDepth((b._southSum != null ? b._southSum : b.col + b.row) * DMUL + 0.02);
+    this.tweens.add({ targets: g, y: iy - 5, yoyo: true, repeat: -1, duration: 950, ease: 'Sine.easeInOut' });
+    b._floatIcon = g;
+  }
+
+  drawBuildingGlyph(g, kind) {
+    g.fillStyle(0x10141c, 0.6); g.fillCircle(0, 0, 12);
+    g.lineStyle(1.5, 0x000000, 0.45); g.strokeCircle(0, 0, 12);
+    if (kind === 'coin') { g.fillStyle(0xb8860b, 1).fillCircle(0, 0, 8); g.fillStyle(0xffd24a, 1).fillCircle(0, 0, 6); g.fillStyle(0xb8860b, 1).fillRect(-1, -4, 2, 8); }
+    else if (kind === 'hammer') { g.fillStyle(0xb5793f, 1).fillRect(-1.6, -2, 3.2, 11); g.fillStyle(0xeef2f7, 1).fillRoundedRect(-8, -8, 16, 6, 1.5); g.fillStyle(0x9aa3ad, 1).fillRect(-8, -3, 16, 1.5); }
+    else if (kind === 'eye') { g.fillStyle(0xffffff, 1).fillEllipse(0, 0, 18, 11); g.fillStyle(0x2a6cb0, 1).fillCircle(0, 0, 4.5); g.fillStyle(0x111111, 1).fillCircle(0, 0, 2.2); }
+    else if (kind === 'mug') { g.fillStyle(0xf0c277, 1).fillRoundedRect(-6, -5, 11, 12, 2); g.lineStyle(2.5, 0xf0c277, 1).strokeCircle(7, 1, 4); g.fillStyle(0xfffbe8, 1).fillRoundedRect(-6, -8, 11, 4, 2); }
+  }
+
+  // (Phase 6) Outlined building name on hover; auto-fades after ~2s.
+  showBuildingName(b) {
+    if (!b || !b.alive) return;
+    this.hideBuildingName(b);
+    const name = (BuildingTypes[b.typeKey] && BuildingTypes[b.typeKey].name) || b.typeKey;
+    const lbl = this.add.text(b.x, b.y - (14 + (b.baseScale || 1) * 34) - 40, name, { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 }).setOrigin(0.5).setDepth(20);
+    b._nameLbl = lbl;
+    b._nameTimer = this.time.delayedCall(2000, () => this.hideBuildingName(b));
+  }
+
+  hideBuildingName(b) {
+    if (b && b._nameTimer) { b._nameTimer.remove(false); b._nameTimer = null; }
+    if (b && b._nameLbl) { b._nameLbl.destroy(); b._nameLbl = null; }
+  }
+
+  selectBuilding(b) {
+    super.selectBuilding(b);
+    if (this._iconHidden && this._iconHidden !== b && this._iconHidden._floatIcon) this._iconHidden._floatIcon.setVisible(true);
+    if (b && b._floatIcon) { b._floatIcon.setVisible(false); this._iconHidden = b; }
+  }
+
+  clearSelection() {
+    super.clearSelection();
+    if (this._iconHidden && this._iconHidden._floatIcon) { this._iconHidden._floatIcon.setVisible(true); this._iconHidden = null; }
   }
 
   // Re-sort everything that can move/spawn, every frame, by iso depth.
@@ -794,6 +849,9 @@ export class IsometricScene extends GameScene {
       this.territoryPulse(); // (Phase 8) always pulse so placement is felt
       if (typeKey === 'watchtower') this.revealAround(b.col, b.row, def.revealRadius || 8);
       if (this.territory) this.territory.recompute();
+      this.placementType = null; // (Phase 5) auto-exit placement mode after placing
+      this.clearGhost();
+      this.time.delayedCall(450, () => this.showTutorial(2)); // Phase 2: stage 2 after first building
     }
     this.refreshPanel();
   }
@@ -817,6 +875,45 @@ export class IsometricScene extends GameScene {
       npc.wander();
       this.npcs.push(npc);
     }
+  }
+
+  // ---- (UI overhaul Phase 2) Interactive staged tutorial -------------------
+
+  // Stage 1 replaces the old static welcome modal.
+  showWelcomePanel() { this.showTutorial(1); }
+
+  tutorialSeen() { try { return JSON.parse(localStorage.getItem('kg_tut') || '{}'); } catch (e) { return {}; } }
+
+  showTutorial(stage) {
+    const TUT = {
+      1: { title: 'Your Kingdom Awaits', body: 'You start with nothing. Idle workers automatically gather nearby resources — you do not need to assign them. Build buildings to produce faster, and grow your settlement to unlock new buildings and units.', btn: "I'm ready →" },
+      2: { title: 'Boost Production', body: 'Your first building is placed. Assign a worker with the + button in its panel — workers staffed in a building gather MUCH faster than idle workers.', btn: 'Got it →' },
+      3: { title: 'Command Your Army', body: 'Warriors defend your kingdom automatically. Drag a box around them to select, then right-click to command them. Press Tab to see the whole continent.', btn: 'Got it →' },
+      4: { title: 'The Continent', body: 'This is your continent. Your territory glows blue. Enemy kingdoms sit in the far corners. Neutral settlements can be conquered. Click anywhere to return.', btn: 'Got it →' },
+      5: { title: 'Under Attack!', body: 'Your kingdom is under attack! Select your warriors and right-click enemies to fight. When the armies are large enough, a full battle begins.', btn: 'Fight! →' },
+    };
+    const seen = this.tutorialSeen();
+    if (seen[stage] || !TUT[stage]) return;
+    seen[stage] = true;
+    try { localStorage.setItem('kg_tut', JSON.stringify(seen)); } catch (e) {}
+    const t = TUT[stage];
+    if (this._tutPanel) this._tutPanel.forEach((o) => o.destroy());
+    const fix = (o) => o.setScrollFactor(0).setDepth(78);
+    const W = 540, H = 120, cx = GAME_W / 2, top = this.PANEL_Y - H - 40;
+    const els = [];
+    els.push(fix(this.add.rectangle(cx, top + H / 2, W, H, 0x1a140c, 0.97).setStrokeStyle(2, 0xc9a14a, 0.95)));
+    els.push(fix(this.add.rectangle(cx - W / 2 + 3, top + H / 2, 4, H - 6, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(cx - W / 2 + 18, top + 12, `📜 ${t.title}`, { fontFamily: 'monospace', fontSize: '16px', color: '#ffe9b0', fontStyle: 'bold' })));
+    els.push(fix(this.add.text(cx - W / 2 + 18, top + 36, t.body, { fontFamily: 'monospace', fontSize: '12px', color: '#f0e6d0', wordWrap: { width: W - 36 }, lineSpacing: 3 })));
+    const bg = fix(this.add.rectangle(cx + W / 2 - 80, top + H - 22, 130, 28, 0x2d6cb0).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(bg);
+    els.push(fix(this.add.text(cx + W / 2 - 80, top + H - 22, t.btn, { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const close = () => { els.forEach((o) => o.destroy()); this._tutPanel = null; };
+    bg.on('pointerover', () => bg.setFillStyle(0x3d83cf));
+    bg.on('pointerout', () => bg.setFillStyle(0x2d6cb0));
+    bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); close(); });
+    this._tutPanel = els;
+    this.routeCameras && this.routeCameras();
   }
 
   // (Phase 8) A ring pulse from the castle whenever a building is placed.
@@ -1228,26 +1325,93 @@ export class IsometricScene extends GameScene {
   // to make room (they were laid out by the base buildHud).
   // (FIX 5) Re-lay the resource bar into two tidy rows within the top bar:
   //   Row 1: Wood | Stone | Food | Gold      Row 2: Iron | Workers | Soldiers
+  // (UI overhaul Phase 1) Consistent resource bar: every resource is a chip with
+  // the SAME format — distinct icon + value + label. Replaces the old mix of
+  // icon-only / label-only / ambiguous-dot readouts.
   createIronHud() {
     const fix = (o) => o.setScrollFactor(0);
-    const SZ = '15px';
-    const ic = (o, x, y) => o.setPosition(x, y).setDisplaySize(18, 18);
-    const tx = (o, x, y) => o.setPosition(x, y).setFontSize(SZ);
-    // Row 1
-    ic(this.hud.woodIcon, 18, 13); tx(this.hud.wood, 32, 6);
-    tx(this.hud.stone, 96, 6);
-    ic(this.hud.foodIcon, 200, 13); tx(this.hud.food, 214, 6);
-    ic(this.hud.goldIcon, 276, 13); tx(this.hud.gold, 290, 6);
-    // Row 2
-    this.hud.ironIcon = fix(this.add.image(18, 37, 'icon_gold').setDisplaySize(18, 18).setTint(0x9aa0a6).setDepth(41));
-    this.hud.iron = fix(this.add.text(32, 30, '0', { fontFamily: 'monospace', fontSize: SZ, color: '#c2c8ce', fontStyle: 'bold' }).setDepth(41));
-    tx(this.hud.workers, 96, 30);
-    tx(this.hud.soldiers, 250, 30);
+    // Retire the old single-style readouts (kept by GameScene.buildHud but now
+    // hidden; their hidden updates are harmless).
+    ['woodIcon', 'foodIcon', 'goldIcon', 'wood', 'stone', 'food', 'gold', 'workers', 'soldiers'].forEach((k) => this.hud[k] && this.hud[k].setVisible(false));
+    if (this.hud.day) this.hud.day.setVisible(false);
+
+    fix(this.add.rectangle(0, 0, GAME_W, 56, 0x10141c, 0.96).setOrigin(0, 0).setDepth(39));
+    fix(this.add.rectangle(0, 56, GAME_W, 2, 0x000000, 0.6).setOrigin(0, 0).setDepth(39));
+    const gfx = fix(this.add.graphics().setDepth(42));
+    this.chips = {};
+
+    // A chip = bg rect + icon (image or drawn shape) + value + label.
+    const chip = (key, x, y, w, labelTxt, imgKey, draw) => {
+      const bg = fix(this.add.rectangle(x, y, w, 25, 0x1c2330, 0.92).setOrigin(0, 0).setDepth(40).setStrokeStyle(1, 0x39455a, 0.9));
+      const cx = x + 12, cy = y + 12;
+      if (imgKey) fix(this.add.image(cx, cy, imgKey).setDisplaySize(18, 18).setDepth(42));
+      else if (draw) draw(gfx, cx, cy);
+      const value = fix(this.add.text(x + 23, y + 3, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setDepth(42));
+      const label = fix(this.add.text(x + 23, y + 15, labelTxt, { fontFamily: 'monospace', fontSize: '8px', color: '#8893a3' }).setDepth(42));
+      this.chips[key] = { bg, value, label };
+    };
+    // Distinct drawn icons (shapes differ for colourblind readability).
+    const I = {
+      stone: (g, x, y) => g.fillStyle(0xaab1ba, 1).fillRoundedRect(x - 7, y - 5, 14, 11, 3),
+      iron: (g, x, y) => { g.fillStyle(0x6b7686, 1); g.beginPath(); g.moveTo(x, y - 7); g.lineTo(x + 6, y); g.lineTo(x, y + 7); g.lineTo(x - 6, y); g.closePath(); g.fillPath(); },
+      equip: (g, x, y) => { g.fillStyle(0xd2d9e2, 1).fillRect(x - 1.5, y - 8, 3, 11); g.fillRect(x - 5, y + 1, 10, 2.5); g.fillStyle(0x9a6a3a, 1).fillRect(x - 1.5, y + 3, 3, 4); },
+      workers: (g, x, y) => { g.fillStyle(0x62d0f0, 1).fillCircle(x, y - 4, 3.4); g.fillRoundedRect(x - 4, y - 1, 8, 8, 2); },
+      soldiers: (g, x, y) => { g.fillStyle(0xc9d3df, 1); g.beginPath(); g.moveTo(x - 6, y - 6); g.lineTo(x + 6, y - 6); g.lineTo(x + 6, y + 1); g.lineTo(x, y + 7); g.lineTo(x - 6, y + 1); g.closePath(); g.fillPath(); },
+      day: (g, x, y) => g.fillStyle(0xffe9a8, 1).fillCircle(x, y, 5),
+    };
+    // Row 1 — economy.
+    chip('wood', 6, 2, 86, 'WOOD', 'icon_wood'); chip('stone', 96, 2, 86, 'STONE', null, I.stone);
+    chip('food', 186, 2, 86, 'FOOD', 'icon_food'); chip('gold', 276, 2, 86, 'GOLD', 'icon_gold');
+    chip('iron', 366, 2, 86, 'IRON', null, I.iron);
+    // Row 2 — military / time.
+    chip('equipment', 6, 29, 86, 'EQUIP', null, I.equip);
+    chip('workers', 96, 29, 104, 'WORKERS', null, I.workers);
+    chip('soldiers', 204, 29, 104, 'SOLDIERS', null, I.soldiers);
+    chip('day', 312, 29, 70, 'DAY', null, I.day);
+    chip('season', 386, 29, 160, 'SEASON', null, null);
+    this.seasonIcon = fix(this.add.ellipse(398, 41, 11, 11, 0x66cc66).setDepth(42));
+    this.chips.season.value.setX(410);
+    this.chips.season.label.setX(410);
+  }
+
+  seasonColor(day) {
+    return { 'Early Spring': 0x66cc66, 'Late Spring': 0x66cc66, Summer: 0xffd24a, 'Early Autumn': 0xd2772a, 'Late Autumn': 0xc06010, Winter: 0x7fa8d8 }[this.seasonHint(day)] || 0x66cc66;
+  }
+
+  updateChips() {
+    if (!this.chips) return;
+    const r = this.resources;
+    this._chipPrev = this._chipPrev || {};
+    const set = (key, val) => {
+      const ch = this.chips[key]; if (!ch) return;
+      ch.value.setText(`${val}`);
+      const prev = this._chipPrev[key];
+      if (prev !== undefined && Math.abs(val - prev) >= 2 && !ch._crit) {
+        ch.bg.setFillStyle(val > prev ? 0x1e3a24 : 0x3a1e22, 0.95);
+        this.time.delayedCall(300, () => { if (!ch._crit) ch.bg.setFillStyle(0x1c2330, 0.92); });
+      }
+      this._chipPrev[key] = val;
+    };
+    set('wood', Math.floor(r.wood)); set('stone', Math.floor(r.stone)); set('food', Math.floor(r.food));
+    set('gold', Math.floor(r.gold)); set('iron', Math.floor(r.iron || 0)); set('equipment', Math.floor(r.equipment || 0));
+    this.chips.workers.value.setText(`${this.buildings.workersUsed()}/${r.workersCap}`);
+    this.chips.soldiers.value.setText(`${this.troops.count}/${this.soldierCap()}`);
+    this.chips.day.value.setText(`${this.gameDay}`);
+    this.chips.season.value.setText(this.seasonHint(this.gameDay));
+    if (this.seasonIcon) this.seasonIcon.setFillStyle(this.seasonColor(this.gameDay));
+    this.critChip('food', r.food < 20);
+    this.critChip('soldiers', this.troops.count === 0);
+  }
+
+  critChip(key, on) {
+    const ch = this.chips[key]; if (!ch) return;
+    if (on && !ch._crit) { ch._crit = true; ch.bg.setFillStyle(0x4a1e1e, 0.92); ch._critTween = this.tweens.add({ targets: ch.bg, alpha: { from: 0.92, to: 0.4 }, yoyo: true, repeat: -1, duration: 600 }); }
+    else if (!on && ch._crit) { ch._crit = false; if (ch._critTween) ch._critTween.stop(); ch.bg.setAlpha(0.92).setFillStyle(0x1c2330, 0.92); }
   }
 
   updateHud() {
     super.updateHud();
-    if (this.hud.iron) this.hud.iron.setText(`${Math.floor(this.resources.iron || 0)}`);
+    this.updateChips();
     // (Phase 6) Top-bar threat readout reflects whichever kingdom is attacking.
     if (this.kingdoms && this.hud.aiStatus) {
       const atk = this.waveCoord.holder;
@@ -1304,6 +1468,8 @@ export class IsometricScene extends GameScene {
 
   refreshPanel() {
     this.panel.removeAll(true);
+    this.hideTip();
+    this.highlightTabs();
     if (this.selectedBuilding && this.selectedBuilding.alive) this.renderSelectedPanel(this.selectedBuilding);
     else if (this.panelMode === 'expedition') this.renderExpeditionPanel();
     else if (this.panelMode === 'artifacts') this.renderArtifactsPanel();
@@ -1322,13 +1488,12 @@ export class IsometricScene extends GameScene {
     this.panelText(GAME_W - 150, this.PANEL_Y + 6, `Buildings: ${this.buildings.placedCount()}/${this.maxBuildings()}`, { color: '#ffd23f', bold: true });
 
     const unlocked = BUILD_ORDER.filter((k) => this.buildingUnlocked(k));
-    const bw = 88, h = 38, gap = 4, perRow = 7;
+    const bw = 88, h = 44, gap = 4, perRow = 7;
     unlocked.forEach((k, i) => {
-      const t = BuildingTypes[k];
       const col = i % perRow, rowi = Math.floor(i / perRow);
-      const x = 6 + col * (bw + gap), y = this.PANEL_Y + 26 + rowi * (h + 6);
+      const x = 6 + col * (bw + gap), y = this.PANEL_Y + 24 + rowi * (h + 6);
       const ok = this.buildingUnlocked(k) && this.buildings.canPlace(k, this.resources, this.maxBuildings()).ok;
-      this.spriteButton(x, y, bw, h, t.name, formatCost(t.cost), ok, () => { this.placementType = k; this.selectedBuilding = null; this.clearSelection(); this.refreshPanel(); }, { active: this.placementType === k });
+      this.buildPaletteButton(x, y, bw, h, k, ok);
     });
 
     // Right side: cancel placement, or the settlement upgrade button.
@@ -1345,6 +1510,51 @@ export class IsometricScene extends GameScene {
     } else {
       this.spriteButton(GAME_W - 150, uy, 140, 56, 'Large Castle', 'max stage', false, null);
     }
+  }
+
+  // (Phase 5) A build-palette button: name on top, cost as icon+number pairs,
+  // a hover tooltip (name + description), and auto-deselect handled in tryBuild.
+  buildPaletteButton(x, y, w, h, key, ok) {
+    const t = BuildingTypes[key];
+    const active = this.placementType === key;
+    const fill = !ok ? 0x39393f : active ? 0x2e8b57 : 0x2d6cb0;
+    const bg = this.add.rectangle(x, y, w, h, fill).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(2, ok ? 0xf0e6c8 : 0x666666, ok ? 0.85 : 0.4).setInteractive({ useHandCursor: ok });
+    this.panel.add(bg);
+    this.panel.add(this.add.text(x + w / 2, y + 7, t.name, { fontFamily: 'monospace', fontSize: '11px', color: ok ? '#ffffff' : '#9aa0a6', fontStyle: 'bold' }).setOrigin(0.5, 0).setScrollFactor(0));
+    this.drawCostRow(x, y + h - 12, w, t.cost, ok);
+    bg.on('pointerover', () => { if (ok && !active) bg.setFillStyle(0x3d83cf); this.showTip(x + w / 2, y, t.name, t.desc || ''); });
+    bg.on('pointerout', () => { if (ok && !active) bg.setFillStyle(fill); this.hideTip(); });
+    if (ok) bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.placementType = key; this.selectedBuilding = null; this.clearSelection(); this.hideTip(); this.time.delayedCall(0, () => this.refreshPanel()); });
+  }
+
+  // Lays out a building cost as small resource icon + amount pairs, centred in w.
+  drawCostRow(x, cy, w, cost, ok) {
+    const entries = Object.entries(cost || {});
+    if (!entries.length) {
+      this.panel.add(this.add.text(x + w / 2, cy - 5, 'Free', { fontFamily: 'monospace', fontSize: '10px', color: '#bfe6c0' }).setOrigin(0.5, 0).setScrollFactor(0));
+      return;
+    }
+    const g = this.add.graphics().setScrollFactor(0); this.panel.add(g);
+    const itemW = (v) => 13 + 1 + `${v}`.length * 6 + 7;
+    const total = entries.reduce((s, [, v]) => s + itemW(v), 0);
+    let cx = x + (w - total) / 2 + 6;
+    for (const [k, v] of entries) {
+      this.resGlyph(g, cx, cy, k);
+      this.panel.add(this.add.text(cx + 8, cy, `${v}`, { fontFamily: 'monospace', fontSize: '11px', color: ok ? '#ffe9b0' : '#9aa0a6', fontStyle: 'bold' }).setOrigin(0, 0.5).setScrollFactor(0));
+      cx += itemW(v);
+    }
+  }
+
+  // A ~13px resource icon: image for wood/food/gold, drawn shape otherwise.
+  resGlyph(g, cx, cy, key) {
+    if (key === 'wood' || key === 'food' || key === 'gold') {
+      this.panel.add(this.add.image(cx, cy, `icon_${key}`).setDisplaySize(14, 14).setScrollFactor(0));
+      return;
+    }
+    if (key === 'stone') g.fillStyle(0xaab1ba, 1).fillRoundedRect(cx - 6, cy - 4, 12, 9, 2);
+    else if (key === 'iron') { g.fillStyle(0x6b7686, 1); g.beginPath(); g.moveTo(cx, cy - 6); g.lineTo(cx + 5, cy); g.lineTo(cx, cy + 6); g.lineTo(cx - 5, cy); g.closePath(); g.fillPath(); }
+    else if (key === 'equipment') { g.fillStyle(0xd2d9e2, 1).fillRect(cx - 1.4, cy - 6, 2.8, 9); g.fillRect(cx - 4, cy + 1, 8, 2.2); g.fillStyle(0x9a6a3a, 1).fillRect(cx - 1.4, cy + 3, 2.8, 3); }
+    else g.fillStyle(0xcfc1a6, 1).fillCircle(cx, cy, 5);
   }
 
   // (Phase 2) Market / Tavern get custom panels; everything else uses the base.
@@ -1396,24 +1606,30 @@ export class IsometricScene extends GameScene {
 
     // (FIX 3) Each type can have several slots running at once; the button
     // sends another party while free, and active slots show their own countdown.
+    // (Phase 5) Three evenly-spaced cards that fit the panel without clipping;
+    // disabled cards (too few soldiers) show a tooltip explaining why.
     const keys = ['scout', 'raid', 'campaign'];
-    const w = 296;
-    const gap = 8;
-    let x = 14;
+    const gap = 12, x0 = 14;
+    const w = Math.floor((GAME_W - 28 - gap * (keys.length - 1)) / keys.length);
     const by = this.PANEL_Y + 30;
-    for (const key of keys) {
+    keys.forEach((key, i) => {
+      const x = x0 + i * (w + gap);
       const def = this.expeditions.defs[key];
       const active = this.expeditions.activeCount(key);
       const can = this.expeditions.canSend(key);
-      this.spriteButton(x, by, w, 42, `${def.name}  (${def.cost} sol · ${def.days}d)`, def.reward, can, () => this.expeditions.send(key));
+      const btn = this.spriteButton(x, by, w, 42, `${def.name}  (${def.cost} sol · ${def.days}d)`, def.reward, can, () => this.expeditions.send(key));
+      if (!can) {
+        const why = this.troops.count < def.cost ? `Need ${def.cost} soldiers — you have ${this.troops.count}.` : active >= def.maxSlots ? `All ${def.maxSlots} parties already out.` : 'Cannot send right now.';
+        btn.setInteractive({ useHandCursor: false });
+        btn.on('pointerover', () => this.showTip(x + w / 2, by, def.name, `${why}\nReward: ${def.reward}`));
+        btn.on('pointerout', () => this.hideTip());
+      }
       const days = this.expeditions.slotDays(key);
       const slotTxt = `Out ${active}/${def.maxSlots}` + (days.length ? '   ' + days.map((d) => `[${d.toFixed(1)}d]`).join(' ') : '');
       this.panelText(x + 2, by + 46, slotTxt, { size: '12px', color: active > 0 ? '#ffe066' : '#9aa0a6' });
-      x += w + gap;
-    }
+    });
 
-    this.spriteButton(GAME_W - 182, this.PANEL_Y + 6, 88, 22, `Artifacts (${this.artifacts.length})`, '', true, () => { this.panelMode = 'artifacts'; this.refreshPanel(); }, { gold: true });
-    this.spriteButton(GAME_W - 88, this.PANEL_Y + 6, 78, 22, 'Back', '', true, () => { this.panelMode = 'build'; this.refreshPanel(); });
+    this.spriteButton(GAME_W - 110, this.PANEL_Y + 6, 100, 22, `Artifacts (${this.artifacts.length})`, '', true, () => { this.panelMode = 'artifacts'; this.refreshPanel(); }, { gold: true });
   }
 
   // (Phase 5) Owned artifacts + scroll / iron tallies.
@@ -1445,10 +1661,10 @@ export class IsometricScene extends GameScene {
     this.threatWarning(`${kingdom.cfg.name} is attacking!`, kingdom.cfg.color, true);
     const wt = this.hud && this.hud.wave;
     if (wt) { const x0 = wt.x; this.tweens.add({ targets: wt, x: x0 + 5, yoyo: true, repeat: 5, duration: 45, onComplete: () => (wt.x = x0) }); }
-    this.fireHint('firstWave', 'Enemy attack incoming — select your warriors and right-click enemies to fight');
     // (Phase 1) Large engagements (10+ combined units) resolve in the BattleScene.
     const enemies = this.waves.enemies.filter((e) => e.faction === kingdom);
-    this.maybeTriggerBattle(enemies, kingdom.cfg.key, { type: 'wave', kingdom, defending: true });
+    const battled = this.maybeTriggerBattle(enemies, kingdom.cfg.key, { type: 'wave', kingdom, defending: true });
+    if (!battled) this.showTutorial(5); // Phase 2: stage 5 on first small attack (battles have their own UI)
   }
 
   // ---- Phase 1: BattleScene trigger + outcome -----------------------------
@@ -1521,24 +1737,75 @@ export class IsometricScene extends GameScene {
     return (this.kingdoms || []).reduce((s, k) => s + (k.castleAlive ? k.estimatedArmy() : 0), 0);
   }
 
-  // Small HUD button (top-right) that toggles the kingdom status panel.
-  // (FIX 5) Two collapsed top-right openers: Kingdoms status + Expeditions.
-  // Both toggle their bottom panel so neither takes up space by default.
+  // (UI overhaul Phase 5) Persistent tabs on the top edge of the bottom panel
+  // replace the old top-right openers: [Build][Expeditions][Kingdoms][Caravans].
   createKingdomsButton() {
     const fix = (o) => o.setScrollFactor(0);
-    const mkBtn = (x, y, w, h, label, fillC, hoverC, onClick) => {
-      const btn = fix(this.add.rectangle(x, y, w, h, fillC).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.6).setDepth(40).setInteractive({ useHandCursor: true }));
-      fix(this.add.text(x + w / 2, y + h / 2, label, { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(41));
-      btn.on('pointerover', () => btn.setFillStyle(hoverC));
-      btn.on('pointerout', () => btn.setFillStyle(fillC));
-      btn.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); onClick(); });
-      return btn;
-    };
-    const toggle = (mode) => { this.selectedBuilding = null; this.clearSelection(); this.placementType = null; this.panelMode = this.panelMode === mode ? 'build' : mode; this.refreshPanel(); };
-    const X = GAME_W - 238, W = 108;
-    mkBtn(X, TOP_BAR + 8, W, 22, 'Kingdoms ▾', 0x4a2d6b, 0x5d3a85, () => toggle('kingdoms'));
-    mkBtn(X, TOP_BAR + 34, W, 22, 'Expeditions ▾', 0x1f5b3a, 0x2e7d50, () => toggle('expedition'));
-    mkBtn(X - 116, TOP_BAR + 8, W, 22, 'Caravans ▾', 0x2d4a6b, 0x3a5d85, () => { if (this.caravans && this.caravans.sites().length >= 2) toggle('caravans'); else this.showToast('Conquer a settlement first (need 2+ sites)'); });
+    const defs = [['Build', 'build', 0x3a2f1a], ['Expeditions', 'expedition', 0x1f4f33], ['Kingdoms', 'kingdoms', 0x432863], ['Caravans', 'caravans', 0x2d4a6b]];
+    this.panelTabs = [];
+    const ty = this.PANEL_Y - 26, h = 26, w = 134, gap = 3;
+    defs.forEach((t, i) => {
+      const x = 8 + i * (w + gap);
+      const bg = fix(this.add.rectangle(x, ty, w, h, t[2]).setOrigin(0, 0).setDepth(40).setStrokeStyle(2, 0xc9a14a, 0.5).setInteractive({ useHandCursor: true }));
+      const txt = fix(this.add.text(x + w / 2, ty + h / 2, t[0], { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(41));
+      bg.on('pointerover', () => { if (!this.tabActive(t[1])) bg.setFillStyle(0x5a4a2a); });
+      bg.on('pointerout', () => this.highlightTabs());
+      bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.onTabClick(t[1]); });
+      this.panelTabs.push({ mode: t[1], bg, txt, base: t[2] });
+    });
+    this.highlightTabs();
+  }
+
+  tabActive(mode) {
+    if (mode === 'build') return !['expedition', 'artifacts', 'kingdoms', 'caravans'].includes(this.panelMode) || !!this.selectedBuilding;
+    if (mode === 'expedition') return this.panelMode === 'expedition' || this.panelMode === 'artifacts';
+    return this.panelMode === mode && !this.selectedBuilding;
+  }
+
+  highlightTabs() {
+    if (!this.panelTabs) return;
+    const caravanOk = this.caravans && this.caravans.sites().length >= 2;
+    for (const t of this.panelTabs) {
+      const on = this.tabActive(t.mode);
+      const dim = t.mode === 'caravans' && !caravanOk;
+      t.bg.setFillStyle(on ? 0xc9a14a : t.base, dim ? 0.5 : 1);
+      t.txt.setColor(on ? '#1a140c' : dim ? '#8a8f99' : '#ffffff');
+      t.bg.setStrokeStyle(2, 0xc9a14a, on ? 1 : 0.45);
+    }
+  }
+
+  onTabClick(mode) {
+    this.selectedBuilding = null; this.clearSelection(); this.placementType = null; this.clearGhost(); this.hideTip();
+    if (mode === 'caravans' && !(this.caravans && this.caravans.sites().length >= 2)) { this.showToast('Conquer a settlement first (need 2+ sites)'); return; }
+    this.panelMode = mode;
+    this.refreshPanel();
+  }
+
+  // ---- (Phase 5) Hover tooltip shared by the build palette + expeditions -----
+  showTip(cx, topY, title, body) {
+    this.hideTip();
+    const W = 250;
+    const bodyText = this.add.text(0, 0, body || '', { fontFamily: 'monospace', fontSize: '11px', color: '#e8e0cc', wordWrap: { width: W - 20 }, lineSpacing: 2 }).setScrollFactor(0).setDepth(81);
+    const H = 26 + bodyText.height + 8;
+    const px = Phaser.Math.Clamp(cx - W / 2, 6, GAME_W - W - 6);
+    const py = topY - H - 8;
+    const bg = this.add.rectangle(px, py, W, H, 0x16120a, 0.98).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(2, 0xc9a14a, 0.9).setDepth(80);
+    const tt = this.add.text(px + 10, py + 7, title, { fontFamily: 'monospace', fontSize: '13px', color: '#ffe9b0', fontStyle: 'bold' }).setScrollFactor(0).setDepth(81);
+    bodyText.setPosition(px + 10, py + 26);
+    this._tip = [bg, tt, bodyText];
+  }
+
+  hideTip() { if (this._tip) { this._tip.forEach((o) => o.destroy()); this._tip = null; } }
+
+  // (UI overhaul Phase 4) Status label -> colour.
+  diploColor(s) {
+    if (s.includes('Allied')) return '#7CFC7C';
+    if (s.includes('Non-aggression') || s.includes('Pact')) return '#9ad0ff';
+    if (s.includes('Friendly')) return '#a6e22e';
+    if (s.includes('Cautious')) return '#e6c84a';
+    if (s.includes('Neutral')) return '#cfc1a6';
+    if (s.includes('Coordinated')) return '#ff4d4d';
+    return '#ff8a5a'; // Hostile
   }
 
   renderKingdomsPanel() {
@@ -1547,28 +1814,42 @@ export class IsometricScene extends GameScene {
     );
     const scouted = this.intelActive();
     this.panelText(16, this.PANEL_Y + 8, `AI KINGDOMS — DIPLOMACY${scouted ? '   (scouted)' : ''}`, { bold: true, color: '#ffe9b0' });
-    let y = this.PANEL_Y + 32;
-    for (const k of this.kingdoms) {
+    const base = this.PANEL_Y + 26, rowH = 32;
+    this.kingdoms.forEach((k, idx) => {
       const key = k.cfg.key;
-      const sw = this.add.rectangle(20, y + 2, 14, 14, k.cfg.color).setOrigin(0, 0).setStrokeStyle(1, 0x000000, 0.6).setScrollFactor(0);
-      this.panel.add(sw);
-      this.panelText(40, y, k.cfg.name, { bold: true, color: '#ffffff', size: '13px' });
-      const army = k.castleAlive ? `${scouted ? '' : '~'}${k.estimatedArmy()}w` : '—';
-      this.panelText(170, y, `${k.statusWord()} · ${army}`, { color: '#cfe0ff', size: '12px' });
-      // Relationship bar (-100..100).
+      const y = base + idx * rowH;
+      // Identity.
+      this.panel.add(this.add.rectangle(18, y + 6, 16, 16, k.cfg.color).setOrigin(0, 0).setStrokeStyle(1, 0x000000, 0.6).setScrollFactor(0));
+      this.panelText(42, y + 3, k.cfg.name, { bold: true, color: '#ffffff', size: '13px' });
+      const n = k.estimatedArmy();
+      const army = k.castleAlive ? `${scouted ? '' : '~'}${n} ${n === 1 ? 'Warrior' : 'Warriors'}` : 'defeated';
+      this.panelText(42, y + 18, army, { color: '#b9c6d6', size: '11px' });
+      // Status label (coloured).
       const rel = this.diplomacy ? this.diplomacy.get(key) : 0;
       const relStatus = this.diplomacy ? this.diplomacy.status(key) : 'Neutral';
-      const bx = 300, bw = 130;
-      this.panel.add(this.add.rectangle(bx, y + 2, bw, 12, 0x000000, 0.5).setOrigin(0, 0).setScrollFactor(0));
-      const relCol = rel <= -50 ? 0xd64a4a : rel < 0 ? 0xd6a04a : rel < 50 ? 0xc8c84a : 0x4ad66b;
-      this.panel.add(this.add.rectangle(bx + bw / 2, y + 2, (bw / 2) * Math.abs(rel) / 100, 12, relCol).setOrigin(rel < 0 ? 1 : 0, 0).setScrollFactor(0));
-      this.panelText(bx + bw + 6, y, `${relStatus} (${rel})`, { color: '#cfc1a6', size: '11px' });
-      // Action buttons.
-      const can50 = this.diplomacy && this.diplomacy.get(key) >= 50 && !this.diplomacy.nap[key];
-      this.spriteButton(610, y - 2, 70, 20, 'Tribute', '', !!this.diplomacy, () => this.diplomacy.sendTribute(key));
-      this.spriteButton(684, y - 2, can50 ? 60 : 60, 20, can50 ? 'Pact' : 'War', '', !!this.diplomacy, () => (can50 ? this.diplomacy.acceptPact(key) : this.diplomacy.declareWar(key)), { gold: can50 });
-      y += 26;
-    }
+      this.panelText(180, y + 9, relStatus, { color: this.diploColor(relStatus), size: '13px', bold: true });
+      // Relationship bar: centre tick at neutral, red (hostile) left / green (friendly) right.
+      const bx = 330, bw = 180, cx = bx + bw / 2, barY = y + 16;
+      this.panel.add(this.add.rectangle(bx, barY, bw, 11, 0x000000, 0.55).setOrigin(0, 0).setScrollFactor(0));
+      this.panel.add(this.add.rectangle(bx, barY, bw / 2, 11, 0x3a1418, 0.7).setOrigin(0, 0).setScrollFactor(0));
+      this.panel.add(this.add.rectangle(cx, barY, bw / 2, 11, 0x123a1a, 0.7).setOrigin(0, 0).setScrollFactor(0));
+      if (rel >= 0) this.panel.add(this.add.rectangle(cx, barY, (bw / 2) * (rel / 100), 11, 0x4ad66b).setOrigin(0, 0).setScrollFactor(0));
+      else this.panel.add(this.add.rectangle(cx, barY, (bw / 2) * (-rel / 100), 11, 0xd64a4a).setOrigin(1, 0).setScrollFactor(0));
+      this.panel.add(this.add.rectangle(cx, barY - 3, 2, 17, 0xffffff, 0.9).setOrigin(0.5, 0).setScrollFactor(0));
+      this.panelText(cx, y + 1, `${rel > 0 ? '+' : ''}${rel}`, { color: rel < 0 ? '#ff9a8a' : rel > 0 ? '#9af0a0' : '#dcd2bf', size: '11px', bold: true }).setOrigin(0.5, 0).setScrollFactor(0);
+      // Action buttons with their effect shown up front.
+      const napped = this.diplomacy && this.diplomacy.nap[key];
+      const canTribute = this.diplomacy && this.resources.gold >= 50;
+      this.spriteButton(556, y + 3, 116, 26, 'Tribute', '50g → +20', !!canTribute, () => this.diplomacy.sendTribute(key));
+      if (napped) {
+        this.spriteButton(680, y + 3, 96, 26, this.diplomacy.ally[key] ? 'Allied' : 'Pact ✓', 'at peace', false, () => {});
+      } else if (rel >= 50) {
+        const cost = rel >= 80 ? 200 : 100;
+        this.spriteButton(680, y + 3, 96, 26, 'Form Pact', `${cost}g → peace`, this.resources.gold >= cost, () => this.diplomacy.acceptPact(key), { gold: true });
+      } else {
+        this.spriteButton(680, y + 3, 96, 26, 'Declare War', 'relations → 0', !!this.diplomacy, () => this.diplomacy.declareWar(key));
+      }
+    });
     this.spriteButton(GAME_W - 88, this.PANEL_Y + 6, 78, 22, 'Back', '', true, () => { this.panelMode = 'build'; this.refreshPanel(); });
   }
 
@@ -1745,8 +2026,10 @@ export class IsometricScene extends GameScene {
     } else {
       this._desertAcc = 0;
     }
-    if (this.troops.count > 0 && this.resources.food < 30) this.fireHint('lowFood', 'Your people are hungry — build a Farm and assign workers');
-    if (this.canUpgradeTier()) this.fireHint('canUpgrade', 'Your settlement can grow — check the upgrade button');
+    if (this.resources.food < 30) this.fireHint('lowFood', 'Food is running low — build a Farm so your people keep eating');
+    if (this.resources.workersCap > 0 && this.buildings.workersUsed() >= this.resources.workersCap) this.fireHint('workerCap', 'All workers are busy — build more Houses to grow your workforce');
+    if (this.canUpgradeTier()) this.fireHint('canUpgrade', 'Your settlement can grow — use the Grow button at the bottom-right');
+    if (this.troops.count >= 5) this.fireHint('army5', 'You have an army — send an Expedition (bottom panel) for rare rewards');
 
     if (this.waveCoord.cooldown > 0) this.waveCoord.cooldown -= dt;
     for (const k of this.kingdoms) k.update(dt); // Phase 6: independent AI kingdoms
@@ -1776,6 +2059,7 @@ export class IsometricScene extends GameScene {
     this.pawns.update(dt);
     this.troops.update(dt, threats);
     this.resources.soldiers = this.troops.count;
+    if (this.troops.count > 0) this.showTutorial(3); // Phase 2: stage 3 after first warrior
 
     for (const b of this.buildings.buildings) {
       if (b.typeKey !== 'barracks' || b.slots.length === 0) continue;
@@ -1795,6 +2079,9 @@ export class IsometricScene extends GameScene {
       }
     }
 
+    for (const b of this.buildings.buildings) {
+      if (!b.alive && b._floatIcon) { b._floatIcon.destroy(); b._floatIcon = null; this.hideBuildingName(b); } // (Phase 6) clean up icons of dying buildings
+    }
     if (this.buildings.reap()) {
       if (this.selectedBuilding && !this.selectedBuilding.alive) {
         this.selectedBuilding = null;

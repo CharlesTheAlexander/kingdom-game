@@ -112,9 +112,13 @@ export class ResourceNodeManager {
         }
       }
     };
-    near('wood', 3, 7, 12);
+    // (Phase 7) A couple of nodes right beside the castle so the player can see
+    // resources to gather from the very first view.
+    near('wood', 1, 3, 5);
+    near('food', 1, 3, 5);
+    near('wood', 2, 7, 12);
     near('stone', 2, 7, 12);
-    near('food', 3, 7, 12);
+    near('food', 2, 7, 12);
     near('gold', 1, 9, 14);
 
     // Biome-distributed nodes (bounding box per biome).

@@ -28,8 +28,8 @@ const T_CONTEST = 0xffe9a8;
 const T_EDGE = 0xc8ccd0;   // just outside the border
 const T_NEAR = 0xa6aeb8;   // visible, within fog range
 const T_FAR = 0x848c97;    // visible, near the fog edge
-const T_EXPLORED = 0x646b76; // explored but far from territory — dim but visible
-const T_DARK = 0x333941;   // unexplored fog
+const T_EXPLORED = 0x5c6470; // explored but far from territory — dim but visible
+const T_DARK = 0x232c3c;   // unexplored fog — deep dark blue-gray (Phase 7)
 
 export class Territory {
   constructor(scene) {
@@ -160,12 +160,18 @@ export class Territory {
     const s = this.scene;
     const g = this.border;
     g.clear();
+    // (Phase 7) Soft warm-gold frontier at lower opacity (was bright cyan).
     const draw = (width, alpha) => {
-      g.lineStyle(width, 0x6fdcff, alpha);
+      g.lineStyle(width, 0xe6c87a, alpha);
       for (const [c, r] of edges) { const pts = s.regionDiamond(c, c, r, r); s.strokeDiamond(g, pts); g.strokePath(); }
     };
-    draw(5, 0.1);
-    draw(2, 0.45);
+    draw(6, 0.07);
+    draw(2, 0.3);
+    // A gentle one-time alpha pulse so the frontier feels alive (cheap — it
+    // animates the single border graphic, not the 40k terrain tiles).
+    if (!this._borderPulse) {
+      this._borderPulse = this.scene.tweens.add({ targets: g, alpha: { from: 0.7, to: 1 }, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
   }
 
   // Incremental fog reveal: mark tiles newly seen by units as explored (forever)
