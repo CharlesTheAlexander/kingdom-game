@@ -718,3 +718,51 @@ save→reload→load round-trip — all green, console clean, FPS stable (~44 he
 **Decisions logged:** all army combat routes through BattleScene regardless of size;
 armies auto-name; some trait effects simplified; DOM `<input>` used for king
 creation; coalition reuses each kingdom's `launchWave` for the synchronized assault.
+
+---
+
+## SECTION 19: SESSION 1 — RUINS, WANDERING FACTIONS, EVENTS, HISTORIES, TAX, STATS ✅
+
+Seven-phase content pass adding the "living world" layer. All phases build clean and
+were headless-verified; a full integrated playthrough runs at ~42 FPS with **zero
+console errors** and full save/reload persistence of every new system.
+
+**1. Ancient Ruins (`src/systems/Ruins.js`)** — 6 Graphics-drawn ruins anchored to
+biomes (2 forest, 2 mountains, 1 wildlands, 1 delta), ≥40 tiles from the player and
+≥20 from AI castles, hidden in fog until a unit comes within 5 tiles (gold name +
+shimmer + investigate event). Explorable once via a 3-soldier / 2-day expedition for
+one of six non-repeating rewards (Whetstone +25% dmg, Forgotten Map full reveal, Iron
+Cache, Lost Tome free research, the Champion "The Ancient", or warned Cursed Gold).
+
+**2. Wandering Factions (`src/systems/WanderingFactions.js`)** — 2 merchant caravans
+(cart Graphics; roam between settlements; proximity prompt → Trade at better-than-
+market rates or Raid for loot at a reputation cost; rep 50+ makes them seek the
+player), 2 nomadic tribes (Forest/Plains, befriend via a 50-gold Envoy expedition →
+reveal their biome + periodic gifts; raid → hostile), and a pilgrim group every 10
+days crossing the map (territory happiness, Monastery donations, vanishes if attacked).
+Drawn on the continent view as colored dots.
+
+**3. World events 15 → 28 (`src/systems/WorldEvents.js`)** — 13 new events (AI-vs-AI
+war, drought, iron rush, renown, wounded soldier, rogue archer, weapon cache, plague,
+defector general, harvest festival, lost merchant, military parade, wandering scholar)
+plus Spring (food windfall) and Winter (wandering-band choice) seasonal additions.
+Backed by small hooks: temporary happiness modifiers, `_eventFarmMult`, iron-bonus
+window, research-speed multiplier, growth-pause.
+
+**4. Location histories (`src/systems/Discovery.js`)** — first approach (5 tiles) to a
+settlement, ruin, goblin camp, AI castle, or new biome shows a bottom-center card with
+an authored one-line history and logs it; never repeats.
+
+**5. Tax system** — Low/Normal/High/Extortionate slider in the kingdoms panel scales
+all gold income (Castle, caravans, administrators) and happiness; a HUD indicator
+shows the rate. Extortionate + happiness <20 for 3 days → revolt: 1-day worker strike,
+2 soldiers defect, happiness hit, taxes forced back to High.
+
+**6. Kingdom Statistics (`src/systems/KingdomStats.js`)** — a Stats button opens a
+full overlay (kingdom / military / economy / research / diplomacy / discoveries +
+reputation bars). Resource totals captured by wrapping `Resources.add`; counters via
+`note()`. Persists across saves (and survives New Game).
+
+**Decisions:** ruins/factions/discovery are world-space Graphics (no new art);
+caravan "dropdown" rendered as a list; AI-vs-AI war modeled by delaying both kingdoms'
+waves ~5 days; tax applies only to the three specified gold sources, not all gold.
