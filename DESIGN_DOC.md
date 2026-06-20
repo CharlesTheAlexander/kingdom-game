@@ -413,16 +413,17 @@ Separate Phaser scene (BattleScene.js).
 - ⬜ Administrator system (auto-manage captured settlement for gold)
 - ⬜ Road building
 
-### Phase F — Polish & Feel
+### Phase F — Polish & Feel ✅ (largely complete — see Section 16)
 *Goal: Looks and feels like a real game*
-- ⬜ Sound design (AudioManager.js roadmap exists)
-- ⬜ Proper unit animations
-- ⬜ Settlement visual evolution (walls appear per tier)
-- ⬜ Win/lose conditions
-- ⬜ Full 9-stage settlement progression
+- ✅ Sound design — procedural Web Audio (`src/audio/SoundEngine.js`), all events wired, mute/volume control
+- ✅ Proper unit animations — `src/systems/Animations.js` (idle/walk/attack/shoot/heal + pawn tool work)
+- ✅ Settlement visual evolution (walls/castle per tier)
+- ⬜ Win/lose conditions (game-over on castle loss exists; victory condition still TBD)
+- ✅ Full 9-stage settlement progression
+- ✅ Day/night cycle + seasonal weather (snow/rain) — added this session
 
 ### Phase G — Late Game
-- ⬜ Diplomacy system
+- ✅ Diplomacy system (relationships, tribute, pacts, war)
 - ⬜ Multiplayer consideration
 - ⬜ 3D transition planning
 
@@ -554,3 +555,60 @@ territory recompute is bounded to the area around changed tiles.
 *Git repo: github.com/CharlesTheAlexander/kingdom-game*
 *Local: ~/Desktop/kingdom-game*
 *Dev server: localhost:5174*
+---
+
+## SECTION 16: PRESENTATION OVERHAUL, POLISH, BALANCE & CRITIC PASSES ✅
+
+Three back-to-back sessions took the game from "impressive prototype" to
+"looks like a game", driven by GAME_CRITIC_REPORT.md and a final critic re-pass
+(GAME_CRITIC_REPORT_2.md). No new gameplay systems were added; building anchors
+were untouched.
+
+**UI / presentation overhaul** (`ui-presentation-overhaul` branch)
+- Resource bar rebuilt as consistent icon+value+label chips (2 rows), with
+  flash-on-change and critical pulse; big numbers abbreviate (`12.3k`, `250k`).
+- Interactive staged tutorial (5 localStorage-gated stages) replacing the static,
+  outdated welcome modal; contextual hints rewritten to match real mechanics.
+- BattleScene overhaul: terrain-themed banded battlefield + scenery, 56px units in
+  dense ranks, redesigned morale bars (icon + numeric value), dramatic pre-battle
+  (battlefield name, faction, countdown), command bar with icons/active state,
+  full-screen Victory/Defeat overlay.
+- Diplomacy panel: centre-tick relationship bar with red/green zones, coloured
+  status labels, action buttons that preview effects ("Tribute 50g → +20").
+- Bottom-panel tabs `[Build][Expeditions][Kingdoms][Caravans]` replacing the
+  disconnected top-right openers; build costs as icon+number; building tooltips on
+  hover; placement auto-exits after placing.
+- Building identity: floating bobbing icons (coin/hammer/eye/mug) over reused-
+  sprite buildings + name labels on hover.
+- World: 20-tile starting reveal, nodes near the castle, deep blue-gray fog, warm-
+  gold pulsing territory border, continent "local view" rectangle + softened biome
+  edges + texture variation, transition fades.
+
+**Polish session**
+- **Animations** (`src/systems/Animations.js`): central state driver over the Tiny
+  Swords spritesheets — warriors (idle/walk/Attack1→Attack2 swing), archers
+  (walk/shoot), monks (walk/heal), pawns (tool-matched walk + chop/mine interact),
+  applied in the world and the BattleScene.
+- **Sound** (`src/audio/SoundEngine.js`): fully procedural Web Audio, ~20 events
+  wired (UI 0.3 / combat 0.5 / world 0.4 / fanfares 0.7), throttled; top-right
+  speaker control (click = mute, scroll = volume).
+- **Day/night**: smooth dawn→day→dusk→night with arcing sun, stars, moon, and
+  flickering per-building torches (drawn above the night overlay so they glow).
+- **Weather**: Winter snow (+ roof caps) and Spring/Autumn diagonal rain particle
+  systems with wind/rain ambient beds, driven off `seasonHint()`.
+- **Text audit**: number abbreviation + fixed the over-long Campaign expedition
+  reward; ellipsis helper for any long names.
+
+**Balance** (`BALANCE_REPORT.md`) — quantitative day-by-day economy sims via
+`window.__game`. Findings: the economy is generous, not scarce; the old "stone
+impossible" critique did not reproduce. Changes: Castle gold 2→1.5/sec (gold was
+oversupplied); idle freelance stone 2→4/trip (idle stone was RNG-low, gating the
+Mine). Food/gold-scarcity conditional fixes were not triggered.
+
+**Critic re-pass** (`GAME_CRITIC_REPORT_2.md`) — every Critic #1 item resolved,
+zero console errors anywhere, no regressions. Two MEDIUM onboarding-feel fixes
+applied: start mid-morning in bright daylight (not dim dawn), and silence the
+day-1 wolf alarm so the opening stays calm.
+
+**Verification:** `npm run build` clean; headless playthroughs (fresh load,
+combat, night, winter, BattleScene, continent) all console-clean.
