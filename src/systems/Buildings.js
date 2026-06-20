@@ -189,6 +189,23 @@ export class BuildingManager {
     return this.buildings.reduce((sum, b) => sum + (b.workers || 0), 0);
   }
 
+  // (Save system) Recompute the worker cap from scratch (base 3 + Houses), so a
+  // load that re-places Houses doesn't double-count the cap they already granted.
+  refreshWorkerCap() {
+    let cap = 3; // matches Resources constructor base
+    for (const b of this.buildings) if (b.alive && b.type.capIncrease) cap += b.type.capIncrease;
+    this.scene.resources.workersCap = cap;
+  }
+
+  // (Save system) Every building's placement + state (castle separate).
+  serialize() {
+    return this.buildings.filter((b) => b.alive).map((b) => ({
+      type: b.typeKey, col: b.col, row: b.row, level: b.level || 1,
+      hp: Math.round(b.hp), workers: b.workers || 0,
+      recruitCd: b._recruitCd || 0,
+    }));
+  }
+
   availableWorkers(resources) {
     return resources.workersCap - this.workersUsed();
   }

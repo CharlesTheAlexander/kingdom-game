@@ -368,6 +368,33 @@ export class TroopManager {
     this.warriors = []; this.archers = []; this.monks = [];
   }
 
+  // (Save system) Capture every living unit's type/position/hp.
+  serialize() {
+    const out = [];
+    for (const w of this.warriors) if (w.alive) out.push({ t: w.knight ? 'knight' : w.mercenary ? 'mercenary' : 'warrior', x: Math.round(w.x), y: Math.round(w.y), hp: Math.round(w.hp), maxHp: w.maxHp, cmd: !!w.playerCommanded });
+    for (const a of this.archers) if (a.alive) out.push({ t: 'archer', x: Math.round(a.x), y: Math.round(a.y), hp: Math.round(a.hp), maxHp: a.maxHp, cmd: !!a.playerCommanded });
+    for (const m of this.monks) if (m.alive) out.push({ t: 'monk', x: Math.round(m.x), y: Math.round(m.y), hp: Math.round(m.hp), maxHp: m.maxHp, cmd: !!m.playerCommanded });
+    return out;
+  }
+
+  // (Save system) Rebuild units from serialized data onto a clean roster.
+  restore(list) {
+    this.removeAll();
+    for (const d of list || []) {
+      const x = d.x, y = d.y;
+      let u;
+      if (d.t === 'archer') { u = new Archer(this.scene, x, y); this.archers.push(u); }
+      else if (d.t === 'monk') { u = new Monk(this.scene, x, y); this.monks.push(u); }
+      else if (d.t === 'knight') { u = new Warrior(this.scene, x, y, x, y, { knight: true, hp: 120, dps: 25, scale: 44 / 192, tint: 0x9fb8d8, label: 'Knight' }); this.warriors.push(u); }
+      else if (d.t === 'mercenary') { u = new Warrior(this.scene, x, y, x, y, { mercenary: true, label: 'Mercenary', idle: 'yellow_warrior_idle', run: 'yellow_warrior_run', attack: 'yellow_warrior_attack' }); this.warriors.push(u); }
+      else { u = new Warrior(this.scene, x, y, x, y); this.warriors.push(u); }
+      if (d.maxHp) u.maxHp = d.maxHp;
+      if (d.hp != null) u.hp = d.hp;
+      u.playerCommanded = !!d.cmd;
+      if (u.sync) u.sync();
+    }
+  }
+
   spawnArcher(barracks) {
     this.archers.push(new Archer(this.scene, barracks.x + Phaser.Math.Between(-26, -14), barracks.y + Phaser.Math.Between(-14, 14)));
   }

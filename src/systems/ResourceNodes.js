@@ -88,6 +88,26 @@ export class ResourceNodeManager {
     this.nodes = [];
   }
 
+  // (Save system) Remaining counts of live nodes.
+  serialize() {
+    return this.nodes.filter((n) => n.alive).map((n) => ({ type: n.type, count: n.count }));
+  }
+
+  // (Save system) Best-effort: apply saved remaining counts onto the freshly
+  // spawned nodes by index (positions are random per session, so we don't try to
+  // match exactly — this just preserves how depleted the world economy is).
+  applyCounts(list) {
+    if (!list) return;
+    for (let i = 0; i < this.nodes.length && i < list.length; i++) {
+      const n = this.nodes[i], d = list[i];
+      if (d && d.count != null) {
+        n.count = Math.max(0, Math.min(n.maxCount, d.count));
+        if (n.label && n.def) n.label.setText(`${n.def.label} x${n.count}`);
+        if (n.count <= 0 && n.deplete) n.deplete();
+      }
+    }
+  }
+
   // (Phase B) 60-80 nodes across the continent. A small reachable cluster sits
   // just outside the build zone (so idle workers can bootstrap the economy),
   // while the rest are distributed into biome-appropriate zones for exploration.

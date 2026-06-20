@@ -70,6 +70,7 @@ import { Caravans } from '../systems/Caravans.js';
 import { findPath } from '../systems/Pathfinding.js';
 import { registerUnitAnimations } from '../systems/Animations.js';
 import { sfx } from '../audio/SoundEngine.js';
+import * as SaveManager from '../systems/SaveManager.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -262,6 +263,14 @@ export class IsometricScene extends GameScene {
     this.selectedUnits = [];
     this.boxSel = null;
     this._prevRes = {};
+    // (Save system) scene.restart() reuses this instance, so null stale HUD refs
+    // whose display objects were destroyed by the restart — otherwise the first
+    // updateHud() (run inside buildHud, before these are rebuilt) touches dead text.
+    this.chips = null;
+    this.panelTabs = null;
+    this._chipPrev = {};
+    this._menuOpen = false; this._menuEls = null; this._savingEls = null;
+    this._confirmEls = null; this._tip = null; this._soundUI = null; this.movingBuilding = null;
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -377,18 +386,37 @@ export class IsometricScene extends GameScene {
     // (Phase B) Tab toggles the continent overview (launched on top, this scene
     // pauses while it's open).
     this.input.keyboard.on('keydown-TAB', (e) => { if (e && e.preventDefault) e.preventDefault(); this.openContinent(); });
-    // (Gameplay change 2) Escape cancels move/placement mode.
+    // (Gameplay change 2) Escape cancels move/placement mode (or closes the menu).
     this.input.keyboard.on('keydown-ESC', () => {
-      if (this.movingBuilding) this.cancelMoveBuilding();
+      if (this._menuOpen) this.closeMenu();
+      else if (this.movingBuilding) this.cancelMoveBuilding();
       else if (this.placementType) { this.placementType = null; this.clearGhost(); this.refreshPanel(); }
     });
+
+    // (Save system) Menu button + shortcuts + auto-save infrastructure.
+    this.gamePlayMs = this.gamePlayMs || 0;
+    this._autoSaveEveryDays = 5;
+    this.createMenuButton();
+    this.input.keyboard.on('keydown-S', (e) => { if (this._typing) return; this.quickSave(); });
+    this._beforeUnload = () => { try { SaveManager.save(this, 0); } catch (err) {} };
+    window.addEventListener('beforeunload', this._beforeUnload);
+    this.events.once('shutdown', () => window.removeEventListener('beforeunload', this._beforeUnload));
+
+    // (Save system) If a load is pending (set by requestLoad → scene.restart),
+    // reconstruct the saved state now that the fresh scene exists.
+    if (SaveManager.hasPending()) {
+      const data = SaveManager.consumePending();
+      SaveManager.applySave(this, data);
+      this.showLoadedBanner(this.gameDay);
+    }
   }
 
   openContinent() {
-    if (this.isGameOver) return;
+    if (this.isGameOver || this._menuOpen) return;
     // (Bug 3) Guard double-launch and wrap the transition: if launching the
     // continent ever throws, make sure we don't end up paused with no scene up.
     if (this.scene.isActive('ContinentScene')) return;
+    try { SaveManager.save(this, 0); } catch (e) {} // (Save system) auto-save before transition
     try {
       this.scene.launch('ContinentScene');
       this.scene.pause();
@@ -1080,6 +1108,158 @@ export class IsometricScene extends GameScene {
     }
   }
 
+  // ============================================================ SAVE / LOAD UI
+
+  createMenuButton() {
+    const fix = (o) => o.setScrollFactor(0);
+    const bg = fix(this.add.rectangle(8, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
+    const g = fix(this.add.graphics().setDepth(61));
+    g.lineStyle(2.5, 0xdfe6ee, 1);
+    for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(17, 15 + i * 5); g.lineTo(35, 15 + i * 5); g.strokePath(); }
+    bg.on('pointerover', () => bg.setFillStyle(0x1c2330, 0.95));
+    bg.on('pointerout', () => bg.setFillStyle(0x10141c, 0.9));
+    bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('ui_click'); this.openMenu(); });
+  }
+
+  showSavingIndicator() {
+    const fix = (o) => o.setScrollFactor(0).setDepth(120);
+    if (this._savingEls) this._savingEls.forEach((o) => o.destroy());
+    const x = GAME_W - 120, y = 90;
+    const bg = fix(this.add.rectangle(x, y, 108, 26, 0x10300f, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0x4ad66b, 0.8));
+    const t = fix(this.add.text(x + 54, y + 13, 'Saving…', { fontFamily: 'monospace', fontSize: '13px', color: '#bdf0c4', fontStyle: 'bold' }).setOrigin(0.5));
+    this._savingEls = [bg, t];
+    this.routeCameras && this.routeCameras();
+    this.time.delayedCall(1000, () => { if (this._savingEls) { this._savingEls.forEach((o) => o.destroy()); this._savingEls = null; } });
+  }
+
+  showLoadedBanner(day) {
+    const fix = (o) => o.setScrollFactor(0).setDepth(120);
+    const t = fix(this.add.text(GAME_W / 2, 120, `Kingdom Loaded — Day ${day}`, { fontFamily: 'monospace', fontSize: '22px', color: '#ffe9a8', fontStyle: 'bold', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5));
+    this.routeCameras && this.routeCameras();
+    this.tweens.add({ targets: t, alpha: 0, delay: 1500, duration: 600, onComplete: () => t.destroy() });
+  }
+
+  autoSave() {
+    const res = SaveManager.save(this, 0);
+    if (res.ok) this.showSavingIndicator();
+    else this.showToast(res.error || 'Auto-save failed');
+  }
+
+  quickSave() {
+    const res = SaveManager.save(this, 1);
+    if (res.ok) { this.showSavingIndicator(); this.showToast('Saved to slot 1'); }
+    else this.showToast(res.error || 'Save failed');
+  }
+
+  saveSlot(slot) { return SaveManager.save(this, slot); }
+  loadSlot(slot) { return SaveManager.requestLoad(this, slot); }
+
+  openMenu() { this._menuOpen = true; this.gameSpeedBeforeMenu = this.gameSpeed; this.gameSpeed = 0; this.renderMenu('main'); }
+  closeMenu() {
+    this._menuOpen = false;
+    if (this.gameSpeedBeforeMenu != null) this.gameSpeed = this.gameSpeedBeforeMenu;
+    if (this._menuEls) this._menuEls.forEach((o) => o.destroy());
+    this._menuEls = null;
+  }
+
+  renderMenu(screen) {
+    if (this._menuEls) this._menuEls.forEach((o) => o.destroy());
+    const fix = (o) => o.setScrollFactor(0);
+    const els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.82).setOrigin(0, 0).setDepth(100).setInteractive()));
+    const panelW = 560, panelH = 440, px = (GAME_W - panelW) / 2, py = (GAME_H - panelH) / 2;
+    els.push(fix(this.add.rectangle(px, py, panelW, panelH, 0x161b26, 0.99).setOrigin(0, 0).setDepth(101).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, py + 22, 'KINGDOM GAME', { fontFamily: 'monospace', fontSize: '26px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0).setDepth(102)));
+    this._menuEls = els;
+
+    const btn = (label, x, y, w, h, onClick, color) => {
+      const b = fix(this.add.rectangle(x, y, w, h, color || 0x2d6cb0).setOrigin(0, 0).setDepth(102).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+      const t = fix(this.add.text(x + w / 2, y + h / 2, label, { fontFamily: 'monospace', fontSize: '15px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(103));
+      b.on('pointerover', () => b.setFillStyle((color || 0x2d6cb0) + 0x111111));
+      b.on('pointerout', () => b.setFillStyle(color || 0x2d6cb0));
+      b.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('ui_click'); onClick(); });
+      els.push(b, t);
+      return b;
+    };
+    const text = (s, x, y, opts = {}) => { const t = fix(this.add.text(x, y, s, { fontFamily: 'monospace', fontSize: opts.size || '13px', color: opts.color || '#dfe6ee', fontStyle: opts.bold ? 'bold' : 'normal', wordWrap: opts.wrap ? { width: opts.wrap } : undefined }).setOrigin(opts.ox || 0, 0).setDepth(102)); els.push(t); return t; };
+
+    if (screen === 'main') {
+      const bx = px + 180, bw = 200; let y = py + 80;
+      btn('Continue', bx, y, bw, 44, () => this.closeMenu()); y += 56;
+      btn('Save Game', bx, y, bw, 44, () => this.renderMenu('save')); y += 56;
+      btn('Load Game', bx, y, bw, 44, () => this.renderMenu('load')); y += 56;
+      btn('Settings', bx, y, bw, 44, () => this.renderMenu('settings')); y += 56;
+      btn('New Game', bx, y, bw, 44, () => this.renderMenu('newgame'), 0x8a3a3a);
+    } else if (screen === 'save' || screen === 'load') {
+      text(screen === 'save' ? 'SAVE GAME' : 'LOAD GAME', GAME_W / 2, py + 56, { ox: 0.5, bold: true, size: '16px', color: '#ffe9b0' });
+      const slots = SaveManager.listSlots();
+      slots.forEach((s, i) => {
+        const sy = py + 88 + i * 88, sx = px + 24, sw = panelW - 48;
+        els.push(fix(this.add.rectangle(sx, sy, sw, 78, 0x0e1219, 0.9).setOrigin(0, 0).setDepth(102).setStrokeStyle(1, 0x39455a, 0.9)));
+        const label = i === 0 ? 'Slot 0 — Auto-save' : `Slot ${i}`;
+        text(label, sx + 12, sy + 8, { bold: true, color: '#cfe0ff' });
+        if (s.empty) text('Empty Slot', sx + 12, sy + 32, { color: '#8893a3' });
+        else if (s.corrupted) text('⚠ Corrupted save', sx + 12, sy + 32, { color: '#ff8a80' });
+        else {
+          text(`${s.tier} · Day ${s.day}`, sx + 12, sy + 30, { color: '#f0e6d0' });
+          const when = new Date(s.timestamp).toLocaleString();
+          text(`${when}  ·  ${s.playMin || 0} min played`, sx + 12, sy + 50, { color: '#9aa0a6', size: '11px' });
+        }
+        if (screen === 'save' && i !== 0) {
+          btn('Save Here', sx + sw - 220, sy + 24, 104, 30, () => { const r = SaveManager.save(this, i); if (r.ok) { this.showToast('Saved to slot ' + i); this.renderMenu('save'); } else this.showToast(r.error); }, 0x1f5b3a);
+        }
+        if (screen === 'load' && !s.empty && !s.corrupted) {
+          btn('Load', sx + sw - 220, sy + 24, 104, 30, () => this.confirmAction(`Load slot ${i}? Current progress will be lost.`, () => { this.closeMenu(); SaveManager.requestLoad(this, i); }), 0x2d6cb0);
+        }
+        if (!s.empty) btn('Delete', sx + sw - 108, sy + 24, 92, 30, () => this.confirmAction(`Delete slot ${i}?`, () => { SaveManager.deleteSlot(i); this.renderMenu(screen); }), 0x6a2a2a);
+      });
+      btn('Back', px + panelW / 2 - 60, py + panelH - 48, 120, 36, () => this.renderMenu('main'));
+    } else if (screen === 'settings') {
+      text('SETTINGS', GAME_W / 2, py + 56, { ox: 0.5, bold: true, size: '16px', color: '#ffe9b0' });
+      let y = py + 96;
+      text(`Master Volume: ${Math.round(sfx.volume * 100)}%`, px + 40, y, { bold: true }); els[els.length - 1].setName('volLabel');
+      btn('–', px + 320, y - 4, 40, 26, () => { sfx.setVolume(sfx.volume - 0.1); this.renderMenu('settings'); });
+      btn('+', px + 370, y - 4, 40, 26, () => { sfx.setVolume(sfx.volume + 0.1); this.renderMenu('settings'); });
+      y += 50;
+      btn(sfx.muted ? 'Sound: OFF' : 'Sound: ON', px + 40, y - 4, 200, 30, () => { sfx.toggleMute(); this.drawSoundControl(); this.renderMenu('settings'); }, sfx.muted ? 0x6a2a2a : 0x1f5b3a);
+      y += 50;
+      const freq = this._autoSaveEveryDays;
+      text(`Auto-save: ${freq === 0 ? 'Off' : 'Every ' + freq + ' days'}`, px + 40, y, { bold: true });
+      const cycle = () => { const opts = [3, 5, 10, 0]; this._autoSaveEveryDays = opts[(opts.indexOf(freq) + 1) % opts.length]; this.renderMenu('settings'); };
+      btn('Change', px + 320, y - 4, 90, 26, cycle);
+      y += 50;
+      text(`Tooltips: ${this._tooltipsOff ? 'Off' : 'On'}`, px + 40, y, { bold: true });
+      btn('Toggle', px + 320, y - 4, 90, 26, () => { this._tooltipsOff = !this._tooltipsOff; this.renderMenu('settings'); });
+      btn('Back', px + panelW / 2 - 60, py + panelH - 48, 120, 36, () => this.renderMenu('main'));
+    } else if (screen === 'newgame') {
+      text('Start a new game?', GAME_W / 2, py + 140, { ox: 0.5, bold: true, size: '18px', color: '#ffe9b0' });
+      text('All unsaved progress will be lost.', GAME_W / 2, py + 175, { ox: 0.5, color: '#f0e6d0' });
+      btn('Yes, New Game', px + 90, py + 240, 170, 44, () => { this.closeMenu(); SaveManager.consumePending(); this.scene.restart(); }, 0x8a3a3a);
+      btn('Cancel', px + 300, py + 240, 170, 44, () => this.renderMenu('main'));
+    }
+    this.routeCameras && this.routeCameras();
+  }
+
+  // Small in-menu confirmation dialog.
+  confirmAction(msg, onYes) {
+    const fix = (o) => o.setScrollFactor(0);
+    const els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0.5).setOrigin(0, 0).setDepth(130).setInteractive()));
+    const W = 440, H = 150, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a120a, 0.99).setOrigin(0, 0).setDepth(131).setStrokeStyle(2, 0xc9a14a, 0.95)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 30, msg, { fontFamily: 'monospace', fontSize: '14px', color: '#f0e6d0', align: 'center', wordWrap: { width: W - 40 } }).setOrigin(0.5, 0).setDepth(132)));
+    const close = () => els.forEach((o) => o.destroy());
+    const mk = (label, bx, color, fn) => {
+      const b = fix(this.add.rectangle(bx, y + H - 46, 160, 34, color).setOrigin(0, 0).setDepth(132).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+      const t = fix(this.add.text(bx + 80, y + H - 29, label, { fontFamily: 'monospace', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(133));
+      b.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); close(); fn(); });
+      els.push(b, t);
+    };
+    mk('Confirm', x + 30, 0x1f5b3a, onYes);
+    mk('Cancel', x + W - 190, 0x2d4a6b, () => {});
+    this.routeCameras && this.routeCameras();
+  }
+
   // ---- Input (left-click place / box-select; covers the whole iso world) ---
 
   setupInput() {
@@ -1309,6 +1489,22 @@ export class IsometricScene extends GameScene {
     if (this.territory) this.territory.addTierBonus();
     if (next.announce) this.announce(next.announce);
     this.refreshPanel();
+  }
+
+  // (Save system) Apply a tier's visuals without spending — used on load.
+  restoreTier(tierIndex) {
+    this.tierIndex = Math.max(0, Math.min(this.TIERS.length - 1, tierIndex));
+    const t = this.TIERS[this.tierIndex];
+    const castle = this.buildings.castle;
+    if (castle) {
+      if (t.tex && this.textures.exists(t.tex)) castle.rect.setTexture(t.tex);
+      castle.rect.setOrigin(0.5, 1.0).setScale(castle.baseScale * (t.castleScale || 1)).clearTint();
+      const by = castle.y - castle.baseScale * (t.castleScale || 1) * 48;
+      if (this.castleBarBg) this.castleBarBg.y = by;
+      if (this.castleBarFill) this.castleBarFill.y = by;
+    }
+    if (t.wall) this.drawWall(t.wall, t.moat, t.towers);
+    if (this.territory) for (let i = 0; i < this.tierIndex; i++) this.territory.addTierBonus();
   }
 
   // Visual-only iso diamond perimeter around the build zone, styled per stage
@@ -1935,6 +2131,7 @@ export class IsometricScene extends GameScene {
     const pTotal = playerArmy.reduce((s, g) => s + g.count, 0);
     if (pTotal + enemies.length < 10) return false;
     this._inBattle = true;
+    try { SaveManager.save(this, 0); } catch (e) {} // (Save system) auto-save before BattleScene
     const enemyArmy = this.enemyArmyFrom(enemies);
     for (const e of enemies) e.destroy();
     this.troops.removeAll();
@@ -2359,6 +2556,9 @@ export class IsometricScene extends GameScene {
     sfx.play('day_start'); // (Polish Phase 2) dawn bell
     this.updateSeason();
     this.updateWeather(); // (Polish Phase 4) switch snow/rain on season change
+    // (Save system) Auto-save to slot 0 every N days.
+    const freq = this._autoSaveEveryDays || 5;
+    if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();
     const c = this.buildings.castle;
     // (Phase 5) Artifact daily yields: Farmer's Almanac (+food/farm),
     // Miner's Compass (+stone/mine).
@@ -2414,6 +2614,8 @@ export class IsometricScene extends GameScene {
 
   update(time, delta) {
     if (this.isGameOver) return;
+    this.gamePlayMs = (this.gamePlayMs || 0) + delta; // (Save system) real playtime
+    if (this._menuOpen) return; // menu pauses the sim
     const realDt = delta / 1000;
     const gdelta = delta * this.gameSpeed;
     const dt = realDt * this.gameSpeed;

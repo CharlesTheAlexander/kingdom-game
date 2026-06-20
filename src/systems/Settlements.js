@@ -117,6 +117,33 @@ export class SettlementManager {
   ownedCount() { return this.list.filter((s) => s.owner === 'player').length; }
   total() { return this.list.length; }
 
+  // (Save system) Settlement positions come from fixed defs, so we restore by name.
+  serialize() {
+    return this.list.map((s) => ({ name: s.name, owner: s.owner, discovered: s.discovered, guards: s.guards.filter((g) => g.alive).length, administrator: !!s.administrator }));
+  }
+
+  restore(list) {
+    if (!list) return;
+    for (const d of list) {
+      const s = this.list.find((x) => x.name === d.name);
+      if (!s) continue;
+      s.discovered = !!d.discovered;
+      s.administrator = !!d.administrator;
+      if (d.owner === 'player' && s.owner !== 'player') {
+        for (const g of s.guards) { if (g.alive) { g.alive = false; if (g.destroy) g.destroy(); } }
+        s.guards = [];
+        s.conquer();
+      } else if (typeof d.guards === 'number' && s.owner === 'neutral') {
+        // Trim guards down to the saved count (defenders already lost mid-siege).
+        while (s.guards.filter((g) => g.alive).length > d.guards) {
+          const g = s.guards.find((x) => x.alive);
+          if (!g) break;
+          g.alive = false; if (g.destroy) g.destroy();
+        }
+      }
+    }
+  }
+
   // Living defenders of un-conquered settlements (added to the combat threats).
   threats() {
     const out = [];

@@ -1,0 +1,179 @@
+// SaveManager.js — (Expansion Phase 1) complete save / load.
+//
+// Captures the full gameplay state as a JSON snapshot and reconstructs it on
+// load. Loading uses a "pending snapshot + scene.restart()" handshake: the
+// scene rebuilds from a clean slate (deterministic terrain) and then applySave()
+// overwrites the dynamic state. Three slots in localStorage: slot 0 = auto-save.
+
+const KEY = (slot) => `kingdom_save_slot_${slot}`;
+const VERSION = 1;
+let PENDING = null; // snapshot waiting to be applied after a scene.restart()
+
+// ---------------------------------------------------------------- capture ----
+
+export function capture(scene) {
+  const r = scene.resources;
+  const data = {
+    version: VERSION,
+    world: {
+      gameDay: scene.gameDay,
+      dayTimer: scene.dayTimer,
+      tierIndex: scene.tierIndex,
+      gamePlayMs: scene.gamePlayMs || 0,
+    },
+    resources: { wood: r.wood, stone: r.stone, food: r.food, gold: r.gold, iron: r.iron, equipment: r.equipment, workersCap: r.workersCap },
+    castle: scene.buildings.castle ? { hp: Math.round(scene.buildings.castle.hp), level: scene.buildings.castle.level } : null,
+    buildings: scene.buildings.serialize ? scene.buildings.serialize().filter((b) => b.type !== 'castle') : [],
+    troops: scene.troops.serialize ? scene.troops.serialize() : [],
+    fog: scene.territory && scene.territory.serializeFog ? scene.territory.serializeFog() : null,
+    diplomacy: scene.diplomacy ? { rel: { ...scene.diplomacy.rel }, nap: { ...scene.diplomacy.nap }, ally: { ...scene.diplomacy.ally } } : null,
+    kingdoms: (scene.kingdoms || []).map((k) => ({ key: k.cfg.key, castleAlive: k.castleAlive, castleHp: k.castleHp, barracksCount: k.barracksCount, waveTimer: k.waveTimer, waveNumber: k.waveNumber, startDay: k.startDay, regrouping: k.regrouping, rebuildTimer: k.rebuildTimer })),
+    settlements: scene.settlements && scene.settlements.serialize ? scene.settlements.serialize() : [],
+    nodes: scene.nodes && scene.nodes.serialize ? scene.nodes.serialize() : [],
+    expeditions: scene.expeditions ? scene.expeditions.state : null,
+    caravans: scene.caravans ? (scene.caravans.routes || []).map((rt) => ({ from: rt.from && rt.from.name, to: rt.to && rt.to.name, resource: rt.resource, amount: rt.amount, progress: rt.progress, days: rt.days })) : [],
+    progress: { artifacts: [...(scene.artifacts || [])], scrolls: scene.scrolls || 0, intelUntilDay: scene.intelUntilDay || 0, buffs: { ...(scene.buffs || {}) } },
+    flags: { tut: safeParse(localStorage.getItem('kg_tut')) || {}, hints: scene._firedHints ? Object.keys(scene._firedHints) : [] },
+    audio: scene.sfx ? { volume: scene.sfx.volume, muted: scene.sfx.muted } : null,
+  };
+  return data;
+}
+
+function safeParse(s) { try { return JSON.parse(s); } catch (e) { return null; } }
+
+export function metadataFor(scene) {
+  const tier = scene.TIERS && scene.TIERS[scene.tierIndex] ? scene.TIERS[scene.tierIndex].name : '—';
+  return { day: scene.gameDay, tier, timestamp: Date.now(), playMin: Math.round((scene.gamePlayMs || 0) / 60000) };
+}
+
+// ----------------------------------------------------------------- storage ---
+
+export function save(scene, slot) {
+  try {
+    const payload = { meta: metadataFor(scene), data: capture(scene) };
+    let str = JSON.stringify(payload);
+    // (Spec) base64-wrap large saves; flag so load knows to decode.
+    if (str.length > 500000) str = 'B64:' + btoa(unescape(encodeURIComponent(str)));
+    localStorage.setItem(KEY(slot), str);
+    return { ok: true };
+  } catch (e) {
+    console.error('[Save] write failed (slot ' + slot + ')', e);
+    const quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e)));
+    return { ok: false, error: quota ? 'Storage full — delete an old save.' : 'Could not save.' };
+  }
+}
+
+export function readRaw(slot) {
+  const str = localStorage.getItem(KEY(slot));
+  if (!str) return null;
+  try {
+    const json = str.startsWith('B64:') ? decodeURIComponent(escape(atob(str.slice(4)))) : str;
+    return JSON.parse(json);
+  } catch (e) {
+    console.error('[Save] corrupted slot ' + slot, e);
+    return { corrupted: true };
+  }
+}
+
+export function listSlots() {
+  const out = [];
+  for (let i = 0; i < 3; i++) {
+    const raw = readRaw(i);
+    out.push(raw && raw.corrupted ? { slot: i, corrupted: true } : raw ? { slot: i, ...raw.meta } : { slot: i, empty: true });
+  }
+  return out;
+}
+
+export function deleteSlot(slot) { try { localStorage.removeItem(KEY(slot)); } catch (e) {} }
+export function hasAnySave() { for (let i = 0; i < 3; i++) if (localStorage.getItem(KEY(i))) return true; return false; }
+
+// ----------------------------------------------------------- load handshake --
+
+// Read a slot, stash its snapshot, and restart the scene so it rebuilds clean.
+export function requestLoad(scene, slot) {
+  const raw = readRaw(slot);
+  if (!raw || raw.corrupted || !raw.data) return { ok: false, error: raw && raw.corrupted ? 'Save is corrupted.' : 'Empty slot.' };
+  PENDING = raw.data;
+  try { scene.scene.restart(); return { ok: true }; }
+  catch (e) { console.error('[Save] restart failed', e); PENDING = null; return { ok: false, error: 'Load failed.' }; }
+}
+
+export function consumePending() { const p = PENDING; PENDING = null; return p; }
+export function hasPending() { return !!PENDING; }
+
+// ------------------------------------------------------------------ apply ----
+
+// Reconstruct dynamic state onto a freshly-created scene. Each section is
+// independently guarded so one failure can't abort the whole load.
+export function applySave(scene, data) {
+  if (!data) return;
+  const sect = (name, fn) => { try { fn(); } catch (e) { console.error('[Load] section "' + name + '" failed', e); } };
+
+  sect('world', () => {
+    scene.gameDay = data.world.gameDay;
+    scene.dayTimer = data.world.dayTimer;
+    scene.gamePlayMs = data.world.gamePlayMs || 0;
+    if (data.world.tierIndex > 0 && scene.restoreTier) scene.restoreTier(data.world.tierIndex);
+  });
+  sect('resources', () => { Object.assign(scene.resources, data.resources); });
+  sect('progress', () => {
+    if (data.progress) {
+      scene.scrolls = data.progress.scrolls || 0;
+      scene.intelUntilDay = data.progress.intelUntilDay || 0;
+      scene.artifacts = [...(data.progress.artifacts || [])];
+      if (data.progress.buffs) scene.buffs = { ...scene.buffs, ...data.progress.buffs };
+    }
+  });
+  sect('castle', () => { if (data.castle && scene.buildings.castle) { scene.buildings.castle.hp = data.castle.hp; scene.buildings.castle.level = data.castle.level || 1; } });
+  sect('buildings', () => {
+    for (const bd of data.buildings || []) {
+      const b = scene.buildings.place(bd.type, bd.col, bd.row);
+      if (!b) continue;
+      b.level = bd.level || 1;
+      b.hp = bd.hp != null ? bd.hp : b.hp;
+      b.workers = bd.workers || 0;
+      if (bd.recruitCd) b._recruitCd = bd.recruitCd;
+      scene.decorateBuilding(b);
+    }
+    if (scene.buildings.refreshWorkerCap) scene.buildings.refreshWorkerCap();
+  });
+  sect('troops', () => { if (scene.troops.restore) scene.troops.restore(data.troops); });
+  sect('fog', () => { if (scene.territory && scene.territory.restoreFog) scene.territory.restoreFog(data.fog); });
+  sect('diplomacy', () => {
+    if (data.diplomacy && scene.diplomacy) {
+      Object.assign(scene.diplomacy.rel, data.diplomacy.rel || {});
+      Object.assign(scene.diplomacy.nap, data.diplomacy.nap || {});
+      Object.assign(scene.diplomacy.ally, data.diplomacy.ally || {});
+    }
+  });
+  sect('kingdoms', () => {
+    for (const kd of data.kingdoms || []) {
+      const k = (scene.kingdoms || []).find((x) => x.cfg.key === kd.key);
+      if (!k) continue;
+      // (barracksCount is a derived getter — don't assign it.)
+      k.castleAlive = kd.castleAlive; k.castleHp = kd.castleHp;
+      k.waveTimer = kd.waveTimer; k.waveNumber = kd.waveNumber; k.startDay = kd.startDay;
+      k.regrouping = kd.regrouping; k.rebuildTimer = kd.rebuildTimer;
+    }
+  });
+  sect('settlements', () => { if (scene.settlements && scene.settlements.restore) scene.settlements.restore(data.settlements); });
+  sect('nodes', () => { if (scene.nodes && scene.nodes.applyCounts) scene.nodes.applyCounts(data.nodes); });
+  sect('expeditions', () => { if (data.expeditions && scene.expeditions) scene.expeditions.state = data.expeditions; });
+  sect('caravans', () => {
+    if (scene.caravans && data.caravans && scene.settlements) {
+      const byName = (n) => (scene.settlements.list || []).find((s) => s.name === n);
+      scene.caravans.routes = data.caravans.map((c) => ({ from: byName(c.from), to: byName(c.to), resource: c.resource, amount: c.amount, progress: c.progress, days: c.days })).filter((c) => c.from && c.to);
+    }
+  });
+  sect('flags', () => {
+    if (data.flags) {
+      if (data.flags.tut) localStorage.setItem('kg_tut', JSON.stringify(data.flags.tut));
+      scene._firedHints = {};
+      for (const k of data.flags.hints || []) scene._firedHints[k] = true;
+    }
+  });
+  sect('audio', () => { if (data.audio && scene.sfx) { scene.sfx.setVolume(data.audio.volume); if (scene.sfx.muted !== data.audio.muted) scene.sfx.toggleMute(); scene.drawSoundControl && scene.drawSoundControl(); } });
+
+  if (scene.refreshPanel) scene.refreshPanel();
+  if (scene.updateHud) scene.updateHud();
+}

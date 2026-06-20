@@ -52,6 +52,34 @@ export class Territory {
   // Fraction of the whole continent the player controls (for the continent view).
   get percentOwned() { return (this._tileCount / (this.N * this.N)) * 100; }
 
+  // (Save system) Pack the explored grid into a base64 bitset (1 bit/tile).
+  serializeFog() {
+    const N = this.N;
+    const bytes = new Uint8Array(Math.ceil((N * N) / 8));
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      if (this.explored[r][c]) { const i = r * N + c; bytes[i >> 3] |= 1 << (i & 7); }
+    }
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  // (Save system) Restore the explored grid from a base64 bitset and re-tint.
+  restoreFog(b64) {
+    if (!b64) return;
+    try {
+      const s = atob(b64);
+      const N = this.N;
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+        const i = r * N + c;
+        this.explored[r][c] = (s.charCodeAt(i >> 3) & (1 << (i & 7))) !== 0;
+      }
+      const tiles = this.scene.terrainTiles;
+      if (tiles) for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (this.explored[r][c] && tiles[r][c]) tiles[r][c].setTint(this.tintFor(c, r));
+      this.recompute();
+    } catch (e) { console.error('[Save] fog restore failed', e); }
+  }
+
   // Paint the entire map dark once at startup (everything begins unexplored).
   darkenAll() {
     const tiles = this.scene.terrainTiles;
