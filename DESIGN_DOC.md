@@ -612,3 +612,36 @@ day-1 wolf alarm so the opening stays calm.
 
 **Verification:** `npm run build` clean; headless playthroughs (fresh load,
 combat, night, winter, BattleScene, continent) all console-clean.
+
+---
+
+## SECTION 17: SAVE/LOAD + POPULATION (Expansion session)
+
+Implemented from the Creative Director expansion doc — its two top items were a
+save system and the army-on-map system. This session delivered the save system
+(its #1 priority — "players are losing progress") and population/happiness.
+
+**Save / Load (`src/systems/SaveManager.js`)** ✅
+- Full state snapshot: resources, day/time/tier, buildings (type/pos/level/hp/
+  workers), troops (type/pos/HP/kind), fog-of-war (base64 bitset), diplomacy,
+  AI-kingdom state, settlements (by name), nodes, expeditions, caravans,
+  artifacts/buffs, tutorial/hint flags, audio, population.
+- 3 localStorage slots (slot 0 = auto-save). Load = stash snapshot + scene.restart()
+  + per-section guarded `applySave()`.
+- Auto-save every N days, before BattleScene/Continent transitions, and on
+  `beforeunload`. Menu (≡ top-left): Continue / Save / Load / Settings / New Game,
+  with slot metadata (settlement, day, timestamp, playtime). "Saving…" indicator,
+  S quick-save, "Kingdom Loaded" banner, corrupted/quota handling.
+- Restart-reuse crash fixed by nulling stale HUD refs at the top of `create()`.
+
+**Population + Happiness (`src/systems/Population.js`)** ✅
+- Population (start 10, +4 capacity/House, +1 every 3 days when fed & below cap).
+- Happiness 0–100 recomputed daily from food / recent attacks / Tavern / crowding /
+  recent battles; scales worker production (+10% happy, −20% unhappy, strike <20).
+- Top-centre HUD (Pop X/Y + drawn happiness face + %) with a breakdown tooltip;
+  production modifier shown in the worker panel. Persisted in saves.
+
+**Still open from the expansion doc (future sessions):** army-on-map system
+(the other marquee feature — troops→armies, map movement, supply, AI armies,
+BattleScene HP handoff), world events + messengers, king identity + reputation,
+research tree, and the larger map/exploration/diplomacy/endgame content.
