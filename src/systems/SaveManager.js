@@ -44,6 +44,7 @@ export function capture(scene) {
     ruins: scene.ruins && scene.ruins.serialize ? scene.ruins.serialize() : null,
     factions: scene.factions && scene.factions.serialize ? scene.factions.serialize() : null,
     discovery: scene.discovery && scene.discovery.serialize ? scene.discovery.serialize() : null,
+    taxIndex: scene.taxIndex != null ? scene.taxIndex : 1,
     flags: { tut: safeParse(localStorage.getItem('kg_tut')) || {}, hints: scene._firedHints ? Object.keys(scene._firedHints) : [] },
     audio: scene.sfx ? { volume: scene.sfx.volume, muted: scene.sfx.muted } : null,
   };
@@ -168,6 +169,7 @@ export function applySave(scene, data) {
   sect('ruins', () => { if (data.ruins && scene.ruins) scene.ruins.restore(data.ruins); });
   sect('factions', () => { if (data.factions && scene.factions) scene.factions.restore(data.factions); });
   sect('discovery', () => { if (data.discovery && scene.discovery) scene.discovery.restore(data.discovery); });
+  sect('tax', () => { if (data.taxIndex != null) { scene.taxIndex = data.taxIndex; scene.applyTax && scene.applyTax(); } });
   sect('diplomacy', () => {
     if (data.diplomacy && scene.diplomacy) {
       if (scene.diplomacy.restore) scene.diplomacy.restore(data.diplomacy);

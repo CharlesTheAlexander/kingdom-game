@@ -160,10 +160,13 @@ export class SettlementManager {
   // (Phase 6) Daily income from conquered settlements. With an Administrator the
   // settlement runs itself: +30% tribute but a 50 gold/day salary.
   collectDaily() {
+    const taxGold = (amt) => Math.round(amt * (this.scene._goldTaxMult || 1)); // (Phase 5) tax on gold tribute
     for (const st of this.list) {
       if (st.owner !== 'player') continue;
-      if (st.admin) { this.scene.resources.add(st.specialty, 4); this.scene.resources.gold = Math.max(0, this.scene.resources.gold - 50); }
-      else this.scene.resources.add(st.specialty, 3);
+      const base = st.admin ? 4 : 3;
+      const amt = st.specialty === 'gold' ? taxGold(base) : base;
+      this.scene.resources.add(st.specialty, amt);
+      if (st.admin) this.scene.resources.gold = Math.max(0, this.scene.resources.gold - 50);
     }
   }
 

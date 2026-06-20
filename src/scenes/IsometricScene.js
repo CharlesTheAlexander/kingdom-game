@@ -283,7 +283,7 @@ export class IsometricScene extends GameScene {
     this._popHud = null; this._kingName = null; this._kingTitle = null; this._kingEls = null; this._logEls = null;
     this._logBtnBadge = null; this._logOpen = false; this._pauseBtn = null; this._paused = false; // (Phase 7) reset on restart
     this._endScreenEls = null; this._speedBeforeEnd = null; this._repExpanded = false; // (Audit FIX 2/5) reset on restart
-    this._discEls = null; this._promptEls = null; // (Session-1) reset transient discovery/caravan UI
+    this._discEls = null; this._promptEls = null; this._taxText = null; // (Session-1) reset transient UI
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -395,6 +395,7 @@ export class IsometricScene extends GameScene {
     this.ruins = new Ruins(this); // (Session-1 Phase 1) ancient ruins
     this.factions = new WanderingFactions(this); // (Session-1 Phase 2) caravans/tribes/pilgrims
     this.discovery = new Discovery(this); // (Session-1 Phase 4) location histories
+    if (this.taxIndex == null) this.taxIndex = 1; this.applyTax(); // (Session-1 Phase 5) tax system
     // (Phase 7) Reveal a generous 20-tile starting radius around the castle.
     if (this.buildings.castle) this.revealAround(this.buildings.castle.col, this.buildings.castle.row, 20);
     this.setupInput();
@@ -497,6 +498,43 @@ export class IsometricScene extends GameScene {
     this.isGameOver = true; // (Audit FIX 2) richer defeat screen replaces the minimal one
     this.showEndScreen(false, 'Your castle has fallen');
     this.routeCameras();
+  }
+
+  // (Session-1 Phase 5) Tax system: trades gold income against happiness.
+  taxLevels() { return [
+    { name: 'Low', gold: 0.7, happy: 10 },
+    { name: 'Normal', gold: 1, happy: 0 },
+    { name: 'High', gold: 1.3, happy: -15 },
+    { name: 'Extortionate', gold: 1.6, happy: -40 },
+  ]; }
+  applyTax() {
+    const t = this.taxLevels()[this.taxIndex != null ? this.taxIndex : 1];
+    this._goldTaxMult = t.gold; this._taxHappiness = t.happy;
+    this.updateTaxIndicator();
+  }
+  setTax(i) { this.taxIndex = Phaser.Math.Clamp(i, 0, 3); this.applyTax(); this.refreshPanel(); }
+  updateTaxIndicator() {
+    const t = this.taxLevels()[this.taxIndex != null ? this.taxIndex : 1];
+    const pct = Math.round((t.gold - 1) * 100);
+    const txt = `Tax: ${pct > 0 ? '+' : ''}${pct}%`;
+    const col = pct > 0 ? '#ffd24a' : pct < 0 ? '#9ad0ff' : '#cfc1a6';
+    if (!this._taxText) this._taxText = this.add.text(8, 40, '', { fontFamily: 'monospace', fontSize: '11px', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setScrollFactor(0).setDepth(60);
+    this._taxText.setText(txt).setColor(col);
+  }
+  checkTaxRevolt() {
+    const t = this.taxLevels()[this.taxIndex != null ? this.taxIndex : 1];
+    if (t.name === 'Extortionate' && this.population && this.population.happiness < 20) this._revoltDays = (this._revoltDays || 0) + 1;
+    else this._revoltDays = 0;
+    if (this._revoltDays >= 3) { this._revoltDays = 0; this.doTaxRevolt(); }
+  }
+  doTaxRevolt() {
+    this._strikeUntil = this.gameDay + 1; // workers strike for a day
+    if (this.troops) { this.troops.removeRandom && this.troops.removeRandom(); this.troops.removeRandom && this.troops.removeRandom(); } // 2 defect
+    if (this.population) this.population.addTempMod('Tax revolt', -10, 3);
+    this.setTax(2); // forced down to High
+    this.worldEvents && this.worldEvents.pushNews('Tax Revolt! Your people have had enough.');
+    this.showToast('Your tax collectors have been driven out. Taxes reduced to High.');
+    this.logEvent && this.logEvent('Tax revolt — workers struck, 2 soldiers defected', 'red');
   }
 
   // (Session-1 Phase 4) Brief discovery card, bottom-center, auto-dismissing.
@@ -2873,6 +2911,15 @@ export class IsometricScene extends GameScene {
     );
     const scouted = this.intelActive();
     this.panelText(14, this.PANEL_Y + 6, `AI KINGDOMS — DIPLOMACY${scouted ? '   (scouted)' : ''}`, { bold: true, color: '#ffe9b0' });
+    // (Session-1 Phase 5) Tax slider — 4 segments, current highlighted.
+    this.panelText(486, this.PANEL_Y + 6, 'Tax:', { color: '#cfc1a6', size: '11px' });
+    this.taxLevels().forEach((t, i) => {
+      const bx = 516 + i * 76, on = (this.taxIndex || 1) === i;
+      const b = this.add.rectangle(bx, this.PANEL_Y + 4, 72, 16, on ? 0x6c5a1a : 0x2a2030, 0.95).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(1, on ? 0xffe23f : 0x55473a, on ? 1 : 0.6).setInteractive({ useHandCursor: true });
+      this.panel.add(b);
+      this.panel.add(this.add.text(bx + 36, this.PANEL_Y + 12, t.name.length > 8 ? 'Extort.' : t.name, { fontFamily: 'monospace', fontSize: '9px', color: on ? '#fff' : '#aeb9c6', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0));
+      b.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.setTax(i); });
+    });
     // (Audit FIX 5) Reputation moved out of the header into a collapsible section
     // so the bars no longer overlap the first kingdom row. Collapsed by default;
     // when expanded it floats in a clean box above the panel.
@@ -3219,6 +3266,7 @@ export class IsometricScene extends GameScene {
     if (this.research) this.research.onNewDay(); // (Phase 5) research progress
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
     if (this.factions) this.factions.onNewDay(); // (Session-1 Phase 2) wandering factions daily
+    this.checkTaxRevolt(); // (Session-1 Phase 5) tax revolt check
     // (Session-1 Phase 3) Expire temporary world-event modifiers.
     if (this._eventFarmUntil && this.gameDay >= this._eventFarmUntil) { this._eventFarmMult = 1; this._eventFarmUntil = 0; }
     if (this._tempWorkerUntil && this.gameDay >= this._tempWorkerUntil) { this.resources.workersCap = Math.max(0, this.resources.workersCap - (this._tempWorkerBonus || 0)); this._tempWorkerBonus = 0; this._tempWorkerUntil = 0; }

@@ -40,7 +40,9 @@ export class Caravans {
         r.progress = 0;
         let amt = r.amount;
         if (Math.random() < 0.2) { amt = Math.round(amt * 0.5); if (this.scene.threatWarning) this.scene.threatWarning('A caravan was raided! Cargo halved.', 0xff8a80); }
+        if (r.resource === 'gold' && this.scene._goldTaxMult) amt = Math.round(amt * this.scene._goldTaxMult); // (Phase 5) tax
         this.scene.resources.add(r.resource, amt);
+        if (this.scene.stats) this.scene.stats.note('caravansDelivered');
         const c = this.scene.buildings.castle;
         if (c && this.scene.floatText) this.scene.floatText(c.x, c.y - 40, `Caravan: +${amt} ${r.resource}`, '#cfe0ff');
       }

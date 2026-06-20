@@ -90,6 +90,8 @@ export class Building {
   // manually via its training slots, so 'soldiers' is skipped here.
   produce(resources, scene) {
     if (this.type.attack || !this.type.produces || this.type.produces === 'soldiers') return;
+    // (Session-1 Phase 5) Tax revolt → workers strike, no production today.
+    if (scene && scene._strikeUntil && scene.gameDay < scene._strikeUntil) return;
     const interval = this.type.interval || 1;
     this.prodTimer += 1;
     if (this.prodTimer < interval) return;
@@ -106,6 +108,8 @@ export class Building {
     if (scene && this.typeKey === 'mine' && scene._researchMineMult) rate *= scene._researchMineMult;
     // (Expansion Phase 4) Merchant trait: +15% Castle gold.
     if (scene && this.typeKey === 'castle' && scene.traitBonuses && scene.traitBonuses.goldMult) rate *= scene.traitBonuses.goldMult;
+    // (Session-1 Phase 5) Tax rate scales Castle gold income.
+    if (scene && this.typeKey === 'castle' && this.type.produces === 'gold' && scene._goldTaxMult) rate *= scene._goldTaxMult;
     if (rate > 0) resources.add(this.type.produces, rate);
   }
 
