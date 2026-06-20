@@ -2270,6 +2270,146 @@ export class IsometricScene extends GameScene {
     this.refreshPanel();
   }
 
+  // ============================================ (Phase 2) ARMY COMBAT INTEGRATION
+
+  // What hostile/conquerable thing sits under a clicked tile (for army orders)?
+  armyTargetAt(col, row) {
+    for (const a of this.armyMgr.aiArmies()) if (Math.abs(a.col - col) <= 2 && Math.abs(a.row - row) <= 2) return { kind: 'army', ref: a, col: Math.round(a.col), row: Math.round(a.row), faction: a.faction };
+    if (this.settlements) for (const st of this.settlements.list) if (st.owner === 'neutral' && Math.abs(st.col - col) <= 2 && Math.abs(st.row - row) <= 2) return { kind: 'settlement', ref: st, col: st.col, row: st.row };
+    for (const k of this.kingdoms || []) if (k.castleAlive && Math.abs(k.castleCol - col) <= 3 && Math.abs(k.castleRow - row) <= 3) return { kind: 'aicastle', ref: k, col: k.castleCol, row: k.castleRow, faction: k.cfg.key };
+    return null;
+  }
+
+  // A player army reached its destination; resolve any attack target. An AI army
+  // reaching the player castle attacks.
+  onArmyArrive(army) {
+    if (this._inBattle) return;
+    if (army.faction === 'player') {
+      const t = army.attackTarget; army.attackTarget = null;
+      if (!t) return;
+      if (t.kind === 'settlement' && t.ref.owner === 'neutral') this.resolveSettlementAttack(army, t.ref);
+      else if (t.kind === 'aicastle' && t.ref.castleAlive) this.resolveAICastleAttack(army, t.ref);
+      else if (t.kind === 'army' && this.armyMgr.armies.includes(t.ref)) this.startArmyBattle(army, t.ref.units, { faction: t.ref.faction, enemyArmyRef: t.ref });
+    } else {
+      this.aiArmyAttacksPlayer(army);
+    }
+  }
+
+  // Two opposing armies within 2 tiles → battle (interception in the wilderness).
+  armiesOnInterceptCheck() {
+    if (this._inBattle) return;
+    const players = this.armyMgr.playerArmies();
+    for (const ai of this.armyMgr.aiArmies()) {
+      // 30-tile approach warning (once per AI army).
+      const c = this.buildings.castle;
+      if (c && !ai._warned && Phaser.Math.Distance.Between(ai.col, ai.row, c.col, c.row) <= 30) {
+        ai._warned = true;
+        this.threatWarning(`${ai.name} spotted! Approaching (~${this.armyMgr.etaDays(ai).toFixed(1)} days)`, 0xff8a80, true);
+        this.logEvent(`${ai.name} is marching on your kingdom`, 'red');
+      }
+      for (const pa of players) {
+        if (Phaser.Math.Distance.Between(ai.col, ai.row, pa.col, pa.row) <= 2) {
+          this.startArmyBattle(pa, ai.units, { faction: ai.faction, enemyArmyRef: ai });
+          return;
+        }
+      }
+    }
+  }
+
+  startArmyBattle(playerArmy, enemyUnits, ctx) {
+    if (this._inBattle) return;
+    this._inBattle = true;
+    try { SaveManager.save(this, 0); } catch (e) {}
+    this._battleArmy = playerArmy;
+    this.scene.launch('BattleScene', {
+      playerArmy: playerArmy.units.map((u) => ({ type: u.type, count: u.count })),
+      enemyArmy: enemyUnits.map((u) => ({ type: u.type, count: u.count })),
+      terrainType: this.battleTerrain(), enemyFaction: ctx.faction || 'red',
+      context: ctx, playerDefending: !!ctx.defending,
+      onComplete: (res) => this.onArmyBattleComplete(playerArmy, res, ctx),
+    });
+    this.scene.pause();
+  }
+
+  onArmyBattleComplete(army, res, ctx) {
+    this._inBattle = false; this.scene.resume();
+    this.armyMgr.setUnitsFromBattle(army, res.army);
+    if (res && res.victory) {
+      this._lastBattleWonDay = this.gameDay;
+      this.armyMgr.addMorale(army, 15);
+      if (res.loot) { this.resources.add('gold', res.loot.gold || 0); if (res.loot.iron) this.resources.add('iron', res.loot.iron); }
+      if (this.reputation) this.reputation.add('conqueror', 10);
+      if (ctx.kind === 'settlement' && ctx.ref) { for (const g of ctx.ref.guards) { g.alive = false; if (g.destroy) g.destroy(); } ctx.ref.guards = []; if (ctx.ref.owner === 'neutral') ctx.ref.conquer(); this.armyMgr.addMorale(army, 10); if (this.reputation) this.reputation.add('conqueror', 15); this.logEvent(`Conquered ${ctx.ref.name}`, 'green'); }
+      if (ctx.kind === 'aicastle' && ctx.ref) { ctx.ref.regrouping = true; ctx.ref.rebuildTimer = 5 * this.DAY_SECONDS; this.logEvent(`Defeated ${ctx.ref.cfg.name}'s army`, 'green'); }
+      if (ctx.enemyArmyRef && this.armyMgr.armies.includes(ctx.enemyArmyRef)) { this.armyMgr.removeArmy(ctx.enemyArmyRef); if (ctx.faction) { const k = this.kingdoms.find((x) => x.cfg.key === ctx.faction); if (k) { k.regrouping = true; k.rebuildTimer = 5 * this.DAY_SECONDS; } } }
+      this.threatWarning('Your army was victorious!', 0x7cfc7c, true);
+    } else {
+      this._lastBattleLostDay = this.gameDay;
+      this.armyMgr.addMorale(army, -25);
+      const c = this.buildings.castle;
+      if (c) this.armyMgr.marchTo(army, c.col + 2, c.row + 2, { returning: true });
+      this.threatWarning('Your army was defeated.', 0xff6b6b, true);
+    }
+    if (this.armyMgr.totalUnits(army) === 0) this.armyMgr.disband(army);
+    this.refreshPanel();
+  }
+
+  resolveSettlementAttack(army, st) {
+    const garrison = st.guards.filter((g) => g.alive).length;
+    if (garrison === 0) { if (st.owner === 'neutral') st.conquer(); this.armyMgr.addMorale(army, 10); if (this.reputation) this.reputation.add('conqueror', 15); this.logEvent(`Conquered ${st.name}`, 'green'); return; }
+    this.startArmyBattle(army, [{ type: 'warrior', count: garrison }], { kind: 'settlement', ref: st, faction: 'neutral' });
+  }
+
+  resolveAICastleAttack(army, k) {
+    if (this.diplomacy) this.diplomacy.declareWar(k.cfg.key);
+    const n = Math.max(2, k.estimatedArmy());
+    this.startArmyBattle(army, [{ type: 'warrior', count: n }], { kind: 'aicastle', ref: k, faction: k.cfg.key });
+  }
+
+  // (Phase 2) AI launches a marching army from its castle toward the player.
+  spawnAIArmyAttack(kingdom, unitCounts) {
+    const a = this.armyMgr.spawnAIArmy(kingdom.cfg.key, kingdom.castleCol, kingdom.castleRow, unitCounts, `${kingdom.cfg.name} army`);
+    if (a) { const c = this.buildings.castle; this.armyMgr.marchTo(a, c.col, c.row, { attackTarget: { kind: 'player' } }); }
+    if (this.onKingdomAttack) this.onKingdomAttack(kingdom);
+  }
+
+  // AI army reached the player castle → defend with the home garrison (unassigned troops).
+  aiArmyAttacksPlayer(aiArmy) {
+    if (this._inBattle) return;
+    const defenders = this.troops.snapshot();
+    const defTotal = defenders.reduce((s, g) => s + g.count, 0);
+    if (defTotal === 0) {
+      // No defenders → castle takes the hit; AI army withdraws.
+      const c = this.buildings.castle; if (c) c.takeDamage(120);
+      this.threatWarning(`${aiArmy.name} raided your undefended castle!`, 0xff6b6b, true);
+      this.armyMgr.removeArmy(aiArmy);
+      return;
+    }
+    this._inBattle = true;
+    try { SaveManager.save(this, 0); } catch (e) {}
+    this.troops.removeAll();
+    this.scene.launch('BattleScene', {
+      playerArmy: defenders, enemyArmy: aiArmy.units.map((u) => ({ type: u.type, count: u.count })),
+      terrainType: this.battleTerrain(), enemyFaction: aiArmy.faction, context: { defending: true },
+      playerDefending: true, taverMoraleBonus: this.hasTavern && this.hasTavern(),
+      onComplete: (res) => {
+        this.onBattleComplete(res); // restores player survivors to the troop pool
+        if (res && res.victory) {
+          if (this.armyMgr.armies.includes(aiArmy)) this.armyMgr.removeArmy(aiArmy);
+          const k = this.kingdoms.find((x) => x.cfg.key === aiArmy.faction);
+          if (k) { k.regrouping = true; k.rebuildTimer = 5 * this.DAY_SECONDS; }
+          if (this.reputation) this.reputation.add('protector', 10);
+          this.logEvent(`Repelled ${aiArmy.name}`, 'green');
+        } else {
+          // Survivors of the AI army retreat to their own castle.
+          const kk = this.kingdoms.find((x) => x.cfg.key === aiArmy.faction);
+          if (kk && this.armyMgr.armies.includes(aiArmy)) this.armyMgr.marchTo(aiArmy, kk.castleCol, kk.castleRow, {});
+        }
+      },
+    });
+    this.scene.pause();
+  }
+
   // Total estimated AI strength (used by the scouting intel reveal).
   armyEstimate() {
     return (this.kingdoms || []).reduce((s, k) => s + (k.castleAlive ? k.estimatedArmy() : 0), 0);

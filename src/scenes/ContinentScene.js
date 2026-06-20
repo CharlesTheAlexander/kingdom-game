@@ -206,6 +206,16 @@ export class ContinentScene extends Phaser.Scene {
       g.fillStyle(0x2aa0ff, 1).fillTriangle(p.x - 8, p.y + 6, p.x + 8, p.y + 6, p.x, p.y - 9);
       g.lineStyle(2, 0xffffff, 0.9).strokeTriangle(p.x - 8, p.y + 6, p.x + 8, p.y + 6, p.x, p.y - 9);
     }
+    // (Phase 2) Armies on the map — arrow dots in faction colour.
+    if (iso.armyMgr) {
+      const FC = { player: 0x3a7bd5, red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a };
+      for (const a of iso.armyMgr.armies) {
+        const p = this.toScreen(a.col, a.row);
+        const col = FC[a.faction] || 0x888888;
+        g.fillStyle(col, 1).fillTriangle(p.x, p.y - 6, p.x - 5, p.y + 5, p.x + 5, p.y + 5);
+        g.lineStyle(1, 0xffffff, 0.8).strokeTriangle(p.x, p.y - 6, p.x - 5, p.y + 5, p.x + 5, p.y + 5);
+      }
+    }
     // Player army (centroid of troops) — blue dot, if any in the field.
     const units = iso.troops ? iso.troops.allUnits() : [];
     if (units.length) {

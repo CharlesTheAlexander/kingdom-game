@@ -258,6 +258,13 @@ export class AIKingdom {
     this.waveNumber += 1;
     this.regrouping = false;
     const count = Math.max(2, Math.round(2 * this.barracksCount * this.cfg.countMul));
+    // (Expansion Phase 2) March a visible army from the AI castle instead of
+    // edge-spawning loose units. Falls back to the legacy spawn if unavailable.
+    if (this.scene.spawnAIArmyAttack) {
+      const archers = this.barracksCount >= 3 ? Math.max(1, Math.floor(this.barracksCount / 3)) : 0;
+      this.scene.spawnAIArmyAttack(this, { warrior: count, archer: archers });
+      return;
+    }
     const hp = Math.round((30 + this.waveNumber * 8) * this.cfg.hpMul);
     for (let i = 0; i < count; i++) {
       const x = this.castleX + Phaser.Math.Between(-10, 30);

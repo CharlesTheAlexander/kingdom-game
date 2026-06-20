@@ -95,13 +95,18 @@ export class ArmyManager {
   spawnAIArmy(faction, col, row, unitCounts, name) {
     const units = Object.entries(unitCounts).filter(([, n]) => n > 0).map(([type, count]) => ({ type, count, hp: UNIT_HP[type] || 50, maxHp: UNIT_HP[type] || 50 }));
     if (!units.length) return null;
-    const army = { id: 'army_' + (++this._idc), name: name || (faction + ' army'), faction, col, row, state: 'idle', marchTargetCol: null, marchTargetRow: null, marchProgress: 0, garrisonSettlementId: null, morale: 75, supplyDays: 99, sprite: null, attackTarget: null, _warned: false };
+    const army = { id: 'army_' + (++this._idc), name: name || (faction + ' army'), faction, units, col, row, state: 'idle', marchTargetCol: null, marchTargetRow: null, marchProgress: 0, garrisonSettlementId: null, morale: 75, supplyDays: 99, sprite: null, attackTarget: null, _warned: false };
     this.armies.push(army);
     this.makeIcon(army);
     return army;
   }
 
   totalUnits(army) { return army.units.reduce((s, u) => s + u.count, 0); }
+
+  // (Phase 2) Rebuild an army's roster from a BattleScene survivor list [{type,count}].
+  setUnitsFromBattle(army, resArmy) {
+    army.units = (resArmy || []).filter((g) => g.count > 0).map((g) => ({ type: g.type, count: g.count, hp: UNIT_HP[g.type] || 50, maxHp: UNIT_HP[g.type] || 50 }));
+  }
 
   disband(army) {
     if (army.faction === 'player') this.returnToPool(army.units);
