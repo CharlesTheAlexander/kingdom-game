@@ -73,6 +73,7 @@ import { sfx } from '../audio/SoundEngine.js';
 import * as SaveManager from '../systems/SaveManager.js';
 import { Population } from '../systems/Population.js';
 import { ArmyManager } from '../systems/ArmyManager.js';
+import { WorldEvents } from '../systems/WorldEvents.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -318,6 +319,7 @@ export class IsometricScene extends GameScene {
     this.wildlife = new WildlifeManager(this); // Phase 2 wildlife threats
     this.population = new Population(this); // (Expansion Phase 5) population + happiness
     this.armyMgr = new ArmyManager(this); // (Expansion) armies on the map
+    this.worldEvents = new WorldEvents(this); // (Expansion Phase 3) events + messenger
     this._eventLog = this._eventLog || [];
     this.panelMode = 'build';
 
@@ -2713,7 +2715,7 @@ export class IsometricScene extends GameScene {
     if (this.dayTimer >= DAY_MS) {
       this.dayTimer -= DAY_MS;
       this.gameDay += 1;
-      const eat = this.troops.dailyUpkeep(); // 2/soldier, 5/mercenary (Phase 5)
+      const eat = Math.round(this.troops.dailyUpkeep() * (this._seasonFoodUpkeepMult || 1)); // (Phase 3) winter +20%
       this.resources.food = Math.max(0, this.resources.food - eat);
       this.onNewDay(eat);
     }
@@ -2798,6 +2800,7 @@ export class IsometricScene extends GameScene {
     this.updateWeather(); // (Polish Phase 4) switch snow/rain on season change
     if (this.population) { this.population.onNewDay(); this.updatePopulationHud(); } // (Phase 5)
     if (this.armyMgr) this.armyMgr.onNewDay(); // (Expansion) army supply/morale
+    if (this.worldEvents) this.worldEvents.onNewDay(); // (Expansion Phase 3) world events
     // (Save system) Auto-save to slot 0 every N days.
     const freq = this._autoSaveEveryDays || 5;
     if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();

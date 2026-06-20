@@ -353,7 +353,8 @@ export class WildlifeManager {
   update(dt) {
     const day = this.scene.gameDay;
     if (day - this._lastWolfDay >= 4 && this.wolfCount() < MAX_WOLVES) { this._lastWolfDay = day; this.spawnWolfPack(); } // (FIX 2) every 4 days, max 4
-    if (day >= 2 && day - this._lastGobDay >= 2 && this.count() < MAX_WILDLIFE) { this._lastGobDay = day; this.spawnGoblinRaid(); }
+    const truce = this.scene._goblinTruceUntilDay || 0; // (Phase 3) goblin shaman truce
+    if (day >= truce && day >= 2 && day - this._lastGobDay >= 2 && this.count() < MAX_WILDLIFE) { this._lastGobDay = day; this.spawnGoblinRaid(); }
     if (day - this._lastBoarDay >= 2 && this.count() < MAX_WILDLIFE) { this._lastBoarDay = day; this.spawnBoar(); }
 
     for (const u of this.units) u.update(dt);
