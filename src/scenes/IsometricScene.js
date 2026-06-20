@@ -74,6 +74,7 @@ import * as SaveManager from '../systems/SaveManager.js';
 import { Population } from '../systems/Population.js';
 import { ArmyManager } from '../systems/ArmyManager.js';
 import { WorldEvents } from '../systems/WorldEvents.js';
+import { Reputation, TRAITS, defaultBonuses } from '../systems/Reputation.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -274,7 +275,7 @@ export class IsometricScene extends GameScene {
     this._chipPrev = {};
     this._menuOpen = false; this._menuEls = null; this._savingEls = null;
     this._confirmEls = null; this._tip = null; this._soundUI = null; this.movingBuilding = null;
-    this._popHud = null;
+    this._popHud = null; this._kingName = null; this._kingTitle = null; this._kingEls = null; this._logEls = null;
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -318,6 +319,15 @@ export class IsometricScene extends GameScene {
     this.expeditions = new ExpeditionManager(this);
     this.wildlife = new WildlifeManager(this); // Phase 2 wildlife threats
     this.population = new Population(this); // (Expansion Phase 5) population + happiness
+    // (Expansion Phase 4) King identity + reputation. Trait bonuses must exist
+    // before ArmyManager (it reads the army cap) and the economy hooks.
+    this.traitBonuses = defaultBonuses();
+    this.reputation = new Reputation(this);
+    let king = null; try { king = JSON.parse(localStorage.getItem('kg_king')); } catch (e) {}
+    this.kingdomName = (king && king.kingdom) || 'Your Kingdom';
+    this.rulerName = (king && king.ruler) || 'The King';
+    this.kingTrait = (king && king.trait) || null;
+    if (this.kingTrait) this.applyTraitBonuses(this.kingTrait);
     this.armyMgr = new ArmyManager(this); // (Expansion) armies on the map
     this.worldEvents = new WorldEvents(this); // (Expansion Phase 3) events + messenger
     this._eventLog = this._eventLog || [];
@@ -353,6 +363,7 @@ export class IsometricScene extends GameScene {
     this.createDayCounter();
     this.createIronHud(); // UI overhaul: chip-based resource bar (hides old day counter)
     this.createPopulationHud(); // (Expansion Phase 5) population + happiness indicator
+    this.createKingdomNameHud(); // (Expansion Phase 4) kingdom name + reputation title
     this.createCastleBar();
     // Lift the castle HP bar above the (now larger) iso keep.
     const cb = this.buildings.castle;
@@ -388,7 +399,9 @@ export class IsometricScene extends GameScene {
     this.updateWeather(); // (Polish Phase 4) apply weather for the starting season
 
     if (this._startZoom) this.cameras.main.setZoom(Phaser.Math.Clamp(this._startZoom, 0.3, 2));
-    if (!this._noIntro) this.showWelcomePanel();
+    // (Phase 4) First-ever start (no saved king) shows the creation screen; it
+    // then opens the tutorial. Otherwise go straight to the tutorial.
+    if (!this._noIntro) { let hasKing = false; try { hasKing = !!localStorage.getItem('kg_king'); } catch (e) {} if (!hasKing && !SaveManager.hasPending()) this.showKingCreation(); else this.showWelcomePanel(); }
 
     this.setupUICamera();
 
@@ -1151,6 +1164,90 @@ export class IsometricScene extends GameScene {
     if (p.happiness >= 50) { g.beginPath(); g.arc(fx, fy + 1, 4, 0.15 * Math.PI, 0.85 * Math.PI); g.strokePath(); }
     else if (p.happiness >= 30) { g.beginPath(); g.moveTo(fx - 4, fy + 3); g.lineTo(fx + 4, fy + 3); g.strokePath(); }
     else { g.beginPath(); g.arc(fx, fy + 6, 4, 1.15 * Math.PI, 1.85 * Math.PI); g.strokePath(); }
+  }
+
+  // ====================================================== KING IDENTITY / TRAITS
+
+  applyTraitBonuses(traitId) {
+    const t = TRAITS[traitId]; if (!t) return;
+    Object.assign(this.traitBonuses, t.bonuses || {});
+    if (this.armyMgr) this.armyMgr.maxPlayerArmies = this.traitBonuses.armyCap;
+  }
+
+  // Library spawn for the Scholar trait (Phase 5 building; no-op if absent).
+  spawnStartingLibrary() {
+    if (!BuildingTypes.library) return;
+    const c = this.buildings.castle; if (!c) return;
+    for (let dc = 3; dc <= 8; dc++) {
+      const b = this.buildings.place('library', c.col + dc, c.row - 2);
+      if (b) { this.decorateBuilding(b); break; }
+    }
+  }
+
+  createKingdomNameHud() {
+    const fix = (o) => o.setScrollFactor(0);
+    this._kingName = fix(this.add.text(56, 8, this.kingdomName, { fontFamily: 'monospace', fontSize: '14px', color: '#ffe9b0', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setDepth(60));
+    this._kingTitle = fix(this.add.text(56, 26, '', { fontFamily: 'monospace', fontSize: '11px', color: '#c9a14a' }).setDepth(60));
+    this.updateKingdomTitle();
+  }
+
+  updateKingdomTitle() {
+    if (!this._kingName) return;
+    this._kingName.setText(this.kingdomName);
+    const title = this.reputation ? this.reputation.title(this.kingdomName) : null;
+    this._kingTitle.setText(title || (this.kingTrait && TRAITS[this.kingTrait] ? TRAITS[this.kingTrait].name : ''));
+  }
+
+  // One-time kingdom creation screen (names + starting trait).
+  showKingCreation() {
+    const fix = (o) => o.setScrollFactor(0);
+    const els = []; const W = 640, H = 460, px = (GAME_W - W) / 2, py = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.9).setOrigin(0, 0).setDepth(150).setInteractive()));
+    els.push(fix(this.add.rectangle(px, py, W, H, 0x1a1410, 0.99).setOrigin(0, 0).setDepth(151).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, py + 16, 'FOUND YOUR KINGDOM', { fontFamily: 'monospace', fontSize: '22px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0).setDepth(152)));
+    els.push(fix(this.add.text(px + 30, py + 52, 'Kingdom name:', { fontFamily: 'monospace', fontSize: '13px', color: '#f0e6d0' }).setDepth(152)));
+    els.push(fix(this.add.text(px + 30, py + 84, 'Ruler name:', { fontFamily: 'monospace', fontSize: '13px', color: '#f0e6d0' }).setDepth(152)));
+    // DOM inputs (fixed-position, centred horizontally — robust to canvas scaling).
+    const mk = (top, ph) => { const el = document.createElement('input'); el.type = 'text'; el.placeholder = ph; el.style.cssText = `position:fixed;left:50%;transform:translateX(-50%);top:${top}px;width:280px;padding:6px 8px;font-family:monospace;font-size:14px;z-index:9999;background:#0e1219;color:#fff;border:1px solid #c9a14a;border-radius:4px;`; document.body.appendChild(el); return el; };
+    const inK = mk(window.innerHeight / 2 - 150, 'Your Kingdom');
+    const inR = mk(window.innerHeight / 2 - 110, 'The King');
+    this._kingInputs = [inK, inR];
+    this._typing = true;
+    inK.addEventListener('focus', () => (this._typing = true)); inR.addEventListener('focus', () => (this._typing = true));
+    // Trait cards (2x3).
+    let chosen = null; const cards = [];
+    const ids = Object.keys(TRAITS);
+    ids.forEach((id, i) => {
+      const t = TRAITS[id];
+      const cw = 190, ch = 96, gx = px + 30 + (i % 3) * (cw + 14), gy = py + 150 + Math.floor(i / 3) * (ch + 12);
+      const card = fix(this.add.rectangle(gx, gy, cw, ch, 0x241a0e, 0.98).setOrigin(0, 0).setDepth(152).setStrokeStyle(2, 0x55473a, 0.9).setInteractive({ useHandCursor: true }));
+      const ic = fix(this.add.graphics().setDepth(153)); ic.fillStyle(t.color, 1).fillCircle(gx + 22, gy + 24, 12);
+      const nm = fix(this.add.text(gx + 42, gy + 12, t.name, { fontFamily: 'monospace', fontSize: '14px', color: '#ffe9b0', fontStyle: 'bold' }).setDepth(153));
+      const ds = fix(this.add.text(gx + 10, gy + 44, t.desc.join('\n'), { fontFamily: 'monospace', fontSize: '10px', color: '#cfc1a6', lineSpacing: 2 }).setDepth(153));
+      els.push(card, ic, nm, ds); cards.push(card);
+      card.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); chosen = id; cards.forEach((c) => c.setStrokeStyle(2, 0x55473a, 0.9)); card.setStrokeStyle(3, 0xffe23f, 1); begin.setFillStyle(0x1f5b3a); });
+    });
+    const begin = fix(this.add.rectangle(GAME_W / 2 - 90, py + H - 48, 180, 38, 0x39393f).setOrigin(0, 0).setDepth(152).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(begin);
+    els.push(fix(this.add.text(GAME_W / 2, py + H - 29, 'Begin →', { fontFamily: 'monospace', fontSize: '15px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(153)));
+    begin.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); if (!chosen) { this.showToast('Choose a trait'); return; } this.finishKingCreation(inK.value, inR.value, chosen, els); });
+    this._kingEls = els;
+    this.routeCameras && this.routeCameras();
+  }
+
+  finishKingCreation(kingdom, ruler, trait, els) {
+    this.kingdomName = (kingdom && kingdom.trim()) || 'Your Kingdom';
+    this.rulerName = (ruler && ruler.trim()) || 'The King';
+    this.kingTrait = trait;
+    try { localStorage.setItem('kg_king', JSON.stringify({ kingdom: this.kingdomName, ruler: this.rulerName, trait })); } catch (e) {}
+    this.applyTraitBonuses(trait);
+    const t = TRAITS[trait]; if (t && t.oneTime) try { t.oneTime(this); } catch (e) { console.error('[Trait] oneTime failed', e); }
+    if (this._kingInputs) { this._kingInputs.forEach((el) => el.remove()); this._kingInputs = null; }
+    this._typing = false;
+    els.forEach((o) => o.destroy()); this._kingEls = null;
+    this.updateKingdomTitle();
+    this.logEvent && this.logEvent(`${this.kingdomName} founded under ${this.rulerName} (${t ? t.name : '—'})`, 'green');
+    if (!this._noIntro) this.showWelcomePanel();
   }
 
   // ============================================================ SAVE / LOAD UI
@@ -2112,8 +2209,10 @@ export class IsometricScene extends GameScene {
     for (const [label, give, get] of trades) {
       // (Gameplay change 1) No daily limit — trade as long as resources allow.
       const can = b.workers > 0 && this.resources.canAfford(give);
+      // (Phase 4) Merchant trait + reputation improve what you receive.
+      const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0);
       this.spriteButton(x, this.PANEL_Y + 30, 132, 40, label.split(' → ')[0] + '→', label.split(' → ')[1], can, () => {
-        this.resources.spend(give); for (const [r, v] of Object.entries(get)) this.resources.add(r, v); this.refreshPanel();
+        this.resources.spend(give); for (const [r, v] of Object.entries(get)) this.resources.add(r, Math.round(v * mult)); if (this.reputation) this.reputation.add('merchant', 3); this.refreshPanel();
       });
       x += 136;
     }
@@ -2514,6 +2613,16 @@ export class IsometricScene extends GameScene {
     );
     const scouted = this.intelActive();
     this.panelText(14, this.PANEL_Y + 6, `AI KINGDOMS — DIPLOMACY${scouted ? '   (scouted)' : ''}`, { bold: true, color: '#ffe9b0' });
+    // (Phase 4) Reputation mini-bars top-right of the panel.
+    if (this.reputation) {
+      const reps = [['Conqueror', 'conqueror', 0xc0392b], ['Merchant', 'merchant', 0xf1c40f], ['Protector', 'protector', 0x3498db], ['Destroyer', 'destroyer', 0x8e44ad]];
+      reps.forEach(([lbl, key, col], i) => {
+        const rx = 380 + (i % 2) * 180, ry = this.PANEL_Y + 6 + Math.floor(i / 2) * 14;
+        this.panelText(rx, ry, lbl, { color: '#cfc1a6', size: '10px' });
+        this.panel.add(this.add.rectangle(rx + 74, ry + 5, 90, 7, 0x000000, 0.5).setOrigin(0, 0.5).setScrollFactor(0));
+        this.panel.add(this.add.rectangle(rx + 74, ry + 5, 90 * (this.reputation.scores[key] / 100), 7, col).setOrigin(0, 0.5).setScrollFactor(0));
+      });
+    }
     const base = this.PANEL_Y + 24, rowH = 34;
     this.kingdoms.forEach((k, idx) => {
       const key = k.cfg.key;
@@ -2715,7 +2824,7 @@ export class IsometricScene extends GameScene {
     if (this.dayTimer >= DAY_MS) {
       this.dayTimer -= DAY_MS;
       this.gameDay += 1;
-      const eat = Math.round(this.troops.dailyUpkeep() * (this._seasonFoodUpkeepMult || 1)); // (Phase 3) winter +20%
+      const eat = Math.round(this.troops.dailyUpkeep() * (this._seasonFoodUpkeepMult || 1) * (this.traitBonuses ? this.traitBonuses.foodMult : 1)); // (Phase 3 season + Phase 4 Warlord)
       this.resources.food = Math.max(0, this.resources.food - eat);
       this.onNewDay(eat);
     }
@@ -2801,6 +2910,7 @@ export class IsometricScene extends GameScene {
     if (this.population) { this.population.onNewDay(); this.updatePopulationHud(); } // (Phase 5)
     if (this.armyMgr) this.armyMgr.onNewDay(); // (Expansion) army supply/morale
     if (this.worldEvents) this.worldEvents.onNewDay(); // (Expansion Phase 3) world events
+    if (this.reputation) { this.reputation.onNewDay(); this.updateKingdomTitle(); } // (Phase 4)
     // (Save system) Auto-save to slot 0 every N days.
     const freq = this._autoSaveEveryDays || 5;
     if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();

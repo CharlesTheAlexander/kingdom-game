@@ -36,6 +36,8 @@ export function capture(scene) {
     population: scene.population && scene.population.serialize ? scene.population.serialize() : null,
     armies: scene.armyMgr && scene.armyMgr.serialize ? scene.armyMgr.serialize() : [],
     worldEvents: scene.worldEvents && scene.worldEvents.serialize ? scene.worldEvents.serialize() : null,
+    king: { kingdom: scene.kingdomName, ruler: scene.rulerName, trait: scene.kingTrait },
+    reputation: scene.reputation && scene.reputation.serialize ? scene.reputation.serialize() : null,
     flags: { tut: safeParse(localStorage.getItem('kg_tut')) || {}, hints: scene._firedHints ? Object.keys(scene._firedHints) : [] },
     audio: scene.sfx ? { volume: scene.sfx.volume, muted: scene.sfx.muted } : null,
   };
@@ -145,6 +147,16 @@ export function applySave(scene, data) {
   sect('population', () => { if (data.population && scene.population) { scene.population.restore(data.population); scene.updatePopulationHud && scene.updatePopulationHud(); } });
   sect('armies', () => { if (scene.armyMgr && scene.armyMgr.restore) scene.armyMgr.restore(data.armies); });
   sect('worldEvents', () => { if (scene.worldEvents && scene.worldEvents.restore) scene.worldEvents.restore(data.worldEvents); });
+  sect('king', () => {
+    if (data.king) {
+      scene.kingdomName = data.king.kingdom || scene.kingdomName;
+      scene.rulerName = data.king.ruler || scene.rulerName;
+      scene.kingTrait = data.king.trait || scene.kingTrait;
+      if (scene.kingTrait && scene.applyTraitBonuses) scene.applyTraitBonuses(scene.kingTrait);
+    }
+    if (data.reputation && scene.reputation) scene.reputation.restore(data.reputation);
+    if (scene.updateKingdomTitle) scene.updateKingdomTitle();
+  });
   sect('diplomacy', () => {
     if (data.diplomacy && scene.diplomacy) {
       Object.assign(scene.diplomacy.rel, data.diplomacy.rel || {});
