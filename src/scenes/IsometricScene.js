@@ -277,6 +277,7 @@ export class IsometricScene extends GameScene {
     this._menuOpen = false; this._menuEls = null; this._savingEls = null;
     this._confirmEls = null; this._tip = null; this._soundUI = null; this.movingBuilding = null;
     this._popHud = null; this._kingName = null; this._kingTitle = null; this._kingEls = null; this._logEls = null;
+    this._logBtnBadge = null; this._logOpen = false; this._pauseBtn = null; this._paused = false; // (Phase 7) reset on restart
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -421,6 +422,9 @@ export class IsometricScene extends GameScene {
     this.gamePlayMs = this.gamePlayMs || 0;
     this._autoSaveEveryDays = 5;
     this.createMenuButton();
+    this.createLogButton();   // (Expansion Phase 7) notifications log
+    this.createPauseButton(); // (Expansion Phase 7) pause control
+    this.setupHotkeys();      // (Expansion Phase 7) keyboard shortcuts
     this.input.keyboard.on('keydown-S', (e) => { if (this._typing) return; this.quickSave(); });
     this._beforeUnload = () => { try { SaveManager.save(this, 0); } catch (err) {} };
     window.addEventListener('beforeunload', this._beforeUnload);
@@ -1264,6 +1268,114 @@ export class IsometricScene extends GameScene {
     bg.on('pointerover', () => bg.setFillStyle(0x1c2330, 0.95));
     bg.on('pointerout', () => bg.setFillStyle(0x10141c, 0.9));
     bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('ui_click'); this.openMenu(); });
+  }
+
+  // (Expansion Phase 7) Notifications log button — opens the last-50 event log.
+  // A small red badge shows how many events arrived since it was last opened.
+  createLogButton() {
+    const fix = (o) => o.setScrollFactor(0);
+    const bg = fix(this.add.rectangle(52, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
+    fix(this.add.text(72, 22, '📜', { fontFamily: 'monospace', fontSize: '15px' }).setOrigin(0.5).setDepth(61));
+    const badge = fix(this.add.text(86, 8, '', { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff', fontStyle: 'bold', backgroundColor: '#c0392b', padding: { x: 3, y: 1 } }).setOrigin(0.5, 0).setDepth(62)).setVisible(false);
+    this._logBtnBadge = badge;
+    this._logSeen = (this._eventLog || []).length;
+    bg.on('pointerover', () => bg.setFillStyle(0x1c2330, 0.95));
+    bg.on('pointerout', () => bg.setFillStyle(0x10141c, 0.9));
+    bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('ui_click'); this.toggleLog(); });
+    this.updateLogBadge();
+  }
+
+  updateLogBadge() {
+    if (!this._logBtnBadge) return;
+    const unseen = Math.max(0, (this._eventLog || []).length - (this._logSeen || 0));
+    this._logBtnBadge.setVisible(unseen > 0 && !this._logOpen).setText(unseen > 9 ? '9+' : String(unseen));
+  }
+
+  toggleLog() { if (this._logOpen) this.closeLog(); else this.openLog(); }
+
+  closeLog() { this._logOpen = false; if (this._logEls) { this._logEls.forEach((o) => o.destroy()); this._logEls = null; } this.updateLogBadge(); }
+
+  openLog() {
+    this.closeLog();
+    this._logOpen = true;
+    this._logSeen = (this._eventLog || []).length; // mark all read
+    const fix = (o) => o.setScrollFactor(0).setDepth(118);
+    const W = 460, H = 420, x = (GAME_W - W) / 2, y = 70;
+    const els = [];
+    const dim = fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0.45).setOrigin(0, 0).setInteractive());
+    dim.on('pointerdown', (p, lx, ly, evd) => { evd.stopPropagation(); this.closeLog(); });
+    els.push(dim);
+    const body = fix(this.add.rectangle(x, y, W, H, 0x12101a, 0.99).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9).setInteractive());
+    body.on('pointerdown', (p, lx, ly, evb) => evb.stopPropagation());
+    els.push(body);
+    els.push(fix(this.add.text(x + 16, y + 12, '📜 Notifications', { fontFamily: 'monospace', fontSize: '17px', color: '#ffe9b0', fontStyle: 'bold' })));
+    const closeBg = fix(this.add.rectangle(x + W - 30, y + 12, 22, 22, 0x5c1a1a, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0xf0e6c8, 0.6).setInteractive({ useHandCursor: true }));
+    els.push(closeBg);
+    els.push(fix(this.add.text(x + W - 19, y + 23, '✕', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5)));
+    closeBg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.closeLog(); });
+    const COL = { green: '#7cfc7c', red: '#ff7b7b', info: '#bcd6f0', gold: '#ffe066' };
+    const recent = (this._eventLog || []).slice(-50).reverse();
+    if (!recent.length) els.push(fix(this.add.text(x + 20, y + 50, 'No events yet.', { fontFamily: 'monospace', fontSize: '13px', color: '#8893a3' })));
+    let ly2 = y + 46;
+    for (const e of recent) {
+      if (ly2 > y + H - 22) break;
+      const c = COL[e.kind] || COL.info;
+      els.push(fix(this.add.text(x + 16, ly2, `Day ${e.day}`, { fontFamily: 'monospace', fontSize: '11px', color: '#8893a3' })));
+      els.push(fix(this.add.text(x + 78, ly2, e.text, { fontFamily: 'monospace', fontSize: '12px', color: c, wordWrap: { width: W - 96 } })));
+      ly2 += 22;
+    }
+    this._logEls = els;
+    this.routeCameras && this.routeCameras();
+  }
+
+  // (Expansion Phase 7) Pause button — freezes the simulation (gameSpeed 0).
+  createPauseButton() {
+    const fix = (o) => o.setScrollFactor(0);
+    const x = GAME_W - 120 - 34, y = TOP_BAR + 62;
+    const bg = fix(this.add.rectangle(x, y, 30, 26, 0x3a2f1a, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xf0e6c8, 0.7).setDepth(40).setInteractive({ useHandCursor: true }));
+    const t = fix(this.add.text(x + 15, y + 13, this._paused ? '▶' : '⏸', { fontFamily: 'monospace', fontSize: '14px', color: '#ffffff' }).setOrigin(0.5).setDepth(41));
+    this._pauseBtn = { bg, t };
+    bg.on('pointerover', () => bg.setFillStyle(0x5a4a2a, 0.95));
+    bg.on('pointerout', () => bg.setFillStyle(this._paused ? 0x6a2a2a : 0x3a2f1a, 0.95));
+    bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.togglePause(); });
+  }
+
+  togglePause() {
+    this._paused = !this._paused;
+    if (this._paused) { this._speedBeforePause = this.gameSpeed || 1; this.gameSpeed = 0; }
+    else { this.gameSpeed = this._speedBeforePause || 1; }
+    if (this._pauseBtn) { this._pauseBtn.t.setText(this._paused ? '▶' : '⏸'); this._pauseBtn.bg.setFillStyle(this._paused ? 0x6a2a2a : 0x3a2f1a, 0.95); }
+    this.showToast(this._paused ? '⏸ Paused' : '▶ Resumed');
+  }
+
+  // (Expansion Phase 7) Keyboard shortcuts. Suppressed while typing (king name)
+  // or while the pause menu is open (except Escape/M which manage the menu).
+  setupHotkeys() {
+    const kb = this.input.keyboard;
+    const tab = (mode) => { if (this._typing || this._menuOpen) return; if (this.panelMode === mode) return; this.onTabClick(mode); };
+    kb.on('keydown-SPACE', (e) => { if (this._typing || this._menuOpen) return; if (e && e.preventDefault) e.preventDefault(); this.togglePause(); });
+    kb.on('keydown-B', () => tab('build'));
+    kb.on('keydown-E', () => tab('expedition'));
+    kb.on('keydown-K', () => tab('kingdoms'));
+    kb.on('keydown-A', () => tab('armies'));
+    kb.on('keydown-R', () => tab('research'));
+    kb.on('keydown-L', () => { if (this._typing) return; this.toggleLog(); });
+    kb.on('keydown-M', () => { if (this._typing) return; if (this._menuOpen) this.closeMenu(); else this.openMenu(); });
+    kb.on('keydown-ONE', () => this.quickSelectArmy(0));
+    kb.on('keydown-TWO', () => this.quickSelectArmy(1));
+    kb.on('keydown-THREE', () => this.quickSelectArmy(2));
+  }
+
+  // (Expansion Phase 7) Number keys 1-3 select a player army and pan to it.
+  quickSelectArmy(idx) {
+    if (this._typing || this._menuOpen || !this.armyMgr) return;
+    const a = this.armyMgr.playerArmies()[idx];
+    if (!a) { this.showToast(`No army #${idx + 1}`); return; }
+    this.armyMgr.selectArmy(a);
+    const { x, y } = this.tileCenter(Math.round(a.col), Math.round(a.row));
+    this.cameras.main.pan(x, y, 350, 'Sine.easeInOut');
+    this.panelMode = 'armies';
+    this.refreshPanel();
   }
 
   showSavingIndicator() {
