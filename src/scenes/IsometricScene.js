@@ -77,6 +77,7 @@ import { WorldEvents } from '../systems/WorldEvents.js';
 import { Reputation, TRAITS, defaultBonuses } from '../systems/Reputation.js';
 import { Research } from '../systems/Research.js';
 import { WinConditions } from '../systems/WinConditions.js';
+import { Ruins } from '../systems/Ruins.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -388,6 +389,7 @@ export class IsometricScene extends GameScene {
     this.settlements = new SettlementManager(this); // Phase B: neutral settlements
     this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
     this.territory = new Territory(this); // Phase 4: territory + fog of war
+    this.ruins = new Ruins(this); // (Session-1 Phase 1) ancient ruins
     // (Phase 7) Reveal a generous 20-tile starting radius around the castle.
     if (this.buildings.castle) this.revealAround(this.buildings.castle.col, this.buildings.castle.row, 20);
     this.setupInput();
@@ -2212,6 +2214,7 @@ export class IsometricScene extends GameScene {
     if (this.selectedBuilding && this.selectedBuilding.alive) this.renderSelectedPanel(this.selectedBuilding);
     else if (this.panelMode === 'expedition') this.renderExpeditionPanel();
     else if (this.panelMode === 'artifacts') this.renderArtifactsPanel();
+    else if (this.panelMode === 'ruins' && this.ruins) this.renderRuinsPanel();
     else if (this.panelMode === 'kingdoms') this.renderKingdomsPanel();
     else if (this.panelMode === 'caravans' && this.caravans) this.caravans.renderPanel();
     else if (this.panelMode === 'armies') this.renderArmiesPanel();
@@ -2456,6 +2459,34 @@ export class IsometricScene extends GameScene {
     });
 
     this.spriteButton(GAME_W - 110, this.PANEL_Y + 6, 100, 22, `Artifacts (${this.artifacts.length})`, '', true, () => { this.panelMode = 'artifacts'; this.refreshPanel(); }, { gold: true });
+    // (Session-1 Phase 1) Ruins sub-panel — shows discovered ruins to explore.
+    if (this.ruins) {
+      const disc = this.ruins.list.filter((r) => r.discovered).length;
+      this.spriteButton(GAME_W - 224, this.PANEL_Y + 6, 108, 22, `Ruins (${this.ruins.exploredCount()}/${this.ruins.list.length})`, '', disc > 0, () => { this.panelMode = 'ruins'; this.refreshPanel(); }, { gold: disc > 0 });
+    }
+  }
+
+  // (Session-1 Phase 1) Discovered ruins, each explorable once.
+  renderRuinsPanel() {
+    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x241a0e, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.panelText(16, this.PANEL_Y + 8, `ANCIENT RUINS — explore for unique rewards   (Soldiers: ${this.troops.count})`, { bold: true, color: '#ffe9b0' });
+    const avail = this.ruins.available();
+    const out = this.ruins.list.filter((r) => r.explored);
+    if (!this.ruins.list.some((r) => r.discovered)) {
+      this.panelText(16, this.PANEL_Y + 42, 'No ruins discovered yet. Move units through the wilderness to find them.', { color: '#cfc1a6' });
+    }
+    const def = this.expeditions.defs.exploreRuin;
+    avail.forEach((r, i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      const x = 16 + col * 470, y = this.PANEL_Y + 30 + row * 30;
+      const can = this.troops.count >= def.cost && this.expeditions.state.exploreRuin.length < def.maxSlots;
+      this.spriteButton(x, y, 300, 26, `Explore: ${r.name}`, `${def.cost} soldiers · ${def.days} days`, can, () => { this.expeditions.sendRuin(r.name); });
+    });
+    // Show in-progress + explored status on the right.
+    const outX = 640; let oy = this.PANEL_Y + 30;
+    this.expeditions.state.exploreRuin.forEach((slot) => { this.panelText(outX, oy, `Exploring ${slot.target} [${(slot.timeLeft / 300).toFixed(1)}d]`, { color: '#ffe066', size: '11px' }); oy += 16; });
+    out.forEach((r) => { this.panelText(outX, oy, `✓ ${r.name} (explored)`, { color: '#7cfc7c', size: '11px' }); oy += 16; });
+    this.spriteButton(GAME_W - 88, this.PANEL_Y + PANEL_H - 30, 78, 22, 'Back', '', true, () => { this.panelMode = 'expedition'; this.refreshPanel(); });
   }
 
   // (Phase 5) Owned artifacts + scroll / iron tallies.
@@ -3260,6 +3291,7 @@ export class IsometricScene extends GameScene {
     this.nodes.update(gdelta);
     this.expeditions.update(dt);
     if (this.territory) this.territory.update(dt); // Phase 4: fog reveal around units
+    if (this.ruins) this.ruins.update(); // (Session-1 Phase 1) ruin discovery
 
     const trainingOpen = this.selectedBuilding && this.selectedBuilding.typeKey === 'barracks' && this.selectedBuilding.slots.length > 0;
     if (((this.panelMode === 'expedition' || this.panelMode === 'kingdoms') && !this.selectedBuilding) || trainingOpen) {

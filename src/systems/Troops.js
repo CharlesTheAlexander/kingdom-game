@@ -430,6 +430,19 @@ export class TroopManager {
     return k;
   }
 
+  // (Session-1) Champion "The Ancient": a unique legendary warrior from a ruin.
+  // HP 200, 40 dmg, large gold-tinted sprite. Counts as one unit but fights like five.
+  spawnChampion() {
+    const home = this.scene.buildings.castle;
+    const hx = home.x + Phaser.Math.Between(-22, 22);
+    const hy = home.y + Phaser.Math.Between(20, 40);
+    const k = new Warrior(this.scene, hx, hy, hx, hy, { knight: true, hp: 200, dps: 40, scale: 56 / 192, tint: 0xffd24a, label: 'The Ancient' });
+    k.champion = true; k.countsAs = 5;
+    this.warriors.push(k);
+    if (home && this.scene.floatText) this.scene.floatText(home.x, home.y - 48, 'The Ancient joins your army!', '#ffd24a');
+    return k;
+  }
+
   // (Phase 5) A Mercenary joins from an expedition: yellow sprite, "Mercenary"
   // label, fights like a warrior but eats 5 food/day (see dailyUpkeep).
   spawnMercenary() {

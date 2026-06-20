@@ -10,6 +10,14 @@ export class Population {
     this.prodMult = 1;          // production modifier applied in Buildings.produce()
     this._growthAcc = 0;        // days accumulated toward the next +1 person
     this.modifiers = [];        // [{label, value}] active happiness modifiers (for the tooltip)
+    this.tempMods = [];         // [{label, value, untilDay}] timed happiness modifiers (events/tax)
+    this.peak = 10;             // (Phase 6 stats) peak population reached
+  }
+
+  // (Session-1) A timed happiness modifier — festivals, curses, parades, etc.
+  addTempMod(label, value, days) {
+    const until = (this.scene.gameDay || 0) + days;
+    this.tempMods.push({ label, value, untilDay: until });
   }
 
   capacity() {
@@ -36,6 +44,11 @@ export class Population {
     if (day - (s._lastCastleDamageDay ?? -99) <= 3) mods.push({ label: 'Castle damaged', value: -20 });
     if (this.count >= cap) mods.push({ label: 'Overcrowded', value: -10 });
     else if (this.count < cap - 4) mods.push({ label: 'Roomy housing', value: 3 });
+    // (Phase 5) Tax happiness effect, set by the tax slider.
+    if (s._taxHappiness) mods.push({ label: 'Taxes', value: s._taxHappiness });
+    // (Session-1) Timed event modifiers — keep only the unexpired ones.
+    this.tempMods = this.tempMods.filter((m) => m.untilDay > day);
+    for (const m of this.tempMods) mods.push({ label: m.label, value: m.value });
 
     let h = 50;
     for (const m of mods) h += m.value;
@@ -54,6 +67,7 @@ export class Population {
     }
     // Very low happiness: people leave.
     if (this.happiness < 10 && this.count > 1) this.count -= 1;
+    if (this.count > this.peak) this.peak = this.count; // (Phase 6 stats)
   }
 
   // For the happiness tooltip: "Food surplus: +15 | No Tavern: -5"
@@ -69,6 +83,6 @@ export class Population {
     return 'normal';
   }
 
-  serialize() { return { count: this.count, happiness: this.happiness, growthAcc: this._growthAcc }; }
-  restore(d) { if (!d) return; this.count = d.count; this.happiness = d.happiness; this._growthAcc = d.growthAcc || 0; }
+  serialize() { return { count: this.count, happiness: this.happiness, growthAcc: this._growthAcc, peak: this.peak, tempMods: this.tempMods }; }
+  restore(d) { if (!d) return; this.count = d.count; this.happiness = d.happiness; this._growthAcc = d.growthAcc || 0; this.peak = d.peak || this.count; this.tempMods = d.tempMods || []; }
 }

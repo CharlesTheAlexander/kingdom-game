@@ -21,6 +21,10 @@ const DEFS = {
   scout: { name: 'Scouting Party', cost: 2, days: 0.5, maxSlots: 2, reward: 'Reveal enemy army · maybe Artifact' },
   raid: { name: 'Raid Enemy Camp', cost: 5, days: 1, maxSlots: 2, reward: '20-40 Iron · Mercenary? · 30% loss' },
   campaign: { name: 'Major Campaign', cost: 10, days: 2, maxSlots: 1, reward: '40-80 Iron · Artifact · Scroll · risky' },
+  // (Session-1 Phase 1) Explore a discovered ruin for a unique reward.
+  exploreRuin: { name: 'Explore Ruin', cost: 3, days: 2, maxSlots: 2, reward: 'A unique ancient reward' },
+  // (Session-1 Phase 2) Send a gift to a wandering tribe to befriend it.
+  envoy: { name: 'Send Envoy', cost: 0, days: 1, maxSlots: 2, reward: 'Befriend a wandering tribe' },
 };
 
 const WSCALE = 36 / 192;
@@ -30,7 +34,7 @@ export class ExpeditionManager {
     this.scene = scene;
     this.defs = DEFS;
     // Each type holds an array of active slots: [{ timeLeft }]. (FIX 3)
-    this.state = { scout: [], raid: [], campaign: [] };
+    this.state = { scout: [], raid: [], campaign: [], exploreRuin: [], envoy: [] };
   }
 
   activeCount(key) { return this.state[key].length; }
@@ -73,11 +77,49 @@ export class ExpeditionManager {
       for (let i = slots.length - 1; i >= 0; i--) {
         slots[i].timeLeft -= dt;
         if (slots[i].timeLeft <= 0) {
-          slots.splice(i, 1); // remove the finished slot, then resolve its rewards
-          this.resolve(key);
+          const slot = slots.splice(i, 1)[0]; // remove the finished slot, then resolve
+          if (key === 'exploreRuin') this.resolveRuin(slot);
+          else if (key === 'envoy') this.resolveEnvoy(slot);
+          else this.resolve(key);
         }
       }
     }
+  }
+
+  // (Session-1 Phase 1) Send 3 soldiers to explore a specific discovered ruin.
+  sendRuin(ruinName) {
+    const def = this.defs.exploreRuin;
+    if (this.state.exploreRuin.length >= def.maxSlots) { this.scene.showToast('All explorers are already out'); return; }
+    if (this.scene.troops.count < def.cost) { this.scene.showToast(`Need ${def.cost} soldiers`); return; }
+    this.scene.troops.detach(def.cost); this.marchOff(def.cost);
+    this.state.exploreRuin.push({ timeLeft: def.days * SEC_PER_DAY, cost: def.cost, target: ruinName });
+    this.scene.refreshPanel();
+  }
+
+  resolveRuin(slot) {
+    sfx.play('expedition_return');
+    this.marchIn(slot.cost); // explorers return
+    const ruin = this.scene.ruins && this.scene.ruins.byName(slot.target);
+    if (ruin && !ruin.explored) this.scene.ruins.explore(ruin);
+    if (this.scene.stats) this.scene.stats.note('expeditions');
+    this.scene.refreshPanel();
+  }
+
+  // (Session-1 Phase 2) Send a 50-gold gift to a tribe to make it friendly.
+  sendEnvoy(tribeKey) {
+    const def = this.defs.envoy;
+    if (this.state.envoy.length >= def.maxSlots) { this.scene.showToast('An envoy is already travelling'); return; }
+    if (this.scene.resources.gold < 50) { this.scene.showToast('Need 50 gold for the gift'); return; }
+    this.scene.resources.spend({ gold: 50 });
+    this.state.envoy.push({ timeLeft: def.days * SEC_PER_DAY, cost: 0, target: tribeKey });
+    this.scene.refreshPanel();
+  }
+
+  resolveEnvoy(slot) {
+    sfx.play('expedition_return');
+    if (this.scene.factions && this.scene.factions.befriendTribe) this.scene.factions.befriendTribe(slot.target);
+    if (this.scene.stats) this.scene.stats.note('expeditions');
+    this.scene.refreshPanel();
   }
 
   resolve(key) {

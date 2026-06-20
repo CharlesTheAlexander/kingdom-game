@@ -137,6 +137,12 @@ export class WorldEvents {
     if (s.threatWarning) s.threatWarning('📜 ' + text, 0xffe9a8);
   }
 
+  // (Session-1) Fire an ad-hoc news banner + log (used by Ruins discovery, etc.)
+  pushNews(text) {
+    this.showBanner(text);
+    this.scene.logEvent && this.scene.logEvent(text, 'info');
+  }
+
   // ---- messenger UI -------------------------------------------------------
   createMessenger() {
     const s = this.scene;
