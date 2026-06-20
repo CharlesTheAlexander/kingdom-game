@@ -127,3 +127,46 @@ generous economy further toward trivial.
 3. **Smooth idle food** (it is lumpy because freelancers chase the nearest node);
    a small dedicated "first food node" guarantee near the castle would steady the
    pre-Farm period.
+
+---
+
+# Step 2 re-verification (autonomous session)
+
+Re-ran the idle simulation on the current code (after the Castle gold trim). Per-day:
+
+| Day | Wood | Stone | Food | Gold |
+|----:|-----:|------:|-----:|-----:|
+| 1 |   86 |   20 |   60 |  166 |
+| 2 |  209 |   40 |  144 |  604 |
+| 3 |  338 |   64 |  224 | 1054 |
+| 4 |  467 |   80 |  316 | 1504 |
+| 5 |  602 |  100 |  396 | 1954 |
+| 8 | 1001 |  160 |  636 | 3304 |
+
+**Gold is now ≈450/day** (down from 600) — the 2→1.5 Castle trim is confirmed and
+gold remains comfortable. **Stone came in at only ~20/day this run** (vs ~60 in the
+earlier run) — idle freelancers chase the *nearest* node, and the near-castle wood
+/food nodes added in the prior session bias them away from stone, so stone income
+is RNG-variable (20–60/day) and can be slow.
+
+### Answers (this prompt's 7 questions)
+1. **First House (30 wood):** Day 1.
+2. **First Lumberyard (40 wood):** Day 1.
+3. **First Barracks (80 gold + 40 wood):** Day 1.
+4. **Idle stone/day — enough?** Borderline: 20–60/day depending on node RNG. The
+   Mine (50 stone) was affordable by ~day 3 in the worst run. **Fixed** — see below.
+5. **Food at day 10 with 5 warriors:** 5 warriors eat 10/day. Idle food this run is
+   ~80/day, so food stays positive even *without* a Farm; with a Farm it is a large
+   surplus. No crisis.
+6. **First bottleneck:** Stone (the slowest/most variable idle resource). Gold is
+   ample, wood/food plentiful.
+7. **Disproportionate upgrade costs?** No — wood/stone/gold tier costs track income;
+   the only late gate is iron (expedition-only), which is intended pacing.
+
+### Balance change applied this step
+| Change | Before | After | Why |
+|---|---|---|---|
+| Idle (freelance) stone per trip | 2 | **4** | Idle stone was RNG-low (~20/day) and stone gates the Mine, walls, towers and several upgrades. Doubling the per-trip yield lifts the floor to ~40/day so stone is no longer the early bottleneck, without making it overpowered (still ≤ wood). |
+
+The food-upkeep and gold-generation conditional fixes were **not** triggered (food
+is fine; gold is already ample after the earlier trim).

@@ -23,7 +23,7 @@ const GATHER = {
 // excluded — gold comes from the Castle/expeditions, not freelancers.
 const FREELANCE = {
   wood: { carry: 'pawn_run_wood', res: 'wood', amt: 3, walk: 'pawn_run_axe', interact: 'pawn_interact_axe' },
-  stone: { carry: 'pawn_run_gold', res: 'stone', amt: 2, walk: 'pawn_run_pickaxe', interact: 'pawn_interact_pickaxe' },
+  stone: { carry: 'pawn_run_gold', res: 'stone', amt: 4, walk: 'pawn_run_pickaxe', interact: 'pawn_interact_pickaxe' }, // (Balance) 2->4: idle stone was RNG-low (~20/day), gating the Mine
   food: { carry: 'pawn_run_meat', res: 'food', amt: 4, walk: 'pawn_run_meat', interact: 'pawn_idle' },
 };
 const FREELANCE_TYPES = ['wood', 'stone', 'food'];
