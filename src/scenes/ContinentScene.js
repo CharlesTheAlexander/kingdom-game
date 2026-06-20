@@ -216,6 +216,14 @@ export class ContinentScene extends Phaser.Scene {
         g.lineStyle(1, 0xffffff, 0.8).strokeTriangle(p.x, p.y - 6, p.x - 5, p.y + 5, p.x + 5, p.y + 5);
       }
     }
+    // (Session-1 Phase 2) Wandering factions — caravans (brown), tribes (orange), pilgrims (white).
+    if (iso.factions && iso.factions.continentDots) {
+      for (const d of iso.factions.continentDots()) {
+        const p = this.toScreen(d.col, d.row);
+        g.fillStyle(d.color, 1).fillCircle(p.x, p.y, 3);
+        g.lineStyle(1, 0x000000, 0.5).strokeCircle(p.x, p.y, 3);
+      }
+    }
     // Player army (centroid of troops) — blue dot, if any in the field.
     const units = iso.troops ? iso.troops.allUnits() : [];
     if (units.length) {

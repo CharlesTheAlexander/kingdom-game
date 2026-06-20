@@ -78,6 +78,7 @@ import { Reputation, TRAITS, defaultBonuses } from '../systems/Reputation.js';
 import { Research } from '../systems/Research.js';
 import { WinConditions } from '../systems/WinConditions.js';
 import { Ruins } from '../systems/Ruins.js';
+import { WanderingFactions } from '../systems/WanderingFactions.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
@@ -390,6 +391,7 @@ export class IsometricScene extends GameScene {
     this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
     this.territory = new Territory(this); // Phase 4: territory + fog of war
     this.ruins = new Ruins(this); // (Session-1 Phase 1) ancient ruins
+    this.factions = new WanderingFactions(this); // (Session-1 Phase 2) caravans/tribes/pilgrims
     // (Phase 7) Reveal a generous 20-tile starting radius around the castle.
     if (this.buildings.castle) this.revealAround(this.buildings.castle.col, this.buildings.castle.row, 20);
     this.setupInput();
@@ -2464,6 +2466,14 @@ export class IsometricScene extends GameScene {
       const disc = this.ruins.list.filter((r) => r.discovered).length;
       this.spriteButton(GAME_W - 224, this.PANEL_Y + 6, 108, 22, `Ruins (${this.ruins.exploredCount()}/${this.ruins.list.length})`, '', disc > 0, () => { this.panelMode = 'ruins'; this.refreshPanel(); }, { gold: disc > 0 });
     }
+    // (Session-1 Phase 2) Send Envoy to revealed, not-yet-friendly tribes.
+    if (this.factions) {
+      const tribes = this.factions.tribes.filter((t) => t.revealed && t.relation !== 'friendly');
+      tribes.forEach((t, i) => {
+        const can = this.resources.gold >= 50 && this.expeditions.state.envoy.length < this.expeditions.defs.envoy.maxSlots;
+        this.spriteButton(14 + i * 320, this.PANEL_Y + PANEL_H - 30, 300, 24, `Send Envoy: ${t.name}`, '50 gold · 1 day → friendly', can, () => this.expeditions.sendEnvoy(t.biome), { gold: can });
+      });
+    }
   }
 
   // (Session-1 Phase 1) Discovered ruins, each explorable once.
@@ -3187,6 +3197,7 @@ export class IsometricScene extends GameScene {
     if (this.reputation) { this.reputation.onNewDay(); this.updateKingdomTitle(); } // (Phase 4)
     if (this.research) this.research.onNewDay(); // (Phase 5) research progress
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
+    if (this.factions) this.factions.onNewDay(); // (Session-1 Phase 2) wandering factions daily
     // (Save system) Auto-save to slot 0 every N days.
     const freq = this._autoSaveEveryDays || 5;
     if (freq > 0 && this.gameDay > 1 && this.gameDay % freq === 0) this.autoSave();
@@ -3292,6 +3303,7 @@ export class IsometricScene extends GameScene {
     this.expeditions.update(dt);
     if (this.territory) this.territory.update(dt); // Phase 4: fog reveal around units
     if (this.ruins) this.ruins.update(); // (Session-1 Phase 1) ruin discovery
+    if (this.factions) this.factions.update(dt); // (Session-1 Phase 2) wandering factions
 
     const trainingOpen = this.selectedBuilding && this.selectedBuilding.typeKey === 'barracks' && this.selectedBuilding.slots.length > 0;
     if (((this.panelMode === 'expedition' || this.panelMode === 'kingdoms') && !this.selectedBuilding) || trainingOpen) {
