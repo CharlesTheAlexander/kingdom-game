@@ -55,21 +55,24 @@ class Warrior {
     this.y = y;
     this.homeX = homeX;
     this.homeY = homeY;
-    this.hp = MAX_HP;
-    this.maxHp = MAX_HP;
+    this.maxHp = opts.hp || MAX_HP; // (Phase 3) Knights override hp/dps
+    this.hp = this.maxHp;
+    this.dps = opts.dps || DPS_TO_ENEMY;
     this.alive = true;
     this.target = null;
     this.cmd = null; // manual move/attack command (box-select, Phase 3)
     this.canAttackAI = true;
     // (Phase 5) Mercenaries are yellow-sprited warriors with a higher food
-    // upkeep and a floating label; regular warriors are blue.
+    // upkeep and a floating label; regular warriors are blue. (Phase 3) Knights.
     this.mercenary = !!opts.mercenary;
+    this.knight = !!opts.knight;
     this.idleAnim = opts.idle || 'blue_warrior_idle';
     this.runAnim = opts.run || 'blue_warrior_run';
     // (Phase 4) small idle offset so warriors don't rest on exact coordinates.
     this.idleOX = Phaser.Math.Between(-4, 4);
     this.idleOY = Phaser.Math.Between(-4, 4);
-    this.spr = scene.add.sprite(x, y, this.idleAnim, 0).setScale(SCALE).setDepth(7);
+    this.spr = scene.add.sprite(x, y, this.idleAnim, 0).setScale(opts.scale || SCALE).setDepth(7);
+    if (opts.tint) this.spr.setTint(opts.tint);
     this.curAnim = this.idleAnim;
     if (scene.anims.exists(this.idleAnim)) this.spr.play(this.idleAnim);
     if (opts.label) {
@@ -104,7 +107,7 @@ class Warrior {
       } else {
         this.spr.setFlipX(this.target.x < this.x); // (Phase 5) face the enemy
         const dmgMul = this.scene.buffs ? this.scene.buffs.warriorDamage : 1; // Whetstone artifact
-        this.target.takeDamage(DPS_TO_ENEMY * dt * dmgMul);
+        this.target.takeDamage(this.dps * dt * dmgMul);
         this.play(this.idleAnim);
       }
     } else {
@@ -132,7 +135,7 @@ class Warrior {
   takeDamage(amount) {
     this.hp -= amount;
     this.spr.setTintFill(0xff5555); // (Phase 7) hit flash
-    this.scene.time.delayedCall(70, () => { if (this.alive) this.spr.clearTint(); });
+    this.scene.time.delayedCall(70, () => { if (this.alive) { if (this.knight) this.spr.setTint(0x9fb8d8); else this.spr.clearTint(); } });
     if (this.hp <= 0) this.die();
   }
 
@@ -339,6 +342,19 @@ export class TroopManager {
     return true;
   }
 
+  // (Phase 1 BattleScene) Snapshot the army by type, then remove every unit from
+  // the world (they "march off" to the BattleScene). Survivors are respawned.
+  snapshot() {
+    const c = { warrior: 0, mercenary: 0, knight: 0, archer: this.archers.length, monk: this.monks.length };
+    for (const w of this.warriors) { if (w.knight) c.knight++; else if (w.mercenary) c.mercenary++; else c.warrior++; }
+    return Object.entries(c).filter(([, v]) => v > 0).map(([type, count]) => ({ type, count }));
+  }
+
+  removeAll() {
+    for (const u of [...this.warriors, ...this.archers, ...this.monks]) { u.alive = false; if (u.spr) u.spr.destroy(); if (u.label) u.label.destroy(); if (u.selRing) u.selRing.destroy(); }
+    this.warriors = []; this.archers = []; this.monks = [];
+  }
+
   spawnArcher(barracks) {
     this.archers.push(new Archer(this.scene, barracks.x + Phaser.Math.Between(-26, -14), barracks.y + Phaser.Math.Between(-14, 14)));
   }
@@ -361,6 +377,17 @@ export class TroopManager {
   // Spawn a warrior at an explicit point (used when expeditions return).
   spawnAt(x, y) {
     this.warriors.push(new Warrior(this.scene, x, y, x, y));
+  }
+
+  // (Phase 3) Knight: HP 120, 25 dmg, slow, armored (blue-steel tint, larger).
+  spawnKnight(home) {
+    const hx = home.x + Phaser.Math.Between(-22, 22);
+    const hy = home.y + Phaser.Math.Between(20, 40);
+    const k = new Warrior(this.scene, hx, hy, hx, hy, { knight: true, hp: 120, dps: 25, scale: 44 / 192, tint: 0x9fb8d8, label: 'Knight' });
+    this.warriors.push(k);
+    const c = this.scene.buildings.castle;
+    if (c && this.scene.floatText) this.scene.floatText(c.x, c.y - 44, 'A Knight joins your army!', '#9fb8d8');
+    return k;
   }
 
   // (Phase 5) A Mercenary joins from an expedition: yellow sprite, "Mercenary"

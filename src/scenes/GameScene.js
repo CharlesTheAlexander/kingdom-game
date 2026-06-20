@@ -82,6 +82,8 @@ const TRAIN_DEFS = {
   warrior: { label: 'Warrior', time: 30, cost: { gold: 30, food: 5 } },
   archer: { label: 'Archer', time: 40, cost: { gold: 40, food: 8 } },
   monk: { label: 'Monk', time: 50, cost: { gold: 50, food: 10, stone: 10 } },
+  // (Phase 3) Knight — needs Barracks Lv2 + an operational Blacksmith + Equipment.
+  knight: { label: 'Knight', time: 90, cost: { gold: 80, food: 30, equipment: 1 } },
 };
 
 export class GameScene extends Phaser.Scene {
@@ -1129,15 +1131,17 @@ export class GameScene extends Phaser.Scene {
       this.workerControls(b, 26, this.PANEL_Y + 78);
 
       // Train buttons (top row), gated by level + free slots.
-      let tx = 456;
-      for (const type of ['warrior', 'archer', 'monk']) {
+      let tx = 452;
+      for (const type of ['warrior', 'archer', 'monk', 'knight']) {
         const def = TRAIN_DEFS[type];
         const need = this.unitUnlockLevel(type);
-        const unlocked = b.level >= need;
+        const needSmith = type === 'knight';
+        const smithOk = !needSmith || (this.hasBlacksmith && this.hasBlacksmith());
+        const unlocked = b.level >= need && smithOk;
         const can = unlocked && b.slots.length < maxSlots && this.resources.canAfford(def.cost);
-        const sub = unlocked ? `${formatCost(def.cost)} · ${def.time}s` : `Lv ${need} req`;
-        this.spriteButton(tx, this.PANEL_Y + 8, 110, 52, `Train ${def.label}`, sub, can, () => this.trainUnit(b, type));
-        tx += 114;
+        const sub = b.level < need ? `Lv ${need} req` : needSmith && !smithOk ? 'Blacksmith req' : `${formatCost(def.cost)} · ${def.time}s`;
+        this.spriteButton(tx, this.PANEL_Y + 8, 104, 52, `Train ${def.label}`, sub, can, () => this.trainUnit(b, type));
+        tx += 108;
       }
 
       // Upgrade + Close (bottom row).
@@ -1261,7 +1265,7 @@ export class GameScene extends Phaser.Scene {
   // (Bug 4) Barracks level → training slots & unlocked unit types.
   // Lv1: Warrior, 1 slot.  Lv2: +Archer, 2 slots.  Lv3: +Monk, 3 slots.
   unitUnlockLevel(type) {
-    return { warrior: 1, archer: 2, monk: 3 }[type];
+    return { warrior: 1, archer: 2, monk: 3, knight: 2 }[type];
   }
 
   // (Phase 3) Hard soldier cap = 5 per Barracks built.
@@ -1280,6 +1284,10 @@ export class GameScene extends Phaser.Scene {
     const need = this.unitUnlockLevel(type);
     if (barracks.level < need) {
       this.showToast(`${TRAIN_DEFS[type].label} unlocks at Barracks Lv ${need}`);
+      return;
+    }
+    if (type === 'knight' && (!this.hasBlacksmith || !this.hasBlacksmith())) {
+      this.showToast('Knights need an operational Blacksmith');
       return;
     }
     if (this.soldierTotal() >= this.soldierCap()) {

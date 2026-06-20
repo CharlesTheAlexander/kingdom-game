@@ -172,9 +172,10 @@ export class BuildingManager {
     return this.buildings.filter((b) => b.typeKey === typeKey).length;
   }
 
-  // Placeable buildings count toward the settlement building cap (castle excluded).
+  // Placeable buildings count toward the settlement building cap (castle and
+  // no-cap structures like Walls excluded).
   placedCount() {
-    return this.buildings.filter((b) => b.typeKey !== 'castle').length;
+    return this.buildings.filter((b) => b.typeKey !== 'castle' && !b.type.noCap).length;
   }
 
   // Sum of workers ALLOCATED to buildings (Phase 2 manual allocation).

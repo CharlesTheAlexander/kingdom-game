@@ -3,6 +3,7 @@ import './style.css';
 import { GameScene, GAME_W, GAME_H } from './scenes/GameScene.js';
 import { IsometricScene } from './scenes/IsometricScene.js';
 import { ContinentScene } from './scenes/ContinentScene.js';
+import { BattleScene } from './scenes/BattleScene.js';
 
 const config = {
   type: Phaser.AUTO,
@@ -17,7 +18,7 @@ const config = {
   // IsometricScene is the active scene (first in the array auto-starts);
   // GameScene stays registered as reference but is not started. ContinentScene
   // is launched on demand (Tab) on top of the local view.
-  scene: [IsometricScene, GameScene, ContinentScene],
+  scene: [IsometricScene, GameScene, ContinentScene, BattleScene],
 };
 
 const game = new Phaser.Game(config);

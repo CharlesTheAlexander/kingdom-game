@@ -130,9 +130,18 @@ export class SettlementManager {
     return best;
   }
 
+  // (Phase 6) Daily income from conquered settlements. With an Administrator the
+  // settlement runs itself: +30% tribute but a 50 gold/day salary.
   collectDaily() {
-    for (const st of this.list) if (st.owner === 'player') this.scene.resources.add(st.specialty, 3);
+    for (const st of this.list) {
+      if (st.owner !== 'player') continue;
+      if (st.admin) { this.scene.resources.add(st.specialty, 4); this.scene.resources.gold = Math.max(0, this.scene.resources.gold - 50); }
+      else this.scene.resources.add(st.specialty, 3);
+    }
   }
+
+  owned() { return this.list.filter((s) => s.owner === 'player'); }
+  toggleAdmin(st) { st.admin = !st.admin; if (this.scene.refreshPanel) this.scene.refreshPanel(); }
 
   update(dt) { for (const st of this.list) st.update(dt); }
 

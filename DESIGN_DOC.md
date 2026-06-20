@@ -508,6 +508,49 @@ Completely isolated file, zero risk to existing systems.
 
 ---
 
+## SECTION 15: MAJOR UPDATE — BATTLES, BUILDINGS, PROGRESSION, DIPLOMACY ✅
+
+This session implemented the strategic mid/late-game layer:
+
+**BattleScene (`src/scenes/BattleScene.js`)** — separate scene; triggers when a
+combat involves 10+ combined units. Terrain-themed field, armies spawn
+left/right, terrain obstacles, 20s pre-battle with 4 formation buttons
+(Line/Wedge/Defensive/Flank), then auto-combat with a 5-button command bar
+(Charge/Hold/Flank L/R/Retreat), per-side morale bars (green/yellow/red),
+floating damage numbers, archer projectiles, death fades. Outcome (Victory/
+Defeat/Retreat) returns surviving army + loot to the world.
+
+**New buildings** — Market (2×2, trade panel, 1/day), Blacksmith (2×2, crafts
+Equipment/day, enables Knights), Watchtower (1×1, +8 fog reveal), Tavern (2×2,
++10 battle morale, recruit mercenaries), Wall (1×1, placeable anywhere, blocks
+pathing, no-cap). New resource: **Equipment**.
+
+**Knights** — Barracks L2 + operational Blacksmith; 80g+30 food+1 equipment;
+HP 120 / 25 dmg, blue-steel armored sprite.
+
+**9-stage settlement progression** — Small/Medium/Large Village → Small/Medium/
+Large Town → Small/Medium/Large Castle, each with cost, building cap (8→40),
+stage-gated buildings, castle sprite swaps (village→wooden→stone fort), walls
+(fence→wood→stone), moat + corner towers at castle stages, milestone banners.
+
+**Caravans (`src/systems/Caravans.js`)** — routes between owned settlements
+(max 3), daily specialty delivery scaled by distance, raid chance.
+
+**Administrators** — assign to a conquered settlement: +30% tribute, 50 gold/day.
+
+**Diplomacy (`src/systems/Diplomacy.js`)** — per-kingdom relationship (-100..100),
+reacts to attacks/tribute/time; thresholds gate attacks; Send Tribute / Declare
+War / Non-aggression Pact / Trade Alliance from the kingdoms panel.
+
+**World polish** — priority warning banners (kingdom attacks jump the queue),
+territory pulse on every build, goblin-camp red banners + rubble, seasonal
+terrain tints, decorative wandering villagers.
+
+**Performance** — terrain is a single batched Blitter (no 40k-tile depth sort);
+territory recompute is bounded to the area around changed tiles.
+
+---
+
 *Git repo: github.com/CharlesTheAlexander/kingdom-game*
 *Local: ~/Desktop/kingdom-game*
 *Dev server: localhost:5174*

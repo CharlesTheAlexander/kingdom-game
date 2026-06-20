@@ -60,13 +60,15 @@ import { PawnManager } from '../systems/Pawns.js';
 import { TroopManager } from '../systems/Troops.js';
 import { ResourceNodeManager } from '../systems/ResourceNodes.js';
 import { ExpeditionManager } from '../systems/Expeditions.js';
-import { AIKingdom, FACTIONS } from '../systems/AIKingdom.js';
+import { AIKingdom, AIArcher, FACTIONS } from '../systems/AIKingdom.js';
 import { WildlifeManager } from '../systems/Wildlife.js';
 import { Territory } from '../systems/Territory.js';
 import { SettlementManager } from '../systems/Settlements.js';
 import { GoblinCampManager } from '../systems/GoblinCamps.js';
+import { Diplomacy } from '../systems/Diplomacy.js';
+import { Caravans } from '../systems/Caravans.js';
 import { findPath } from '../systems/Pathfinding.js';
-import { BuildingTypes } from '../data/BuildingTypes.js';
+import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 
 // ---- Isometric world constants -------------------------------------------
 const N = 200;           // 200x200 tile grid (the huge continent)
@@ -237,10 +239,19 @@ export class IsometricScene extends GameScene {
       if (q.has('day')) this.gameDay = Math.max(1, parseInt(q.get('day'), 10) || 1);
     }
 
+    // (Phase 4) Full 9-stage settlement progression. `stage` gates buildings;
+    // `tex` selects the castle sprite; `wall` auto-draws a perimeter; `announce`
+    // fires the big banner at the milestone stages.
     this.TIERS = [
-      { name: 'Village', maxBuildings: 8 },
-      { name: 'Town', maxBuildings: 16, cost: { gold: 200, wood: 150, stone: 100 }, wall: 'wood', castleScale: 1.3, button: 'UPGRADE TO TOWN', announce: 'YOUR VILLAGE IS NOW A TOWN' },
-      { name: 'Castle', maxBuildings: 24, cost: { gold: 500, wood: 300, stone: 400 }, wall: 'stone', castleScale: 1.6, button: 'UPGRADE TO CASTLE', announce: 'YOUR TOWN IS NOW A MIGHTY CASTLE' },
+      { name: 'Small Village', stage: 1, maxBuildings: 8, tex: 'castle', castleScale: 1.0 },
+      { name: 'Medium Village', stage: 2, maxBuildings: 12, cost: { gold: 150, wood: 100 }, tex: 'castle', castleScale: 1.1 },
+      { name: 'Large Village', stage: 3, maxBuildings: 16, cost: { gold: 250, wood: 150, stone: 50 }, tex: 'castle', castleScale: 1.2, wall: 'fence' },
+      { name: 'Small Town', stage: 4, maxBuildings: 20, cost: { gold: 400, wood: 200, stone: 150 }, tex: 'castle_town', castleScale: 1.3, wall: 'wood', announce: 'Your village has grown into a Town!' },
+      { name: 'Medium Town', stage: 5, maxBuildings: 24, cost: { gold: 600, wood: 250, stone: 200 }, tex: 'castle_town', castleScale: 1.4, wall: 'stonebase' },
+      { name: 'Large Town', stage: 6, maxBuildings: 28, cost: { gold: 900, wood: 300, stone: 350, iron: 50 }, tex: 'castle_town', castleScale: 1.5, wall: 'stone' },
+      { name: 'Small Castle', stage: 7, maxBuildings: 32, cost: { gold: 1200, wood: 400, stone: 500, iron: 100 }, tex: 'castle_castle', castleScale: 1.6, wall: 'stone', moat: true, announce: 'Your town has become a Castle!' },
+      { name: 'Medium Castle', stage: 8, maxBuildings: 36, cost: { gold: 1800, stone: 500, iron: 200 }, tex: 'castle_castle', castleScale: 1.8, wall: 'stone', moat: true, towers: true },
+      { name: 'Large Castle', stage: 9, maxBuildings: 40, cost: { gold: 2500, stone: 600, iron: 300 }, tex: 'castle_castle', castleScale: 2.0, wall: 'stone', moat: true, towers: true, announce: 'Your kingdom stands as a mighty Castle!' },
     ];
     this.tierIndex = 0;
 
@@ -295,6 +306,8 @@ export class IsometricScene extends GameScene {
     this.ai = new AIKingdom(this, FACTIONS.red); // primary (kept for legacy refs)
     this.kingdoms = [this.ai, new AIKingdom(this, FACTIONS.purple), new AIKingdom(this, FACTIONS.yellow)];
     this.DAY_SECONDS = DAY_MS / 1000;
+    this.diplomacy = new Diplomacy(this); // Phase 7: relationships with kingdoms
+    this.caravans = new Caravans(this); // Phase 5: trade routes between settlements
     this.settlements = new SettlementManager(this); // Phase B: neutral settlements
     this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
     this.territory = new Territory(this); // Phase 4: territory + fog of war
@@ -303,6 +316,7 @@ export class IsometricScene extends GameScene {
     this.createMinimap();
     this.createKingdomsButton(); // Phase 6: open the kingdom status panel
     this.wildlife.spawnInitial(); // Phase 2: wildlife present from day 1
+    this.createNPCs(); // Phase 8: decorative villagers
     this.refreshPanel();
 
     if (this._startZoom) this.cameras.main.setZoom(Phaser.Math.Clamp(this._startZoom, 0.3, 2));
@@ -368,6 +382,21 @@ export class IsometricScene extends GameScene {
     this.sliceFrame('stone_fort_sheet', 13, 'castle_castle');
     this.sliceFrame('wooden_fort_sheet', 13, 'barracks');
     this.sliceFrame('wind_mill_sheet', 0, 'farm');
+    // (Phase 2) New buildings reuse the closest existing iso art (tinted in
+    // decorateBuilding to read as distinct structures).
+    this.aliasBuilding('market', 'farm');
+    this.aliasBuilding('blacksmith', 'mine');
+    this.aliasBuilding('watchtower', 'tower');
+    this.aliasBuilding('tavern', 'house');
+    this.aliasBuilding('wall', 'iso_rock');
+  }
+
+  aliasBuilding(newKey, srcKey) {
+    if (this.textures.exists(newKey) || !this.textures.exists(srcKey)) return;
+    const src = this.textures.get(srcKey).getSourceImage();
+    const ct = this.textures.createCanvas(newKey, src.width, src.height);
+    ct.getContext().drawImage(src, 0, 0);
+    ct.refresh();
   }
 
   sliceFrame(sheetKey, idx, newKey) {
@@ -433,10 +462,21 @@ export class IsometricScene extends GameScene {
     return ((wy - OY - HH) / HH) * DMUL;
   }
 
-  // Multi-tile footprints (visual + occupancy). Castle 3x3, Barracks 2x2.
+  // Multi-tile footprints (visual + occupancy). Castle 3x3, Barracks/Market/
+  // Blacksmith/Tavern 2x2, everything else 1x1.
   footprintSize(typeKey) {
+    const t = BuildingTypes[typeKey];
+    if (t && t.footprint) return t.footprint;
     return typeKey === 'castle' ? 3 : typeKey === 'barracks' ? 2 : 1;
   }
+
+  buildingUnlocked(key) {
+    const def = BuildingTypes[key];
+    return !!def && (!def.stageUnlock || this.currentStage() >= def.stageUnlock);
+  }
+
+  hasTavern() { return this.buildings.buildings.some((b) => b.typeKey === 'tavern' && b.alive); }
+  hasBlacksmith() { return this.buildings.buildings.some((b) => b.typeKey === 'blacksmith' && b.alive && b.workers > 0); }
 
   footprintCells(typeKey, col, row) {
     const fp = this.footprintSize(typeKey);
@@ -637,6 +677,8 @@ export class IsometricScene extends GameScene {
     b.x = sc.x;
     b.y = sc.y;
     b.rect.setOrigin(0.5, 1.0).setScale(scale).setAngle(0).setPosition(sc.x, sc.y);
+    const BTINT = { market: 0xffe27a, blacksmith: 0xd08a4a, watchtower: 0xa9c6e6, tavern: 0xe0b070, wall: 0xb6b6b6 };
+    if (BTINT[b.typeKey]) b.rect.setTint(BTINT[b.typeKey]); else if (!b._tierTinted) b.rect.clearTint();
     if (b.shadow) b.shadow.setVisible(false);
 
     const topOff = 14 + scale * 34;
@@ -674,6 +716,7 @@ export class IsometricScene extends GameScene {
     }
 
     for (const p of this.pawns.pawns) p.spr.setDepth(D(p.spr.y) + UNIT);
+    if (this.npcs) for (const n of this.npcs) if (n.spr.active) n.spr.setDepth(D(n.spr.y) + UNIT - 0.001);
 
     for (const u of this.troops.allUnits()) {
       u.spr.setDepth(D(u.spr.y) + UNIT);
@@ -721,13 +764,19 @@ export class IsometricScene extends GameScene {
 
   // Build with multi-tile footprint validation, then iso-decorate + place FX.
   tryBuild(typeKey, tile) {
+    const def = BuildingTypes[typeKey];
+    if (def && def.stageUnlock && this.currentStage() < def.stageUnlock) {
+      this.showToast(`${def.name} unlocks at a later settlement stage`);
+      return;
+    }
+    const anywhere = def && def.anywhere; // Walls can be placed outside the build zone
     const cells = this.footprintCells(typeKey, tile.col, tile.row);
     for (const cell of cells) {
-      if (cell.c < 0 || cell.r < 0 || cell.c >= this.COLS || cell.r >= this.ROWS || !this.isBuildZone(cell.c, cell.r)) {
-        this.showToast('Can only build in the settlement zone');
+      if (cell.c < 0 || cell.r < 0 || cell.c >= this.COLS || cell.r >= this.ROWS || (!anywhere && !this.isBuildZone(cell.c, cell.r))) {
+        this.showToast(anywhere ? 'Out of bounds' : 'Can only build in the settlement zone');
         return;
       }
-      if (this.buildings.isOccupied(cell.c, cell.r)) {
+      if (this.buildings.isOccupied(cell.c, cell.r) || (this.terrainType && this.terrainType[cell.r][cell.c] === 'water')) {
         this.showToast('Not enough room — needs a clear footprint');
         return;
       }
@@ -737,14 +786,55 @@ export class IsometricScene extends GameScene {
       this.showToast(check.reason);
       return;
     }
-    this.resources.spend(BuildingTypes[typeKey].cost);
+    this.resources.spend(def.cost);
     const b = this.buildings.place(typeKey, tile.col, tile.row);
     if (b) {
       this.decorateBuilding(b);
       this.placeFX(b);
-      if (this.territory) this.territory.recompute(); // Phase 4: territory grows toward new builds
+      this.territoryPulse(); // (Phase 8) always pulse so placement is felt
+      if (typeKey === 'watchtower') this.revealAround(b.col, b.row, def.revealRadius || 8);
+      if (this.territory) this.territory.recompute();
     }
     this.refreshPanel();
+  }
+
+  // (Phase 8) A few decorative villagers wandering the settlement (purely
+  // visual — they speed up while a raid/battle is active).
+  createNPCs() {
+    this.npcs = [];
+    const c = this.buildings.castle;
+    for (let i = 0; i < 3; i++) {
+      const spr = this.add.sprite(c.x + Phaser.Math.Between(-50, 50), c.y + Phaser.Math.Between(-30, 40), 'pawn_idle', 0).setScale(30 / 192).setDepth(2).setAlpha(0.92);
+      if (this.anims.exists('pawn_idle')) spr.play('pawn_idle');
+      const npc = { spr, wander: () => {
+        if (!spr.active) return;
+        const a = Math.random() * Math.PI * 2, r = 20 + Math.random() * 70;
+        const tx = c.x + Math.cos(a) * r, ty = c.y + Math.sin(a) * r * 0.7;
+        spr.setFlipX(tx < spr.x);
+        const fast = this.waves.enemies.length > 0 || this._inBattle;
+        this.tweens.add({ targets: spr, x: tx, y: ty, duration: fast ? 800 : 2400 + Math.random() * 1600, onComplete: () => npc.wander() });
+      } };
+      npc.wander();
+      this.npcs.push(npc);
+    }
+  }
+
+  // (Phase 8) A ring pulse from the castle whenever a building is placed.
+  territoryPulse() {
+    const c = this.buildings.castle;
+    if (!c) return;
+    const ring = this.add.circle(c.x, c.y, 20, 0x6fdcff, 0).setStrokeStyle(3, 0x6fdcff, 0.8).setDepth(27.5);
+    this.tweens.add({ targets: ring, radius: 200, alpha: 0, duration: 700, ease: 'Cubic.out', onComplete: () => ring.destroy() });
+  }
+
+  // Permanently reveal fog within `rad` tiles of (col,row) — Watchtower / vision.
+  revealAround(col, row, rad) {
+    if (!this.territory) return;
+    for (let dr = -rad; dr <= rad; dr++) for (let dc = -rad; dc <= rad; dc++) {
+      const nc = col + dc, nr = row + dr;
+      if (nc < 0 || nr < 0 || nc >= this.COLS || nr >= this.ROWS || dc * dc + dr * dr > rad * rad) continue;
+      if (!this.territory.explored[nr][nc]) { this.territory.explored[nr][nc] = true; const bob = this.terrainTiles[nr][nc]; if (bob) bob.setTint(this.territory.tintFor(nc, nr)); }
+    }
   }
 
   // ---- Camera (iso world pan + zoom) --------------------------------------
@@ -896,6 +986,8 @@ export class IsometricScene extends GameScene {
 
   // ---- Settlement tiers (swap the castle to the matching iso fort) ---------
 
+  currentStage() { return this.TIERS[this.tierIndex].stage; }
+
   upgradeTier() {
     if (this.tierIndex >= this.TIERS.length - 1) return;
     const next = this.TIERS[this.tierIndex + 1];
@@ -904,7 +996,7 @@ export class IsometricScene extends GameScene {
 
     const castle = this.buildings.castle;
     if (castle) {
-      castle.rect.setTexture(this.tierIndex === 1 ? 'castle_town' : 'castle_castle');
+      if (next.tex && this.textures.exists(next.tex)) castle.rect.setTexture(next.tex);
       castle.rect.setOrigin(0.5, 1.0).setScale(castle.baseScale * next.castleScale);
       castle.rect.clearTint();
       const by = castle.y - castle.baseScale * next.castleScale * 48;
@@ -912,23 +1004,28 @@ export class IsometricScene extends GameScene {
       this.castleBarFill.y = by;
       this.sparkleAt(castle.x, castle.y);
     }
-    if (next.wall) this.drawWall(next.wall);
-    if (this.territory) this.territory.addTierBonus(); // Phase 4: +5 territory radius
-    this.announce(next.announce);
+    if (next.wall) this.drawWall(next.wall, next.moat, next.towers);
+    if (this.territory) this.territory.addTierBonus();
+    if (next.announce) this.announce(next.announce);
     this.refreshPanel();
   }
 
-  // Visual-only iso diamond wall around the build zone.
-  drawWall(type) {
+  // Visual-only iso diamond perimeter around the build zone, styled per stage
+  // (fence → wood → stone), with an optional moat and corner towers.
+  drawWall(type, moat, towers) {
     if (this.wallGfx) this.wallGfx.destroy();
     const g = this.add.graphics().setDepth(28);
     const z = this.BZ;
     const pts = this.regionDiamond(z.c0, z.c1, z.r0, z.r1);
-    const color = type === 'stone' ? 0x9a9a9a : 0x8b5a2b;
-    const thick = type === 'stone' ? 5 : 3;
-    g.lineStyle(thick, color, 0.95);
+    if (moat) { // outer blue ring
+      const mp = this.regionDiamond(z.c0 - 1, z.c1 + 1, z.r0 - 1, z.r1 + 1);
+      g.lineStyle(7, 0x3f6fa0, 0.55); this.strokeDiamond(g, mp); g.strokePath();
+    }
+    const style = { fence: [0x8b5a2b, 2], wood: [0x8b5a2b, 3], stonebase: [0x8a7a5a, 4], stone: [0x9a9a9a, 5] }[type] || [0x9a9a9a, 4];
+    g.lineStyle(style[1], style[0], type === 'fence' ? 0.7 : 0.95);
     this.strokeDiamond(g, pts);
     g.strokePath();
+    if (towers) { for (const p of pts) { g.fillStyle(0x9a9a9a, 0.95).fillCircle(p.x, p.y, 4); g.lineStyle(1, 0x5a5a5a, 1).strokeCircle(p.x, p.y, 4); } }
     this.wallGfx = g;
   }
 
@@ -1211,7 +1308,83 @@ export class IsometricScene extends GameScene {
     else if (this.panelMode === 'expedition') this.renderExpeditionPanel();
     else if (this.panelMode === 'artifacts') this.renderArtifactsPanel();
     else if (this.panelMode === 'kingdoms') this.renderKingdomsPanel();
+    else if (this.panelMode === 'caravans' && this.caravans) this.caravans.renderPanel();
     else this.renderDefaultPanel();
+  }
+
+  // (Phase 2/4) Build palette shows only stage-unlocked buildings (compact grid),
+  // plus the 9-stage upgrade button with the next stage's requirements.
+  renderDefaultPanel() {
+    const status = this.placementType
+      ? `Placing: ${BuildingTypes[this.placementType].name} — click a tile`
+      : `${this.TIERS[this.tierIndex].name}  ·  pick a building, then click a tile`;
+    this.panelText(12, this.PANEL_Y + 6, status, { color: '#f1e3c0' });
+    this.panelText(GAME_W - 150, this.PANEL_Y + 6, `Buildings: ${this.buildings.placedCount()}/${this.maxBuildings()}`, { color: '#ffd23f', bold: true });
+
+    const unlocked = BUILD_ORDER.filter((k) => this.buildingUnlocked(k));
+    const bw = 88, h = 38, gap = 4, perRow = 7;
+    unlocked.forEach((k, i) => {
+      const t = BuildingTypes[k];
+      const col = i % perRow, rowi = Math.floor(i / perRow);
+      const x = 6 + col * (bw + gap), y = this.PANEL_Y + 26 + rowi * (h + 6);
+      const ok = this.buildingUnlocked(k) && this.buildings.canPlace(k, this.resources, this.maxBuildings()).ok;
+      this.spriteButton(x, y, bw, h, t.name, formatCost(t.cost), ok, () => { this.placementType = k; this.selectedBuilding = null; this.clearSelection(); this.refreshPanel(); }, { active: this.placementType === k });
+    });
+
+    // Right side: cancel placement, or the settlement upgrade button.
+    const uy = this.PANEL_Y + 26;
+    if (this.placementType) {
+      this.spriteButton(GAME_W - 150, uy, 140, 56, 'Cancel', 'stop placing', true, () => { this.placementType = null; this.clearGhost(); this.refreshPanel(); });
+    } else if (this.tierIndex < this.TIERS.length - 1) {
+      const nt = this.TIERS[this.tierIndex + 1];
+      const ok = this.canUpgradeTier();
+      const missing = Object.entries(nt.cost).filter(([r, v]) => (this.resources[r] || 0) < v).map(([r]) => r);
+      const sub = ok ? formatCost(nt.cost) : `need ${missing.join(', ')}`;
+      const btn = this.spriteButton(GAME_W - 196, uy, 186, 56, `→ ${nt.name}`, sub, ok, ok ? () => this.upgradeTier() : null, { gold: ok });
+      if (ok) this.tweens.add({ targets: btn, alpha: 0.7, yoyo: true, repeat: -1, duration: 700 });
+    } else {
+      this.spriteButton(GAME_W - 150, uy, 140, 56, 'Large Castle', 'max stage', false, null);
+    }
+  }
+
+  // (Phase 2) Market / Tavern get custom panels; everything else uses the base.
+  renderSelectedPanel(b) {
+    if (b.typeKey === 'market') return this.renderMarketPanel(b);
+    if (b.typeKey === 'tavern') return this.renderTavernPanel(b);
+    return super.renderSelectedPanel(b);
+  }
+
+  renderMarketPanel(b) {
+    this.panel.add(this.add.rectangle(8, this.PANEL_Y + 8, GAME_W - 16, PANEL_H - 16, 0x241a0e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.panelText(20, this.PANEL_Y + 12, `Market  ·  ${b.workers > 0 ? (b._tradedDay ? 'traded today' : 'open') : 'needs a worker'}`, { bold: true, color: '#ffe9b0', size: '16px' });
+    this.workerControls(b, 20, this.PANEL_Y + 36);
+    const trades = [
+      ['20 Wood → 10 Gold', { wood: 20 }, { gold: 10 }],
+      ['20 Stone → 10 Gold', { stone: 20 }, { gold: 10 }],
+      ['10 Gold → 15 Wood', { gold: 10 }, { wood: 15 }],
+      ['10 Gold → 15 Stone', { gold: 10 }, { stone: 15 }],
+      ['15 Food → 10 Gold', { food: 15 }, { gold: 10 }],
+    ];
+    let x = 150;
+    for (const [label, give, get] of trades) {
+      const can = b.workers > 0 && !b._tradedDay && this.resources.canAfford(give);
+      this.spriteButton(x, this.PANEL_Y + 30, 132, 40, label.split(' → ')[0] + '→', label.split(' → ')[1], can, () => {
+        this.resources.spend(give); for (const [r, v] of Object.entries(get)) this.resources.add(r, v); b._tradedDay = true; this.refreshPanel();
+      });
+      x += 136;
+    }
+    this.spriteButton(GAME_W - 92, this.PANEL_Y + 88, 80, 30, 'Close', '', true, () => { this.selectedBuilding = null; this.clearSelection(); this.refreshPanel(); });
+  }
+
+  renderTavernPanel(b) {
+    this.panel.add(this.add.rectangle(8, this.PANEL_Y + 8, 440, PANEL_H - 16, 0x241a0e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.panelText(20, this.PANEL_Y + 12, 'Tavern', { bold: true, color: '#ffe9b0', size: '18px' });
+    this.panelText(20, this.PANEL_Y + 40, '+10 starting morale in battle while built.', { color: '#cfe0ff', size: '12px' });
+    this.panelText(20, this.PANEL_Y + 60, b._recruitCd > 0 ? `Recruit ready in ${b._recruitCd} day(s)` : 'A mercenary is available to recruit.', { color: '#cfc1a6', size: '12px' });
+    this.workerControls(b, 20, this.PANEL_Y + 80);
+    const can = b.workers > 0 && (!b._recruitCd || b._recruitCd <= 0) && this.resources.gold >= 50;
+    this.spriteButton(456, this.PANEL_Y + 30, 220, 52, 'Recruit Mercenary', '50 gold', can, () => { this.resources.spend({ gold: 50 }); this.troops.spawnMercenary(); b._recruitCd = 3; this.refreshPanel(); }, { gold: can });
+    this.spriteButton(GAME_W - 120, this.PANEL_Y + 30, 104, 52, 'Close', '', true, () => { this.selectedBuilding = null; this.clearSelection(); this.refreshPanel(); });
   }
 
   // (Phase 5) Expeditions now return only special rewards; durations in days.
@@ -1273,6 +1446,74 @@ export class IsometricScene extends GameScene {
     const wt = this.hud && this.hud.wave;
     if (wt) { const x0 = wt.x; this.tweens.add({ targets: wt, x: x0 + 5, yoyo: true, repeat: 5, duration: 45, onComplete: () => (wt.x = x0) }); }
     this.fireHint('firstWave', 'Enemy attack incoming — select your warriors and right-click enemies to fight');
+    // (Phase 1) Large engagements (10+ combined units) resolve in the BattleScene.
+    const enemies = this.waves.enemies.filter((e) => e.faction === kingdom);
+    this.maybeTriggerBattle(enemies, kingdom.cfg.key, { type: 'wave', kingdom, defending: true });
+  }
+
+  // ---- Phase 1: BattleScene trigger + outcome -----------------------------
+
+  battleTerrain() {
+    const c = this.buildings.castle;
+    const b = c ? this.biomeAt(c.col, c.row) : 'start';
+    return { forest: 'forest', mountains: 'mountains', wildlands: 'wildlands' }[b] || 'plains';
+  }
+
+  enemyArmyFrom(enemies) {
+    const c = {};
+    for (const e of enemies) {
+      const t = e.kind === 'goblin' ? 'goblin' : e instanceof AIArcher || e.range > 2 * this.TILE ? 'archer' : 'warrior';
+      c[t] = (c[t] || 0) + 1;
+    }
+    return Object.entries(c).map(([type, count]) => ({ type, count }));
+  }
+
+  // Launch the BattleScene if the combined unit count is 10+. Returns true if a
+  // battle started. The player's army + the given enemies leave the world and
+  // survivors are restored when the battle resolves.
+  maybeTriggerBattle(enemies, faction, context) {
+    if (this._inBattle || this.isGameOver) return false;
+    const playerArmy = this.troops.snapshot();
+    const pTotal = playerArmy.reduce((s, g) => s + g.count, 0);
+    if (pTotal + enemies.length < 10) return false;
+    this._inBattle = true;
+    const enemyArmy = this.enemyArmyFrom(enemies);
+    for (const e of enemies) e.destroy();
+    this.troops.removeAll();
+    this.deselectAllUnits();
+    this.scene.launch('BattleScene', {
+      playerArmy, enemyArmy, terrainType: this.battleTerrain(), enemyFaction: faction,
+      context, playerDefending: !!(context && context.defending), taverMoraleBonus: this.hasTavern && this.hasTavern(),
+      onComplete: (res) => this.onBattleComplete(res),
+    });
+    this.scene.pause();
+    return true;
+  }
+
+  onBattleComplete(res) {
+    this._inBattle = false;
+    this.scene.resume();
+    const c = this.buildings.castle;
+    if (c) {
+      for (const grp of res.army || []) {
+        for (let i = 0; i < grp.count; i++) {
+          if (grp.type === 'archer') this.troops.spawnArcher(c);
+          else if (grp.type === 'monk') this.troops.spawnMonk(c);
+          else if (grp.type === 'mercenary') this.troops.spawnMercenary();
+          else if (grp.type === 'knight' && this.troops.spawnKnight) this.troops.spawnKnight(c);
+          else this.troops.spawnAt(c.x + Phaser.Math.Between(-40, 40), c.y + Phaser.Math.Between(24, 56));
+        }
+      }
+    }
+    if (res.victory) {
+      if (res.loot) { this.resources.add('gold', res.loot.gold || 0); if (res.loot.iron) this.resources.add('iron', res.loot.iron); }
+      if (c) this.floatText(c.x, c.y - 50, `Victory! +${(res.loot && res.loot.gold) || 0} gold`, '#7CFC7C');
+      this.threatWarning('You won the battle!', 0x7cfc7c, true);
+    } else {
+      if (c && res.context && res.context.defending) c.takeDamage(100); // base took losses
+      this.threatWarning(res.retreated ? 'Your army retreated.' : 'You lost the battle.', 0xff6b6b, true);
+    }
+    this.refreshPanel();
   }
 
   // Total estimated AI strength (used by the scouting intel reveal).
@@ -1297,6 +1538,7 @@ export class IsometricScene extends GameScene {
     const X = GAME_W - 238, W = 108;
     mkBtn(X, TOP_BAR + 8, W, 22, 'Kingdoms ▾', 0x4a2d6b, 0x5d3a85, () => toggle('kingdoms'));
     mkBtn(X, TOP_BAR + 34, W, 22, 'Expeditions ▾', 0x1f5b3a, 0x2e7d50, () => toggle('expedition'));
+    mkBtn(X - 116, TOP_BAR + 8, W, 22, 'Caravans ▾', 0x2d4a6b, 0x3a5d85, () => { if (this.caravans && this.caravans.sites().length >= 2) toggle('caravans'); else this.showToast('Conquer a settlement first (need 2+ sites)'); });
   }
 
   renderKingdomsPanel() {
@@ -1304,19 +1546,28 @@ export class IsometricScene extends GameScene {
       this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x16101f, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0)
     );
     const scouted = this.intelActive();
-    this.panelText(16, this.PANEL_Y + 8, `AI KINGDOMS${scouted ? '   (scouted — army sizes revealed)' : ''}`, { bold: true, color: '#ffe9b0' });
-    let y = this.PANEL_Y + 34;
+    this.panelText(16, this.PANEL_Y + 8, `AI KINGDOMS — DIPLOMACY${scouted ? '   (scouted)' : ''}`, { bold: true, color: '#ffe9b0' });
+    let y = this.PANEL_Y + 32;
     for (const k of this.kingdoms) {
-      const sw = this.add.rectangle(20, y + 3, 16, 16, k.cfg.color).setOrigin(0, 0).setStrokeStyle(1, 0x000000, 0.6).setScrollFactor(0);
+      const key = k.cfg.key;
+      const sw = this.add.rectangle(20, y + 2, 14, 14, k.cfg.color).setOrigin(0, 0).setStrokeStyle(1, 0x000000, 0.6).setScrollFactor(0);
       this.panel.add(sw);
-      const status = k.statusWord();
-      const statusColor = status === 'Active' ? '#ff6b6b' : status === 'Destroyed' ? '#9aa0a6' : status === 'Building' ? '#cfe0ff' : '#9fe0a0';
-      const army = k.castleAlive ? `${scouted ? '' : '~'}${k.estimatedArmy()} warriors` : '—';
-      this.panelText(46, y, k.cfg.name, { bold: true, color: '#ffffff', size: '14px' });
-      this.panelText(250, y, status, { color: statusColor, size: '13px' });
-      this.panelText(380, y, `Army: ${army}`, { color: '#cfe0ff', size: '13px' });
-      this.panelText(600, y, `attacks from day ${k.startDay}`, { color: '#cfc1a6', size: '12px' });
-      y += 28;
+      this.panelText(40, y, k.cfg.name, { bold: true, color: '#ffffff', size: '13px' });
+      const army = k.castleAlive ? `${scouted ? '' : '~'}${k.estimatedArmy()}w` : '—';
+      this.panelText(170, y, `${k.statusWord()} · ${army}`, { color: '#cfe0ff', size: '12px' });
+      // Relationship bar (-100..100).
+      const rel = this.diplomacy ? this.diplomacy.get(key) : 0;
+      const relStatus = this.diplomacy ? this.diplomacy.status(key) : 'Neutral';
+      const bx = 300, bw = 130;
+      this.panel.add(this.add.rectangle(bx, y + 2, bw, 12, 0x000000, 0.5).setOrigin(0, 0).setScrollFactor(0));
+      const relCol = rel <= -50 ? 0xd64a4a : rel < 0 ? 0xd6a04a : rel < 50 ? 0xc8c84a : 0x4ad66b;
+      this.panel.add(this.add.rectangle(bx + bw / 2, y + 2, (bw / 2) * Math.abs(rel) / 100, 12, relCol).setOrigin(rel < 0 ? 1 : 0, 0).setScrollFactor(0));
+      this.panelText(bx + bw + 6, y, `${relStatus} (${rel})`, { color: '#cfc1a6', size: '11px' });
+      // Action buttons.
+      const can50 = this.diplomacy && this.diplomacy.get(key) >= 50 && !this.diplomacy.nap[key];
+      this.spriteButton(610, y - 2, 70, 20, 'Tribute', '', !!this.diplomacy, () => this.diplomacy.sendTribute(key));
+      this.spriteButton(684, y - 2, can50 ? 60 : 60, 20, can50 ? 'Pact' : 'War', '', !!this.diplomacy, () => (can50 ? this.diplomacy.acceptPact(key) : this.diplomacy.declareWar(key)), { gold: can50 });
+      y += 26;
     }
     this.spriteButton(GAME_W - 88, this.PANEL_Y + 6, 78, 22, 'Back', '', true, () => { this.panelMode = 'build'; this.refreshPanel(); });
   }
@@ -1332,6 +1583,7 @@ export class IsometricScene extends GameScene {
     if (target && td < this.TILE * 1.4) {
       this.commandUnits(target.castleX + 30, target.castleY, true, target);
       this.floatText(target.castleX, target.castleY - 30, 'Attack!', '#ff8a80');
+      if (this.diplomacy && !target._playerAttacked) { target._playerAttacked = true; this.time.delayedCall(5000, () => (target._playerAttacked = false)); this.diplomacy.onPlayerAttack(target.cfg.key); }
       return;
     }
     let node = null, nd = Infinity;
@@ -1365,6 +1617,23 @@ export class IsometricScene extends GameScene {
 
   createDayNightOverlay() {
     this.dnOverlay = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x0a1430, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(35);
+    // (Phase 8) Subtle seasonal cast over the world (below the night overlay).
+    this.seasonOverlay = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(34);
+    this.updateSeason();
+  }
+
+  // (Phase 8) Seasonal terrain tint: spring (none), summer (warm), autumn
+  // (orange), winter (blue-gray). Matches the seasonHint() ranges.
+  updateSeason() {
+    if (!this.seasonOverlay) return;
+    const s = this.seasonHint(this.gameDay);
+    const map = {
+      'Early Spring': [0x66ff88, 0.0], 'Late Spring': [0x66ff88, 0.0],
+      Summer: [0xffd070, 0.07], 'Early Autumn': [0xd07a20, 0.09], 'Late Autumn': [0xc06010, 0.11], Winter: [0x6f93c8, 0.12],
+    };
+    const [col, a] = map[s] || [0x000000, 0];
+    this.seasonOverlay.fillColor = col;
+    this.tweens.add({ targets: this.seasonOverlay, alpha: a, duration: 800 });
   }
 
   createDayCounter() {
@@ -1410,6 +1679,17 @@ export class IsometricScene extends GameScene {
     }
     // (Phase B) Passive income from conquered neutral settlements.
     if (this.settlements) this.settlements.collectDaily();
+    // (Phase 2) Daily building effects: Blacksmith crafts Equipment, Market /
+    // Tavern action cooldowns reset, Caravans depart, Administrators pay tribute.
+    for (const b of this.buildings.buildings) {
+      if (b.typeKey === 'blacksmith' && b.workers > 0) this.resources.add('equipment', b.workers);
+      if (b.typeKey === 'market') b._tradedDay = false;
+      if (b.typeKey === 'tavern' && b._recruitCd > 0) b._recruitCd -= 1;
+    }
+    if (this.caravans) this.caravans.onNewDay();
+    if (this.diplomacy) this.diplomacy.onNewDay();
+    this.updateSeason(); // (Phase 8) seasonal terrain cast
+    if (this.npcs) this.npcs.forEach((n) => n.refresh && n.refresh());
     // Brief sunrise: a warm screen flash + a sun disc rising.
     const flash = this.add.rectangle(0, 0, GAME_W, GAME_H, 0xffd27f, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(80);
     this.tweens.add({ targets: flash, alpha: { from: 0.45, to: 0 }, duration: 1400, onComplete: () => flash.destroy() });
@@ -1505,6 +1785,7 @@ export class IsometricScene extends GameScene {
       for (const slot of b.slots.filter((s) => s.timeLeft <= 0)) {
         if (slot.type === 'archer') this.troops.spawnArcher(b);
         else if (slot.type === 'monk') this.troops.spawnMonk(b);
+        else if (slot.type === 'knight') this.troops.spawnKnight(b);
         else this.troops.spawn(b);
         finished = true;
       }

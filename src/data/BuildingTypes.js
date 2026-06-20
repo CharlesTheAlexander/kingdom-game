@@ -46,10 +46,36 @@ export const BuildingTypes = {
     range: 3, damage: 10, attackInterval: 1, attack: true, placeable: true,
     desc: 'Attacks enemies within 3 tiles. Needs 1 worker to operate.',
   },
+  // (Phase 2) Advanced buildings, gated by settlement stage (see stageUnlock).
+  market: {
+    key: 'market', name: 'Market', cost: { gold: 100, wood: 60 }, maxWorkers: 1, hp: 120,
+    footprint: 2, placeable: true, stageUnlock: 4,
+    desc: 'Trade resources at fixed ratios. 1 trade per day. Needs 1 worker.',
+  },
+  blacksmith: {
+    key: 'blacksmith', name: 'Blacksmith', cost: { gold: 80, stone: 60, iron: 20 }, maxWorkers: 2, hp: 150,
+    footprint: 2, placeable: true, stageUnlock: 5,
+    desc: 'Crafts Equipment (1/day per worker). Enables Knight training. 1-2 workers.',
+  },
+  watchtower: {
+    key: 'watchtower', name: 'Watchtower', cost: { wood: 40, stone: 20 }, maxWorkers: 1, hp: 100,
+    revealRadius: 8, placeable: true, stageUnlock: 2,
+    desc: 'Reveals fog within 8 tiles. Does not attack. Needs 1 worker.',
+  },
+  tavern: {
+    key: 'tavern', name: 'Tavern', cost: { gold: 80, wood: 60 }, maxWorkers: 1, hp: 130,
+    footprint: 2, placeable: true, stageUnlock: 3,
+    desc: '+10 battle morale. Recruit a mercenary (50g / 3 days). Needs 1 worker.',
+  },
+  wall: {
+    key: 'wall', name: 'Wall', cost: { stone: 20 }, maxWorkers: 0, hp: 100,
+    wall: true, placeable: true, noCap: true, anywhere: true, stageUnlock: 3,
+    desc: 'Blocks enemies (100 HP). Place along your border, anywhere.',
+  },
 };
 
-// Order shown in the build menu (all 6 placeable types).
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower'];
+// Order shown in the build menu. Advanced types appear once their stage unlocks.
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'wall', 'market', 'tavern', 'blacksmith'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 export const MAX_LEVEL = 3;
@@ -63,7 +89,7 @@ export function outputMultiplier(level) {
   return Math.pow(2, level - 1);
 }
 
-const RES_ABBR = { gold: 'G', wood: 'W', stone: 'S', food: 'F' };
+const RES_ABBR = { gold: 'G', wood: 'W', stone: 'S', food: 'F', iron: 'Fe', equipment: 'Eq' };
 export function formatCost(cost) {
   const parts = Object.entries(cost).map(([k, v]) => `${v}${RES_ABBR[k] || k}`);
   return parts.length ? parts.join(' ') : 'Free';

@@ -43,6 +43,12 @@ class GoblinCamp {
     this.guards = [];
     const n = Phaser.Math.Between(4, 6);
     for (let i = 0; i < n; i++) this.guards.push(new Defender(s, this.x + Phaser.Math.Between(-22, 22), this.y + Phaser.Math.Between(4, 18), 30, 'goblin_idle', 0x6cff8a));
+    // (Phase 8) A red banner above the camp so it reads clearly on the map.
+    if (this.rubble) { this.rubble.destroy(); this.rubble = null; }
+    this.flag = s.add.graphics();
+    this.flag.fillStyle(0x5a3a1a, 1).fillRect(this.x - 1, this.y - 30, 2, 22); // pole
+    this.flag.fillStyle(0xcc2222, 1).fillTriangle(this.x + 1, this.y - 30, this.x + 1, this.y - 20, this.x + 12, this.y - 25); // pennant
+    this.flag.setDepth(s.worldDepth ? s.worldDepth(this.y) + 0.02 : 9);
     this._cleared = false;
   }
 
@@ -69,6 +75,9 @@ class GoblinCamp {
     this.respawnTimer = RESPAWN_DAYS * (s.DAY_SECONDS || 300);
     for (const h of this.huts) { if (s.explosionAt) s.explosionAt(h.x, h.y); h.destroy(); }
     this.huts = [];
+    if (this.flag) { this.flag.destroy(); this.flag = null; }
+    // (Phase 8) Leave ash/rubble remains where the camp stood.
+    this.rubble = s.add.ellipse(this.x, this.y, 34, 18, 0x2a2620, 0.7).setDepth(s.worldDepth ? s.worldDepth(this.y) - 0.001 : 3);
     const gold = Phaser.Math.Between(30, 50);
     s.resources.add('gold', gold);
     s.resources.add('iron', 20);
