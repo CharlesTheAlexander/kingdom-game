@@ -46,7 +46,16 @@ import { biomeData, Biome } from '../data/Biomes.js';
 export const CHUNK_TILES = 50;                 // 50×50 tiles per chunk
 export const PX_PER_TILE = 4;                  // pixels per tile in a chunk image
 export const CHUNK_PX = CHUNK_TILES * PX_PER_TILE; // 200 px per chunk side
-export const MAX_RESIDENT = 36;                // hard cap on resident chunks
+// (Phase 2) Hard cap on resident chunks. The Phase-1 default of 36 was sized for
+// a near-1× zoom; the continent's default zoom (~0.4×) over a 1440×900 viewport
+// can show ~18×12 ≈ 220 chunks + a 1-chunk margin at once, so the cap MUST exceed
+// the visible window or the LRU pass would evict chunks it just reported visible
+// (binding an Image to a removed CanvasTexture crashes the canvas renderer).
+// At PX_PER_TILE=4 a chunk texture is 200×200 RGBA ≈ 160 KB, so 320 chunks is a
+// ~51 MB upper bound — comfortable for a desktop browser. evict() additionally
+// NEVER LRU-drops a chunk inside the current visible window (see below), so the
+// real resident set tracks the viewport regardless of this number.
+export const MAX_RESIDENT = 320;               // hard cap on resident chunks
 
 /** Camera view in WORLD-TILE space, used to compute visible chunks. */
 export interface ChunkView {
@@ -194,11 +203,16 @@ export class ChunkManager {
         this.unloadChunk(rc.cx, rc.cy);
       }
     }
-    // 2. Hard cap (LRU).
+    // 2. Hard cap (LRU) — but NEVER evict a chunk inside the current visible
+    //    window (those are about to be rendered; dropping their texture while an
+    //    Image still references it crashes the canvas renderer). If the window
+    //    itself exceeds the cap we keep all of it; only out-of-window chunks are
+    //    eligible for LRU trimming.
     if (this.resident.size <= MAX_RESIDENT) return;
-    const byAge = [...this.resident.values()].sort((a, b) => a.lastSeen - b.lastSeen);
+    const inWindow = (rc: ResidentChunk) => rc.cx >= x0 && rc.cx <= x1 && rc.cy >= y0 && rc.cy <= y1;
+    const evictable = [...this.resident.values()].filter(rc => !inWindow(rc)).sort((a, b) => a.lastSeen - b.lastSeen);
     let over = this.resident.size - MAX_RESIDENT;
-    for (const rc of byAge) {
+    for (const rc of evictable) {
       if (over-- <= 0) break;
       this.unloadChunk(rc.cx, rc.cy);
     }

@@ -5,6 +5,7 @@ import { GameScene, GAME_W, GAME_H } from './scenes/GameScene.js';
 import { MainMenuScene } from './scenes/MainMenuScene.js';
 import { IsometricScene } from './scenes/IsometricScene.js';
 import { ContinentScene } from './scenes/ContinentScene.js';
+import { KingCreationScene } from './scenes/KingCreationScene.js';
 import { BattleScene } from './scenes/BattleScene.js';
 import { CouncilScene } from './scenes/CouncilScene.js';
 import { IntroCutsceneScene } from './scenes/IntroCutsceneScene.js';
@@ -20,10 +21,13 @@ const config: Phaser.Types.Core.GameConfig = {
     autoCenter: Phaser.Scale.CENTER_BOTH,
     expandParent: true,
   },
-  // MainMenuScene auto-starts (first in the array) and launches IsometricScene
-  // on New Kingdom / Continue / Load. GameScene stays registered as reference;
-  // ContinentScene is launched on demand (Tab) on top of the local view.
-  scene: [MainMenuScene, IsometricScene, GameScene, ContinentScene, BattleScene, CouncilScene, IntroCutsceneScene],
+  // (Phase 2 Bannerlord rebuild) MainMenuScene auto-starts (first in the array).
+  // New flow: MainMenu → KingCreationScene → (first-play) IntroCutsceneScene →
+  // ContinentScene (the PRIMARY game loop). ContinentScene renders the chunked
+  // 1500×1500 world and owns party movement/time/supply/AI. IsometricScene is
+  // retained as the per-settlement view stand-in (Phase 3 makes it real);
+  // BattleScene is launched on a continent battle trigger.
+  scene: [MainMenuScene, ContinentScene, KingCreationScene, IsometricScene, GameScene, BattleScene, CouncilScene, IntroCutsceneScene],
 };
 
 const game = new Phaser.Game(config);
@@ -49,5 +53,10 @@ if (import.meta.env.DEV) {
         ChunkManager: cm.ChunkManager,
       };
     });
+  });
+  // (Phase 2) Expose the shared campaign state so the headless audit can read
+  // the player party / day / supply / AI parties directly.
+  import('./systems/GameWorld.js').then((gw) => {
+    (window as any).__gw = gw.GameWorld;
   });
 }

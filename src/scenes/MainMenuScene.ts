@@ -3,6 +3,8 @@ import { GAME_W, GAME_H } from './GameScene.js';
 import * as AssetGenerator from '../systems/AssetGenerator.js';
 import * as SaveManager from '../systems/SaveManager.js';
 import { sfx } from '../audio/SoundEngine.js';
+import { GameWorld } from '../systems/GameWorld.js';
+import { generateWorld } from '../systems/WorldGenerator.js';
 
 // MainMenuScene (Completion Phase 1) — the first screen the player sees.
 // A slowly panning procedural-terrain backdrop, animated falling leaves, the
@@ -73,9 +75,13 @@ export class MainMenuScene extends Phaser.Scene {
     // --- Menu ----------------------------------------------------------------
     this.panel = null;
     const hasSave = SaveManager.hasAnySave();
+    // (Phase 2) Continue is available whenever a king record exists (the campaign
+    // is rebuilt deterministically from its seed; full save/load is Phase 12).
+    let hasKing = false;
+    try { hasKing = !!localStorage.getItem('kg_king'); } catch (e) {}
     const items: any[] = [
       ['New Kingdom', () => this.newKingdom(), true],
-      ['Continue', () => this.continueGame(), hasSave],
+      ['Continue', () => this.continueGame(), hasKing || hasSave],
       ['Load Game', () => this.openLoad(), hasSave],
       ['Watch Intro', () => this.watchIntro(), true],
       ['Settings', () => this.openSettings(), true],
@@ -160,23 +166,65 @@ export class MainMenuScene extends Phaser.Scene {
     return c;
   }
 
-  // ---- transitions --------------------------------------------------------
-  startGame() {
-    try { sfx.unlock(); sfx.play('menu_confirm'); } catch (e) {} // (Polish Phase 10) warm confirm
-    this.cameras.main.fadeOut(350, 0, 0, 0);
-    this.time.delayedCall(380, () => this.scene.start('IsometricScene'));
+  // ---- transitions (Phase 2 Bannerlord rebuild) ---------------------------
+  // The continent is now the primary game loop. Both New Kingdom and Continue
+  // land on ContinentScene with a freshly generated world stored in the shared
+  // GameWorld singleton (so ContinentScene / IsometricScene / BattleScene all
+  // read the same campaign state). King creation + the first-play intro run as
+  // standalone scenes BEFORE the continent.
+
+  // Boot the continent for a campaign already initialised in GameWorld. This must
+  // work even if the menu was slept during creation/intro, so we wake first and
+  // start the continent immediately (no reliance on this scene's clock/camera,
+  // which don't tick while asleep).
+  enterContinent() {
+    try { this.scene.wake(); } catch (e) {}
+    try { sfx.unlock(); sfx.play('menu_confirm'); } catch (e) {}
+    this.scene.start('ContinentScene');
+  }
+
+  // Generate a world + initialise the shared campaign state from a king record.
+  startCampaign(king: { kingdom: string; ruler: string; trait: string | null }) {
+    const world = generateWorld();
+    GameWorld.startNewCampaign(world, king);
   }
 
   newKingdom() {
-    // Fresh game → force king creation (clear the one-time king flag + any pending save).
+    // Fresh game → king creation, then (first-play) intro, then the continent.
     try { localStorage.removeItem('kg_king'); } catch (e) {}
     SaveManager.clearPending();
-    this.startGame();
+    const afterCreate = (info: { kingdom: string; ruler: string; trait: string }) => {
+      this.startCampaign(info);
+      // First-play illustrated intro (unchanged scene), then the continent.
+      let seen = true;
+      try { seen = !!localStorage.getItem('kingdom_intro_seen'); } catch (e) {}
+      if (!seen) {
+        this.scene.launch('IntroCutsceneScene', {
+          kingdomName: info.kingdom,
+          // The menu is slept while the intro plays, so DON'T gate on the menu
+          // being active here — just transition to the continent when the intro
+          // finishes (enterContinent wakes the menu first, then starts it).
+          onComplete: () => { try { this.enterContinent(); } catch (e) { console.error('[MainMenu] enterContinent failed', e); } },
+        });
+        this.scene.sleep();
+      } else {
+        this.enterContinent();
+      }
+    };
+    // Launch the standalone creation scene on top; sleep the menu until it ends.
+    this.scene.launch('KingCreationScene', { onComplete: (info: any) => { try { this.scene.wake(); } catch (e) {} afterCreate(info); } });
+    this.scene.sleep();
   }
+
   continueGame() {
-    const r = SaveManager.preparePending(0);
-    if (!r.ok) { this.toast(r.error || 'No save to continue.'); return; }
-    this.startGame();
+    // Phase 2: a full save/load round-trip is Phase 12. For now "Continue" lands
+    // on the continent with a campaign initialised from the saved king record
+    // (or defaults), so the player always resumes on the primary loop.
+    let king: any = null;
+    try { king = JSON.parse(localStorage.getItem('kg_king') || 'null'); } catch (e) {}
+    if (!king) { this.toast('No kingdom to continue.'); return; }
+    this.startCampaign({ kingdom: king.kingdom, ruler: king.ruler, trait: king.trait || null });
+    this.enterContinent();
   }
 
   // (Phase 11) Replay the intro cutscene standalone from the menu. Sleeps the
@@ -220,7 +268,9 @@ export class MainMenuScene extends Phaser.Scene {
       if (has) {
         const lb = this.add.rectangle(x + W - 110, sy + 32, 76, 30, 0x2d6cb0).setDepth(23).setStrokeStyle(1, 0xf0e6c8, 0.8).setInteractive({ useHandCursor: true });
         els.push(lb); els.push(this.add.text(x + W - 110, sy + 32, 'Load', { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(24));
-        lb.on('pointerdown', () => { if (SaveManager.preparePending(i).ok) this.startGame(); });
+        // (Phase 2) Loading a slot resumes the campaign on the continent. A full
+        // slot-state restore is Phase 12; for now we rebuild from the king record.
+        lb.on('pointerdown', () => { if (SaveManager.preparePending(i).ok) this.continueGame(); });
       }
     });
   }

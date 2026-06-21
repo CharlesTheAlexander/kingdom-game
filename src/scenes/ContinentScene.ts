@@ -1,953 +1,1050 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H } from './GameScene.js';
+import { GameWorld } from '../systems/GameWorld.js';
+import type { AIParty } from '../systems/GameWorld.js';
+import { generateWorld } from '../systems/WorldGenerator.js';
+import type { Settlement } from '../systems/WorldGenerator.js';
+import { ChunkManager, PX_PER_TILE } from '../systems/ChunkManager.js';
+import { ContinentPathfinder } from '../systems/ContinentPathfinder.js';
+import type { PathStep } from '../systems/ContinentPathfinder.js';
+import { biomeData } from '../data/Biomes.js';
 
-// Continent view — Phase 8 (Visual): a beautiful hand-drawn illustrated parchment
-// map (Northgard-style), rendered ENTIRELY with procedural Phaser Graphics /
-// Canvas2D (no external assets). The whole 200x200 world is sampled at low
-// resolution and drawn as miniature illustrated biome regions (pines, peaks,
-// dunes, grass, wavy water), with watercolour territory washes, illustrated
-// settlement/army/ruin icons, a decorative border, a compass rose, biome
-// labels, a legend and a parchment stats header. Tab/Esc/return + click-to-focus
-// are unchanged — only the RENDER is restyled, never the data or controls.
+// ============================================================================
+// ContinentScene — Phase 2 (Bannerlord rebuild) PRIMARY game loop.
+// ============================================================================
+//
+// This is the scene the player lives in: a TOP-DOWN (orthographic) render of the
+// 1500×1500 chunked world from ChunkManager, with a roaming player party, A*
+// movement, continuous time, supply, roaming AI parties, fog of war, settlement
+// interaction, a battle trigger, a slim HUD, and a whole-world minimap.
+//
+// ============================================================================
+// DESIGN DECISIONS
+// ============================================================================
+//
+// * COORDINATE SPACE. ChunkManager renders chunks into world-PIXEL space where
+//   1 tile = PX_PER_TILE (4) px. The camera lives in this pixel space; tiles are
+//   converted via tile*PX_PER_TILE. Default zoom 0.4 shows a large slice while
+//   the chunk budget (≤36 resident) holds 30+ FPS while panning.
+//
+// * CHUNK IMAGES. We keep a pool of reusable Phaser.Image objects (no per-frame
+//   allocation). Each frame we ask ChunkManager.update(view) for the visible
+//   texture keys, then bind images to those keys and position them. Images for
+//   keys that left the view are hidden and returned to the pool. ChunkManager
+//   owns texture lifecycle (load/evict); we own the sprite lifecycle.
+//
+// * TIME. Continuous: 1 game day = DAY_MS (300000 ms = 5 real min), matching the
+//   legacy IsometricScene. The world never pauses; an onNewDay() hook fires once
+//   per whole day for resources/AI/events. Travelling consumes supply daily.
+//
+// * MOVEMENT. Click a passable tile → A* (ContinentPathfinder) using per-biome
+//   movementCost. The party advances along the path each frame, its pixels-per-
+//   ms speed scaled by the current tile's movement cost (slower in forest/marsh).
+//   A dotted planned-route line + an "Arrives in ~X days" ETA are drawn; right-
+//   click cancels.
+//
+// * FOG OF WAR. A coarse explored bitmap (1 cell = FOG_CELL tiles) is lifted in
+//   a radius around the player + player-owned settlements, drawn as a dark
+//   overlay image in screen space (cheap; redrawn only when the set changes).
+//
+// * SETTLEMENT / BATTLE. Within ~2 tiles of a settlement → highlight + "Enter?"
+//   confirm; entering launches IsometricScene as a per-settlement stand-in
+//   (Phase 3 makes it real), passing the settlement id via GameWorld. Within ~3
+//   tiles of an enemy party → "Enemy army approaching!" banner; on collision →
+//   BattleScene with the player's army vs the enemy party, returning to the
+//   continent at the battle location.
+// ============================================================================
 
-const N = 200;
-const MAP_PX = 600;                 // on-screen size of the (square) continent
-const MX = (GAME_W - MAP_PX) / 2;   // top-left of the map on screen
-const MY = 86;
-
-// --- Illustrated parchment palette --------------------------------------------
-const PARCH = 0xf0e4c0;            // aged parchment base
-const PARCH_DK = 0xe2d2a4;         // darker parchment (region shading)
-const PARCH_EDGE = 0xcdb888;       // parchment edge / vignette
-const INK = 0x4a3a22;              // brown drawing ink
-const INK_SOFT = 0x6b5634;         // softer ink for fills
-const SEA = 0x8fb5c4;             // map-sea blue (muted, watercolour)
-const SEA_DK = 0x6f9bb0;          // deeper sea for ripples
-const SEA_FOAM = 0xd9ecef;        // foam / coastline highlight
-
-// Per-biome illustrated treatment.
-type BiomeStyle = { ground: number; motif: 'forest' | 'mountains' | 'plains' | 'desert' | 'water'; ink: number };
-const BIOME_STYLE: Record<string, BiomeStyle> = {
-  start:     { ground: 0xd7d79a, motif: 'plains',    ink: 0x6f7a3a },
-  middle:    { ground: 0xd0cf90, motif: 'plains',    ink: 0x70762f },
-  forest:    { ground: 0xb9c98a, motif: 'forest',    ink: 0x2f5a2a },
-  mountains: { ground: 0xd9cdb0, motif: 'mountains', ink: 0x6a6152 },
-  delta:     { ground: 0xc7cf94, motif: 'plains',    ink: 0x5f7a35 },
-  wildlands: { ground: 0xc9c084, motif: 'desert',    ink: 0x8a7332 },
-};
-const DEFAULT_STYLE: BiomeStyle = BIOME_STYLE.middle;
-
-function blend(a: number, b: number, t: number): number {
-  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
-  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
-  return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
-}
-function shade(col: number, f: number): number {
-  const rr = Phaser.Math.Clamp(Math.round(((col >> 16) & 255) * (1 + f)), 0, 255);
-  const gg = Phaser.Math.Clamp(Math.round(((col >> 8) & 255) * (1 + f)), 0, 255);
-  const bb = Phaser.Math.Clamp(Math.round((col & 255) * (1 + f)), 0, 255);
-  return (rr << 16) | (gg << 8) | bb;
-}
+const DAY_MS = 300000;          // 1 game day = 5 real minutes (matches legacy)
+const DEFAULT_ZOOM = 0.4;
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 1.5;
+const FOG_CELL = 8;             // tiles per fog cell
+const FOG_REVEAL = 14;          // tiles of reveal radius around the player
+const SETTLE_RANGE = 2;         // tiles: settlement interaction range
+const ENEMY_WARN_RANGE = 3;     // tiles: "enemy approaching" banner
+const ENEMY_FIGHT_RANGE = 1.2;  // tiles: collision → battle
+// Base travel: tiles/sec on cost-1 terrain at full simulation. Tuned so a
+// cross-region march of tens of tiles takes a believable handful of days.
+const BASE_TILES_PER_DAY = 9;   // plains tiles covered per game day
+const HUD_DEPTH = 1000;
 
 export class ContinentScene extends Phaser.Scene {
   [key: string]: any;
 
   constructor() { super('ContinentScene'); }
 
+  // ------------------------------------------------------------------------
   create() {
-    this.iso = this.scene.get('IsometricScene');
+    // --- Ensure a world exists (defensive: a direct boot should still work). --
+    if (!GameWorld.world) {
+      // No campaign started yet — generate a fresh deterministic world so the
+      // scene always boots cleanly even if launched directly (e.g. headless).
+      GameWorld.startNewCampaign(generateWorld());
+    }
+    this.world = GameWorld.world;
+    const size = this.world.size;
+    this.worldPxW = size * PX_PER_TILE;
+    this.worldPxH = size * PX_PER_TILE;
 
-    // Deep desk backdrop (behind the parchment sheet).
-    this.add.rectangle(0, 0, GAME_W, GAME_H, 0x241a10, 1).setOrigin(0, 0);
-    this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0.35).setOrigin(0, 0);
+    // --- Systems ----------------------------------------------------------
+    this.chunks = new ChunkManager(this, this.world);
+    this.pathfinder = new ContinentPathfinder(this.world);
 
-    // --- Static parchment sheet (background + border + compass), drawn ONCE
-    // into a canvas texture. The illustrated biome regions + watercolour washes
-    // are drawn into a SEPARATE canvas (mapCanvas) that we refresh on rebuild. ---
-    if (!this.textures.exists('contParch')) this.buildParchmentTexture();
-    this.parchImg = this.add.image(MX - 40, MY - 40, 'contParch').setOrigin(0, 0).setDepth(0);
+    // --- Camera -----------------------------------------------------------
+    this.cameras.main.setBounds(0, 0, this.worldPxW, this.worldPxH);
+    this.cameras.main.setBackgroundColor(0x1c2a38); // ocean-ish behind chunks
+    this.zoom = DEFAULT_ZOOM;
+    this.cameras.main.setZoom(this.zoom);
+    this.followParty = true;
 
-    // Illustrated map canvas (biomes + washes + coastline). Refreshed on rebuild.
-    if (!this.textures.exists('contIllus')) this.textures.createCanvas('contIllus', MAP_PX, MAP_PX);
-    this.illusImg = this.add.image(MX, MY, 'contIllus').setOrigin(0, 0).setDepth(1);
+    // --- Chunk image pool (terrain layer, depth 0) ------------------------
+    // A 1×1 transparent placeholder so pooled (hidden) images never reference a
+    // chunk texture that ChunkManager later evicts — referencing a removed
+    // CanvasTexture frame would crash the canvas renderer's batchSprite.
+    if (!this.textures.exists('continent_blank')) {
+      const bt = this.textures.createCanvas('continent_blank', 1, 1);
+      if (bt) bt.refresh();
+    }
+    this.chunkLayer = this.add.container(0, 0).setDepth(0);
+    this.chunkPool = [];
+    this.activeChunkImgs = new Map(); // key -> Image
 
-    // Vector overlay graphics (icons, pins, roads, council, fog clouds, labels).
-    this.icons = this.add.graphics().setDepth(4);
-    this.iconText = this.add.container(0, 0).setDepth(6);
-    this.labels = this.add.container(0, 0).setDepth(5);
+    // --- Overlay graphics (route line, highlights) in world space ---------
+    this.overlay = this.add.graphics().setDepth(20);
 
-    // Night/parchment darkening tint over the map sheet only (below icons).
-    this.nightTint = this.add.rectangle(MX, MY, MAP_PX, MAP_PX, 0x0c1430, 0).setOrigin(0, 0).setDepth(3);
-    this.nightDots = this.add.graphics().setDepth(3.5); // warm settlement lights at night
+    // --- Party + AI icons in world space ----------------------------------
+    this.iconLayer = this.add.container(0, 0).setDepth(30);
+    this.partyIcon = this.add.container(0, 0).setDepth(40);
+    this.buildPartyIcon();
 
-    // --- Parchment stats header (with wax seal) ---
-    this.buildHeader();
+    // --- Fog of war overlay (screen space image) --------------------------
+    this.initFog();
 
-    this.tip = this.add.text(0, 0, '', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#2a1c0c', backgroundColor: '#efe2bccc', padding: { x: 7, y: 5 } }).setOrigin(0.5, 1).setDepth(60).setVisible(false);
+    // --- HUD (screen space) -----------------------------------------------
+    this.buildHud();
+    this.buildMinimap();
 
-    // (Bug 3) Always reset the close guards on (re)entry.
+    // --- Tooltip ----------------------------------------------------------
+    this.tip = this.add.text(0, 0, '', {
+      fontFamily: 'Georgia, serif', fontSize: '12px', color: '#2a1c0c',
+      backgroundColor: '#efe2bcee', padding: { x: 7, y: 5 },
+    }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(HUD_DEPTH + 20).setVisible(false);
+
+    // --- Banner (enemy approaching / messages) ----------------------------
+    this.banner = this.add.text(GAME_W / 2, 64, '', {
+      fontFamily: 'Georgia, serif', fontSize: '20px', color: '#fff', fontStyle: 'bold',
+      backgroundColor: '#8c2b2bdd', padding: { x: 16, y: 8 }, align: 'center',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(HUD_DEPTH + 30).setVisible(false);
+
+    // --- Movement state ---------------------------------------------------
+    this.path = [] as PathStep[];      // remaining tile steps
+    this.pathTotal = [] as PathStep[]; // full planned path (for drawing)
+    this.subProgress = 0;              // 0..1 progress into the current step
+    this.lastNewDay = GameWorld.displayDay();
     this._closing = false;
-    this._finished = false;
 
-    // (Bug 3) Always-on-top, always-clickable "Return to Kingdom" button — styled
-    // as a wax-sealed parchment tab to match the map.
-    const by = GAME_H - 34;
-    const btn = this.add.rectangle(GAME_W / 2, by, 268, 40, 0x6b4a26).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }).setDepth(200);
-    this.add.text(GAME_W / 2, by, 'Return to Kingdom  (Tab / Esc)', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
-    btn.on('pointerover', () => btn.setFillStyle(0x82602f));
-    btn.on('pointerout', () => btn.setFillStyle(0x6b4a26));
-    btn.on('pointerdown', () => this.close());
+    // --- Input ------------------------------------------------------------
+    this.setupInput();
 
-    // (Bug 3) Tab closes (with fade); Escape is a guaranteed instant escape hatch.
-    this.input.keyboard.on('keydown-TAB', (e) => { if (e && e.preventDefault) e.preventDefault(); this.close(); });
-    this.input.keyboard.on('keydown-ESC', (e) => { if (e && e.preventDefault) e.preventDefault(); this.forceClose(); });
-    this.input.keyboard.on('keydown-ESCAPE', (e) => { if (e && e.preventDefault) e.preventDefault(); this.forceClose(); });
-    this.input.on('pointermove', (p) => this.onHover(p));
-    this.input.on('pointerdown', (p) => this.onClick(p));
+    // Centre on the player immediately, then start following.
+    const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
+    this.cameras.main.centerOn(pp.x, pp.y);
 
-    this.buildLabels();
-    this.rebuildMap();
-    this.cameras.main.fadeIn(220, 20, 14, 8);
+    // Initial visibility + draws.
+    this.refreshChunks();
+    this.revealAroundPlayer();
+    this.rebuildFog();
+    this.updateHud();
 
-    this.showContinentTutorial();
-    this._refresh = 0;
+    this.cameras.main.fadeIn(300, 12, 18, 26);
+
+    // First-time tutorial hint.
+    this.showTutorialOnce();
+
+    // Clean shutdown.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.onShutdown());
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => this.onShutdown());
   }
 
-  // --- Parchment sheet texture (drawn once): aged paper + fibers + age spots +
-  // decorative vine/rope border + corner flourishes + compass rose. -----------
-  buildParchmentTexture() {
-    const PAD = 40;
-    const W = MAP_PX + PAD * 2, H = MAP_PX + PAD * 2;
-    const tex = this.textures.createCanvas('contParch', W, H) as Phaser.Textures.CanvasTexture;
-    const ctx = tex.getContext();
-    const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
+  // =========================================================================
+  // Coordinate helpers
+  // =========================================================================
+  tileToPx(col: number, row: number): { x: number; y: number } {
+    return { x: (col + 0.5) * PX_PER_TILE, y: (row + 0.5) * PX_PER_TILE };
+  }
+  pxToTile(x: number, y: number): { col: number; row: number } {
+    return { col: Math.floor(x / PX_PER_TILE), row: Math.floor(y / PX_PER_TILE) };
+  }
 
-    // Base sheet with a soft radial aging from centre.
-    const grad = ctx.createRadialGradient(W / 2, H / 2, MAP_PX * 0.2, W / 2, H / 2, MAP_PX * 0.78);
-    grad.addColorStop(0, hex(blend(PARCH, 0xfff0cc, 0.25)));
-    grad.addColorStop(0.7, hex(PARCH));
-    grad.addColorStop(1, hex(PARCH_EDGE));
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+  // =========================================================================
+  // Input
+  // =========================================================================
+  setupInput() {
+    // Wheel zoom around the cursor.
+    this.input.on('wheel', (_p: any, _go: any, _dx: number, dy: number) => {
+      const factor = dy > 0 ? 0.88 : 1.14;
+      this.setZoom(this.zoom * factor);
+    });
 
-    // Faint paper fibre lines.
-    const rnd = mulberry(1337);
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 220; i++) {
-      const x = rnd() * W, y = rnd() * H, len = 6 + rnd() * 26, ang = rnd() * Math.PI;
-      ctx.strokeStyle = 'rgba(120,96,52,' + (0.03 + rnd() * 0.05).toFixed(3) + ')';
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
-      ctx.stroke();
+    // Pointer down: left = move order (or UI), right = pan-start / cancel path.
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (p.rightButtonDown()) {
+        this._dragging = true;
+        this._dragX = p.x; this._dragY = p.y;
+        this._dragMoved = false;
+        this.followParty = false;
+      }
+    });
+
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (this._dragging) {
+        const dx = (p.x - this._dragX) / this.zoom;
+        const dy = (p.y - this._dragY) / this.zoom;
+        if (Math.abs(p.x - this._dragX) + Math.abs(p.y - this._dragY) > 3) this._dragMoved = true;
+        this.cameras.main.scrollX -= dx;
+        this.cameras.main.scrollY -= dy;
+        this._dragX = p.x; this._dragY = p.y;
+      } else {
+        this.onHover(p);
+      }
+    });
+
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
+      if (p.button === 2 || this._dragging) {
+        // Right-click without dragging = cancel current path.
+        if (!this._dragMoved) this.cancelPath();
+        this._dragging = false;
+        return;
+      }
+    });
+
+    // Left click → move order or settlement interaction. Use the up event so a
+    // click on the minimap/HUD (handled separately) doesn't also issue a move.
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
+      if (p.button !== 0) return;
+      if (this._uiClick) { this._uiClick = false; return; }
+      this.onLeftClick(p);
+    });
+
+    // Disable the browser context menu on right-click.
+    this.input.mouse?.disableContextMenu();
+
+    // Keyboard: F follow toggle; +/- zoom; Esc → menu (with confirm-less escape).
+    this.input.keyboard?.on('keydown-F', () => { this.followParty = true; });
+    this.input.keyboard?.on('keydown-M', () => this.toggleMinimap());
+  }
+
+  setZoom(z: number) {
+    this.zoom = Phaser.Math.Clamp(z, MIN_ZOOM, MAX_ZOOM);
+    this.cameras.main.setZoom(this.zoom);
+  }
+
+  onLeftClick(p: Phaser.Input.Pointer) {
+    const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+    const t = this.pxToTile(wp.x, wp.y);
+    if (t.col < 0 || t.row < 0 || t.col >= this.world.size || t.row >= this.world.size) return;
+
+    // Settlement under/near the click within interaction range of the PARTY?
+    const near = this.settlementNearParty();
+    if (near) {
+      const sp = this.tileToPx(near.col, near.row);
+      const dpx = Phaser.Math.Distance.Between(wp.x, wp.y, sp.x, sp.y);
+      if (dpx < 14 * PX_PER_TILE) { this.promptEnterSettlement(near); return; }
     }
-    // A few brown age spots / coffee-stain blooms.
-    for (let i = 0; i < 14; i++) {
-      const x = PAD + rnd() * MAP_PX, y = PAD + rnd() * MAP_PX, rad = 8 + rnd() * 34;
-      const g2 = ctx.createRadialGradient(x, y, 0, x, y, rad);
-      g2.addColorStop(0, 'rgba(120,88,40,' + (0.04 + rnd() * 0.06).toFixed(3) + ')');
-      g2.addColorStop(1, 'rgba(120,88,40,0)');
-      ctx.fillStyle = g2;
-      ctx.beginPath();
-      ctx.arc(x, y, rad, 0, Math.PI * 2);
-      ctx.fill();
+
+    // Otherwise issue a move order.
+    this.moveTo(t.col, t.row);
+  }
+
+  // =========================================================================
+  // PUBLIC: issue a move order to a tile (also the headless test entry point).
+  // Returns true if a path (full or partial) was found.
+  // =========================================================================
+  moveTo(col: number, row: number): boolean {
+    col = Phaser.Math.Clamp(Math.round(col), 0, this.world.size - 1);
+    row = Phaser.Math.Clamp(Math.round(row), 0, this.world.size - 1);
+    const res = this.pathfinder.find(GameWorld.player.col, GameWorld.player.row, col, row);
+    if (!res.path.length) { this.flashBanner('No route there.', 0x6b5a3a); return false; }
+    this.path = res.path.slice();
+    this.pathTotal = res.path.slice();
+    this.subProgress = 0;
+    this.pathCost = res.cost;
+    this.drawRoute();
+    return true;
+  }
+
+  cancelPath() {
+    if (this.path.length) this.flashBanner('March halted.', 0x6b5a3a);
+    this.path = [];
+    this.pathTotal = [];
+    this.subProgress = 0;
+    this.overlay.clear();
+    if (this.etaLabel) this.etaLabel.setVisible(false);
+  }
+
+  // =========================================================================
+  // Per-frame update
+  // =========================================================================
+  update(_time: number, delta: number) {
+    if (this._closing) return;
+
+    // --- TIME: advance the continuous day clock (never pauses). -----------
+    const dayDelta = delta / DAY_MS;
+    GameWorld.day += dayDelta;
+
+    // --- MOVEMENT ---------------------------------------------------------
+    let travelledTiles = 0;
+    if (this.path.length) {
+      travelledTiles = this.advanceParty(delta);
     }
 
-    // Inner shadow / vignette toward the edges.
-    const vg = ctx.createRadialGradient(W / 2, H / 2, MAP_PX * 0.5, W / 2, H / 2, MAP_PX * 0.82);
-    vg.addColorStop(0, 'rgba(60,40,16,0)');
-    vg.addColorStop(1, 'rgba(60,40,16,0.34)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, W, H);
-
-    // --- Decorative border (double rope/vine frame + corner flourishes) ---
-    const bx = PAD - 16, by = PAD - 16, bw = MAP_PX + 32, bh = MAP_PX + 32;
-    ctx.strokeStyle = hex(INK);
-    ctx.lineWidth = 3;
-    ctx.strokeRect(bx, by, bw, bh);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = hex(INK_SOFT);
-    ctx.strokeRect(bx + 6, by + 6, bw - 12, bh - 12);
-
-    // Rope twist between the two frame lines (short diagonal ticks all around).
-    ctx.strokeStyle = 'rgba(74,58,34,0.55)';
-    ctx.lineWidth = 1.5;
-    const tick = (x: number, y: number, dx: number, dy: number) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx, y + dy); ctx.stroke(); };
-    for (let x = bx + 4; x < bx + bw - 4; x += 9) { tick(x, by + 1, 4, 4); tick(x, by + bh - 5, 4, 4); }
-    for (let y = by + 4; y < by + bh - 4; y += 9) { tick(bx + 1, y, 4, 4); tick(bx + bw - 5, y, 4, 4); }
-
-    // Corner flourishes (little leafy curls).
-    const flourish = (cx: number, cy: number, fx: number, fy: number) => {
-      ctx.strokeStyle = hex(INK);
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.quadraticCurveTo(cx + fx * 22, cy + fy * 6, cx + fx * 26, cy + fy * 24);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.quadraticCurveTo(cx + fx * 6, cy + fy * 22, cx + fx * 24, cy + fy * 26);
-      ctx.stroke();
-      // small leaf
-      ctx.fillStyle = 'rgba(74,58,34,0.7)';
-      ctx.beginPath();
-      ctx.ellipse(cx + fx * 24, cy + fy * 24, 5, 2.5, Math.PI / 4 * (fx * fy), 0, Math.PI * 2);
-      ctx.fill();
-    };
-    flourish(bx + 8, by + 8, 1, 1);
-    flourish(bx + bw - 8, by + 8, -1, 1);
-    flourish(bx + 8, by + bh - 8, 1, -1);
-    flourish(bx + bw - 8, by + bh - 8, -1, -1);
-
-    // --- Compass rose (bottom-right inside the map) ---
-    const compX = PAD + MAP_PX - 56, compY = PAD + MAP_PX - 56, cr = 30;
-    ctx.save();
-    ctx.translate(compX, compY);
-    // faint backing disc
-    ctx.fillStyle = 'rgba(240,228,192,0.55)';
-    ctx.beginPath(); ctx.arc(0, 0, cr + 6, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = hex(INK); ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(0, 0, cr, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, 0, cr - 5, 0, Math.PI * 2); ctx.stroke();
-    // 8-point star
-    for (let k = 0; k < 4; k++) {
-      const ang = (k * Math.PI) / 2;
-      const long = cr - 3, w = 6;
-      const px = Math.cos(ang), py = Math.sin(ang);
-      const ox = -py, oy = px;
-      ctx.fillStyle = (k % 2 === 0) ? hex(INK) : hex(INK_SOFT);
-      ctx.beginPath();
-      ctx.moveTo(px * long, py * long);
-      ctx.lineTo(ox * w, oy * w);
-      ctx.lineTo(-px * 4, -py * 4);
-      ctx.lineTo(-ox * w, -oy * w);
-      ctx.closePath();
-      ctx.fill();
+    // --- SUPPLY: -1 food / soldier-day while away from a held settlement. --
+    // We model the party-level drain as 1 supply-day per game day spent in the
+    // field (the "per soldier" scaling is folded into the day budget so a 10-day
+    // supply lasts ~10 field days, matching the spec's "start ~10 days").
+    if (travelledTiles > 0 || !this.atOwnedSettlement()) {
+      GameWorld.player.supply = Math.max(0, GameWorld.player.supply - dayDelta);
+      if (GameWorld.player.supply <= 0) {
+        // Low/zero supply hook → morale erodes (desertion handled in later phases).
+        GameWorld.player.morale = Math.max(0, GameWorld.player.morale - dayDelta * 6);
+      }
     }
-    // minor diagonal points
-    ctx.fillStyle = 'rgba(74,58,34,0.6)';
-    for (let k = 0; k < 4; k++) {
-      const ang = (k * Math.PI) / 2 + Math.PI / 4;
-      const long = cr - 10, w = 3;
-      const px = Math.cos(ang), py = Math.sin(ang), ox = -py, oy = px;
-      ctx.beginPath();
-      ctx.moveTo(px * long, py * long); ctx.lineTo(ox * w, oy * w); ctx.lineTo(-ox * w, -oy * w); ctx.closePath(); ctx.fill();
+
+    // --- NEW DAY hook -----------------------------------------------------
+    const d = GameWorld.displayDay();
+    if (d > this.lastNewDay) {
+      const days = d - this.lastNewDay;
+      this.lastNewDay = d;
+      for (let i = 0; i < days; i++) this.onNewDay();
     }
-    // N marker
-    ctx.fillStyle = hex(INK);
-    ctx.font = 'bold 13px Georgia, serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('N', 0, -cr + 1);
-    ctx.restore();
 
-    tex.refresh();
+    // --- AI parties -------------------------------------------------------
+    this.updateAIParties(delta);
+
+    // --- Camera follow ----------------------------------------------------
+    if (this.followParty) {
+      const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
+      const cam = this.cameras.main;
+      cam.scrollX += (pp.x - (cam.scrollX + cam.width / 2 / this.zoom)) * 0.12;
+      cam.scrollY += (pp.y - (cam.scrollY + cam.height / 2 / this.zoom)) * 0.12;
+    }
+
+    // --- Chunks + icons + fog + HUD --------------------------------------
+    this.refreshChunks();
+    this.layoutIcons();
+    this.checkEnemyProximity();
+    this.updateHud();
+    this.updateMinimap();
+    if (this._fogDirty) { this.rebuildFog(); this._fogDirty = false; }
   }
 
-  // --- Parchment stats header with wax seal --------------------------------
-  buildHeader() {
-    const hg = this.add.graphics().setDepth(40);
-    const x = 12, y = 8, w = 290, h = 96;
-    // parchment plaque
-    hg.fillStyle(0xe9dab2, 0.96).fillRoundedRect(x, y, w, h, 8);
-    hg.lineStyle(2, 0x6b4a26, 0.9).strokeRoundedRect(x, y, w, h, 8);
-    hg.lineStyle(1, 0x8a6a3a, 0.5).strokeRoundedRect(x + 4, y + 4, w - 8, h - 8, 6);
-    // wax seal (top-right of plaque)
-    const sx = x + w - 22, sy = y + 22;
-    hg.fillStyle(0x000000, 0.18).fillCircle(sx + 1.5, sy + 2, 15);
-    hg.fillStyle(0x8c2b2b, 1).fillCircle(sx, sy, 15);
-    hg.fillStyle(0xa83b3b, 1).fillCircle(sx - 3, sy - 3, 6);
-    hg.lineStyle(1.5, 0x5e1c1c, 0.9).strokeCircle(sx, sy, 15);
-    // tiny embossed star on the seal
-    this.add.text(sx, sy, '✦', { fontFamily: 'serif', fontSize: '14px', color: '#5e1c1c' }).setOrigin(0.5).setDepth(41);
+  // Advance the party along its path; returns tiles travelled this frame.
+  advanceParty(delta: number): number {
+    let travelled = 0;
+    let budgetDays = (delta / DAY_MS); // game-days available this frame
+    // Convert to a tile budget on cost-1 terrain.
+    let tileBudget = budgetDays * BASE_TILES_PER_DAY;
 
-    this.add.text(x + 14, y + 10, 'THE KNOWN WORLD', { fontFamily: 'Georgia, serif', fontSize: '15px', color: '#3a2810', fontStyle: 'bold' }).setDepth(41);
-    this.statsText = this.add.text(x + 14, y + 34, '', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#4a3418', lineSpacing: 4 }).setDepth(41);
-
-    // Resources plaque (top-right).
-    const rw = 220, rh = 78, rx = GAME_W - rw - 12, ry = 8;
-    hg.fillStyle(0xe9dab2, 0.96).fillRoundedRect(rx, ry, rw, rh, 8);
-    hg.lineStyle(2, 0x6b4a26, 0.9).strokeRoundedRect(rx, ry, rw, rh, 8);
-    this.add.text(rx + 12, ry + 8, 'STORES', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#5a3a14', fontStyle: 'bold' }).setDepth(41);
-    this.resText = this.add.text(rx + rw - 12, ry + 26, '', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#6a4a1c', align: 'right', lineSpacing: 4 }).setOrigin(1, 0).setDepth(41);
+    while (tileBudget > 0 && this.path.length) {
+      const next = this.path[0];
+      const cost = Math.max(0.5, this.pathfinder.tileCost(next.col, next.row));
+      // Cost per tile relative to plains (cost 1). Higher cost = slower.
+      const tileFraction = tileBudget / cost; // how much of this step we can do
+      const remaining = 1 - this.subProgress;
+      if (tileFraction >= remaining) {
+        // Complete this step.
+        tileBudget -= remaining * cost;
+        GameWorld.player.col = next.col;
+        GameWorld.player.row = next.row;
+        this.subProgress = 0;
+        this.path.shift();
+        travelled += 1;
+        this.revealAroundPlayer();
+        if (!this.path.length) { this.cancelPath(); break; }
+      } else {
+        this.subProgress += tileFraction;
+        tileBudget = 0;
+      }
+    }
+    if (this.path.length) this.drawRoute();
+    return travelled;
   }
 
-  // (UI overhaul Phase 2) Stage 4 of the staged tutorial — first continent open.
-  showContinentTutorial() {
-    let seen = {};
-    try { seen = JSON.parse(localStorage.getItem('kg_tut') || '{}'); } catch (e) {}
-    if (seen[4]) return;
-    seen[4] = true;
-    try { localStorage.setItem('kg_tut', JSON.stringify(seen)); } catch (e) {}
-    const W = 540, H = 110, cx = GAME_W / 2, top = GAME_H - 34 - 20 - H - 14;
-    const els: any[] = [];
-    els.push(this.add.rectangle(cx, top + H / 2, W, H, 0x2a1d0e, 0.97).setStrokeStyle(2, 0xc9a14a, 0.95).setDepth(70));
-    els.push(this.add.text(cx - W / 2 + 18, top + 12, '📜 The Continent', { fontFamily: 'Georgia, serif', fontSize: '16px', color: '#ffe9b0', fontStyle: 'bold' }).setDepth(71));
-    els.push(this.add.text(cx - W / 2 + 18, top + 36, 'This is your continent. Your territory glows; enemy kingdoms sit in the far corners; neutral settlements can be conquered. Press Tab or the button below to return.', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#f0e6d0', wordWrap: { width: W - 36 }, lineSpacing: 3 }).setDepth(71));
-    const bg = this.add.rectangle(cx + W / 2 - 70, top + H - 20, 110, 26, 0x6b4a26).setStrokeStyle(2, 0xe9d6a4, 0.85).setInteractive({ useHandCursor: true }).setDepth(71);
-    els.push(bg);
-    els.push(this.add.text(cx + W / 2 - 70, top + H - 20, 'Got it →', { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(72));
-    bg.on('pointerover', () => bg.setFillStyle(0x82602f));
-    bg.on('pointerout', () => bg.setFillStyle(0x6b4a26));
-    bg.on('pointerdown', (p, lx, ly, ev) => { if (ev) ev.stopPropagation(); els.forEach((o) => o.destroy()); });
+  atOwnedSettlement(): boolean {
+    // Player is resupplied while standing on/adjacent to a player-owned town.
+    for (const s of this.world.settlements) {
+      if (s.kind !== 'player_castle') continue;
+      if (Phaser.Math.Distance.Between(GameWorld.player.col, GameWorld.player.row, s.col, s.row) <= 2) {
+        // Resupply to full while parked at home.
+        GameWorld.player.supply = 10;
+        return true;
+      }
+    }
+    return false;
   }
 
-  // Tile (c,r) -> on-screen point on the continent map.
-  toScreen(c, r) { return { x: MX + (c / N) * MAP_PX, y: MY + (r / N) * MAP_PX }; }
-  toTile(px, py) { return { col: Math.floor(((px - MX) / MAP_PX) * N), row: Math.floor(((py - MY) / MAP_PX) * N) }; }
-
-  buildLabels() {
-    this.labels.removeAll(true);
-    const mk = (c, r, txt, big?) => {
-      const p = this.toScreen(c, r);
-      this.labels.add(this.add.text(p.x, p.y, txt, {
-        fontFamily: 'Georgia, serif', fontSize: (big ? '17px' : '13px'),
-        color: '#3a2810', fontStyle: 'italic bold',
-        stroke: '#f0e4c0', strokeThickness: 4,
-      }).setOrigin(0.5).setAlpha(0.92));
-    };
-    mk(100, 22, 'Deep Forest');
-    mk(178, 100, 'Iron Mountains');
-    mk(100, 178, 'River Delta');
-    mk(22, 100, 'Western Wildlands');
-    mk(100, 102, 'Your Realm', true);
+  // =========================================================================
+  // onNewDay — the clean daily tick hook for resources/AI/events.
+  // =========================================================================
+  onNewDay() {
+    // Passive economy: a small daily income (placeholder; real economy lives in
+    // the per-settlement view, Phase 3+). Kept tiny so numbers stay legible.
+    GameWorld.gold += 5;
+    // AI parties re-evaluate objectives occasionally.
+    for (const ai of GameWorld.aiParties) {
+      if (Math.random() < 0.15) GameWorld.pickAIObjective(ai);
+      if (ai.personality === 'aggressive') { ai.destCol = GameWorld.player.col; ai.destRow = GameWorld.player.row; }
+    }
   }
 
-  rebuildMap() {
-    const iso = this.iso;
-    if (!iso || !iso.biomeGrid) return;
-    this.drawIllustratedMap(iso);
-    this.drawIcons();
-    this.updateStats();
-    this.applyNight(iso);
-  }
-
-  // --- Illustrated biome + watercolour map into the contIllus canvas. We sample
-  // the 200x200 biome grid at a coarse cell size and draw a hand-drawn MOTIF per
-  // cell (pines / peaks / dunes / grass / waves) rather than per-pixel colour. --
-  drawIllustratedMap(iso: any) {
-    const tex = this.textures.get('contIllus') as Phaser.Textures.CanvasTexture;
-    const ctx = tex.getContext();
-    const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
-    ctx.clearRect(0, 0, MAP_PX, MAP_PX);
-
-    const scale = MAP_PX / N;
-    const castle = iso.buildings && iso.buildings.castle;
-    const baseR = iso.territory ? iso.territory.baseR() : 8;
-    const explored = iso.territory ? iso.territory.explored : null;
-    const seenAt = (c: number, r: number) =>
-      !explored || (explored[r] && explored[r][c]) ||
-      (castle && Phaser.Math.Distance.Between(c, r, castle.col, castle.row) <= baseR + 16);
-
-    const isWater = (c: number, r: number) =>
-      c < 0 || r < 0 || c >= N || r >= N ? false : iso.terrainType[r][c] === 'water';
-    const styleAt = (c: number, r: number): BiomeStyle =>
-      (c < 0 || r < 0 || c >= N || r >= N) ? DEFAULT_STYLE : (BIOME_STYLE[iso.biomeGrid[r][c]] || DEFAULT_STYLE);
-
-    const rnd = mulberry(99173);
-
-    // 1) Base ground wash — coarse cells of softly-blended biome ground colour
-    // so the whole sheet reads as tinted land, with a wavy watercolour sea.
-    const G = 3; // ground cell in tiles
-    for (let r = 0; r < N; r += G) {
-      for (let c = 0; c < N; c += G) {
-        const px = c * scale, py = r * scale, sz = G * scale + 0.6;
-        if (isWater(c, r)) {
-          ctx.fillStyle = hex(blend(SEA, SEA_DK, ((r + c) % 12) / 14));
+  // =========================================================================
+  // AI parties — move toward their objective tiles (cheap step-toward, fog-gated
+  // for visibility).
+  // =========================================================================
+  updateAIParties(delta: number) {
+    const tilesThisFrame = (delta / DAY_MS) * BASE_TILES_PER_DAY * 0.8; // a touch slower than the player
+    for (const ai of GameWorld.aiParties) {
+      const dc = ai.destCol - ai.col, dr = ai.destRow - ai.row;
+      const dist = Math.hypot(dc, dr);
+      if (dist < 1.0) {
+        // Reached objective → pick a new one.
+        GameWorld.pickAIObjective(ai);
+        continue;
+      }
+      // Step toward the objective, but only onto passable tiles (slide along).
+      const step = Math.min(tilesThisFrame, dist);
+      let nc = ai.col + (dc / dist) * step;
+      let nr = ai.row + (dr / dist) * step;
+      if (!this.pathfinder.passable(Math.round(nc), Math.round(nr))) {
+        // Try axis-aligned slides to avoid getting stuck on water/peaks.
+        if (this.pathfinder.passable(Math.round(ai.col + (dc / dist) * step), Math.round(ai.row))) {
+          nr = ai.row;
+        } else if (this.pathfinder.passable(Math.round(ai.col), Math.round(ai.row + (dr / dist) * step))) {
+          nc = ai.col;
         } else {
-          const s0 = styleAt(c, r), s1 = styleAt(c + G, r), s2 = styleAt(c, r + G);
-          let col = blend(s0.ground, blend(s1.ground, s2.ground, 0.5), 0.4);
-          col = shade(col, (((c * 19 + r * 7) % 8) - 4) / 4 * 0.04);
-          ctx.fillStyle = hex(col);
-        }
-        ctx.fillRect(px, py, sz, sz);
-      }
-    }
-
-    // 2) Coastline foam — light stroke where land meets water.
-    ctx.strokeStyle = hex(SEA_FOAM);
-    ctx.lineWidth = 1.4;
-    for (let r = 0; r < N; r += 2) {
-      for (let c = 0; c < N; c += 2) {
-        if (!isWater(c, r)) continue;
-        if (!isWater(c - 2, r) || !isWater(c + 2, r) || !isWater(c, r - 2) || !isWater(c, r + 2)) {
-          const p = c * scale, q = r * scale;
-          ctx.globalAlpha = 0.5;
-          ctx.beginPath(); ctx.arc(p, q, 1.6, 0, Math.PI * 2); ctx.stroke();
-          ctx.globalAlpha = 1;
+          // Stuck → re-pick objective next frame.
+          GameWorld.pickAIObjective(ai);
+          continue;
         }
       }
+      ai.col = Phaser.Math.Clamp(nc, 1, this.world.size - 2);
+      ai.row = Phaser.Math.Clamp(nr, 1, this.world.size - 2);
     }
-    // water ripple strokes
-    ctx.strokeStyle = 'rgba(80,130,150,0.35)';
-    ctx.lineWidth = 1;
-    for (let r = 4; r < N; r += 7) {
-      for (let c = 4; c < N; c += 9) {
-        if (!isWater(c, r)) continue;
-        const p = c * scale, q = r * scale;
-        ctx.beginPath();
-        ctx.moveTo(p - 6, q);
-        ctx.quadraticCurveTo(p - 3, q - 2.5, p, q);
-        ctx.quadraticCurveTo(p + 3, q + 2.5, p + 6, q);
-        ctx.stroke();
+  }
+
+  // =========================================================================
+  // CHUNK RENDER — bind pooled images to ChunkManager's visible texture keys.
+  // =========================================================================
+  refreshChunks() {
+    const cam = this.cameras.main;
+    const tileLeft = Math.floor(cam.scrollX / PX_PER_TILE);
+    const tileTop = Math.floor(cam.scrollY / PX_PER_TILE);
+    const tileWide = Math.ceil(cam.width / this.zoom / PX_PER_TILE);
+    const tileHigh = Math.ceil(cam.height / this.zoom / PX_PER_TILE);
+    const visibleKeys = this.chunks.update({ tileLeft, tileTop, tileWide, tileHigh });
+
+    const wanted = new Set(visibleKeys);
+
+    // Remove images whose key is no longer visible (return to pool). Rebind to
+    // the permanent blank texture so a later texture eviction can't leave a
+    // dangling frame reference under the canvas renderer.
+    for (const [key, img] of this.activeChunkImgs) {
+      if (!wanted.has(key)) {
+        img.setVisible(false);
+        img.setTexture('continent_blank');
+        this.chunkPool.push(img);
+        this.activeChunkImgs.delete(key);
       }
     }
 
-    // 3) Watercolour territory washes (soft, bleeding past borders). Drawn as
-    // translucent radial blooms so they read as painted, not hard fills.
-    const wash = (cx: number, cy: number, radTiles: number, col: number, alpha: number) => {
-      const x = cx * scale, y = cy * scale, rad = radTiles * scale;
-      const g = ctx.createRadialGradient(x, y, rad * 0.25, x, y, rad);
-      g.addColorStop(0, rgba(col, alpha));
-      g.addColorStop(0.7, rgba(col, alpha * 0.55));
-      g.addColorStop(1, rgba(col, 0));
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill();
-    };
-    // player realm wash (a soft layered bloom so it bleeds organically)
-    if (castle) {
-      wash(castle.col, castle.row, baseR + 6, 0x3f7fd6, 0.30);
-      wash(castle.col, castle.row, baseR + 2, 0x4aa0ff, 0.22);
-    }
-    for (const s of (iso.settlements ? iso.settlements.list : [])) {
-      if (s.owner === 'player') wash(s.col, s.row, 7, 0x4aa0ff, 0.24);
-    }
-    // AI realm washes in faction colours
-    for (const k of (iso.kingdoms || [])) {
-      if (k.castleAlive) wash(k.castleCol, k.castleRow, 12, k.cfg.color, 0.26);
-    }
-
-    // 4) Illustrated biome motifs (hand-drawn) at a coarser grid. Only over land
-    // and only where the biome motif applies; jittered for an organic feel.
-    const M = 6; // motif cell in tiles
-    for (let r = 0; r < N; r += M) {
-      for (let c = 0; c < N; c += M) {
-        if (isWater(c, r)) continue;
-        const st = styleAt(c, r);
-        const jx = (rnd() - 0.5) * M * scale * 0.7;
-        const jy = (rnd() - 0.5) * M * scale * 0.7;
-        const x = c * scale + scale * (M / 2) + jx;
-        const y = r * scale + scale * (M / 2) + jy;
-        if (rnd() > 0.82 && st.motif !== 'mountains') continue; // thin density slightly
-        switch (st.motif) {
-          case 'forest': this.drawPine(ctx, x, y, 4 + rnd() * 2, st.ink); break;
-          case 'mountains': this.drawPeak(ctx, x, y, 6 + rnd() * 3, st.ink); break;
-          case 'plains': this.drawGrass(ctx, x, y, st.ink); break;
-          case 'desert': this.drawDune(ctx, x, y, st.ink); break;
+    // Bind/position images for visible keys.
+    for (const key of visibleKeys) {
+      if (!this.textures.exists(key)) continue; // defensive: skip if not yet built
+      let img = this.activeChunkImgs.get(key);
+      if (!img) {
+        img = this.chunkPool.pop();
+        if (!img) {
+          img = this.add.image(0, 0, key).setOrigin(0, 0);
+          this.chunkLayer.add(img);
         }
+        // Reset texture (texture might have been recreated) and show.
+        img.setTexture(key);
+        img.setVisible(true);
+        this.activeChunkImgs.set(key, img);
+      }
+      // Parse chunk coords from the texture key (wgchunk_cx_cy).
+      const m = key.match(/wgchunk_(\d+)_(\d+)/);
+      if (m) {
+        const cx = parseInt(m[1], 10), cy = parseInt(m[2], 10);
+        const pos = this.chunks.chunkWorldPos(cx, cy);
+        img.setPosition(pos.x, pos.y);
       }
     }
-
-    // 5) Fog-of-war as an illustrated dark cloud bank over unexplored land.
-    ctx.save();
-    for (let r = 0; r < N; r += 4) {
-      for (let c = 0; c < N; c += 4) {
-        if (seenAt(c, r)) continue;
-        const x = c * scale, y = r * scale, sz = 4 * scale + 1;
-        // darken the unexplored area
-        ctx.fillStyle = 'rgba(22,26,40,0.62)';
-        ctx.fillRect(x, y, sz, sz);
-      }
-    }
-    // soft cloud puffs along the explored frontier
-    ctx.fillStyle = 'rgba(36,40,58,0.5)';
-    for (let r = 2; r < N; r += 5) {
-      for (let c = 2; c < N; c += 5) {
-        const here = seenAt(c, r);
-        const edge = here && (!seenAt(c - 5, r) || !seenAt(c + 5, r) || !seenAt(c, r - 5) || !seenAt(c, r + 5));
-        const dark = !here && (seenAt(c - 5, r) || seenAt(c + 5, r) || seenAt(c, r - 5) || seenAt(c, r + 5));
-        if (!edge && !dark) continue;
-        const x = c * scale, y = r * scale;
-        for (let k = 0; k < 3; k++) {
-          ctx.globalAlpha = 0.18 + rnd() * 0.12;
-          ctx.beginPath();
-          ctx.arc(x + (rnd() - 0.5) * 14, y + (rnd() - 0.5) * 14, 5 + rnd() * 7, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    }
-    ctx.globalAlpha = 1;
-    ctx.restore();
-
-    // 6) Faint parchment grain over the whole map so even land reads as paper.
-    ctx.fillStyle = 'rgba(120,90,40,0.05)';
-    for (let i = 0; i < 90; i++) ctx.fillRect(rnd() * MAP_PX, rnd() * MAP_PX, 1, 1);
-
-    tex.refresh();
   }
 
-  // --- Hand-drawn biome motif primitives (Canvas2D) ---
-  drawPine(ctx: any, x: number, y: number, h: number, ink: number) {
-    const hex = '#' + ink.toString(16).padStart(6, '0');
-    ctx.fillStyle = hex;
-    ctx.strokeStyle = 'rgba(20,40,18,0.5)';
-    ctx.lineWidth = 0.6;
-    // trunk
-    ctx.fillStyle = 'rgba(70,50,28,0.8)';
-    ctx.fillRect(x - 0.6, y + h * 0.4, 1.2, h * 0.4);
-    // two stacked triangles
-    ctx.fillStyle = hex;
-    const tri = (cy: number, w: number, hh: number) => { ctx.beginPath(); ctx.moveTo(x, cy - hh); ctx.lineTo(x - w, cy); ctx.lineTo(x + w, cy); ctx.closePath(); ctx.fill(); };
-    tri(y + h * 0.5, h * 0.6, h * 0.7);
-    tri(y + h * 0.15, h * 0.45, h * 0.65);
+  // =========================================================================
+  // ICONS — player party + AI parties, laid out in world space each frame.
+  // =========================================================================
+  buildPartyIcon() {
+    // A crown/castle crest in the player faction colour, with an army badge and
+    // a supply dot. Drawn once with Graphics + Text; repositioned each frame.
+    const c = this.partyIcon;
+    const g = this.add.graphics();
+    // Banner shield.
+    g.fillStyle(0x1a120a, 0.5); g.fillEllipse(0, 16, 30, 10);     // shadow
+    g.fillStyle(GameWorld.playerColor, 1);
+    g.fillRoundedRect(-13, -14, 26, 30, 4);
+    g.lineStyle(2, 0xf5ecd2, 0.95); g.strokeRoundedRect(-13, -14, 26, 30, 4);
+    // Crown motif.
+    g.fillStyle(0xffe08a, 1);
+    g.fillTriangle(-9, -4, -5, -12, -1, -4);
+    g.fillTriangle(-3, -4, 1, -14, 5, -4);
+    g.fillTriangle(2, -4, 6, -12, 10, -4);
+    g.fillRect(-9, -4, 19, 4);
+    c.add(g);
+    // Army-size badge.
+    this.partyBadge = this.add.text(0, 18, '', {
+      fontFamily: 'Georgia, serif', fontSize: '11px', color: '#fff', fontStyle: 'bold',
+      backgroundColor: '#000000aa', padding: { x: 4, y: 1 },
+    }).setOrigin(0.5, 0);
+    c.add(this.partyBadge);
+    // Supply dot.
+    this.supplyDot = this.add.circle(13, -14, 4, 0x4ad06b).setStrokeStyle(1, 0x10160d, 0.8);
+    c.add(this.supplyDot);
   }
-  drawPeak(ctx: any, x: number, y: number, h: number, ink: number) {
-    const hex = '#' + ink.toString(16).padStart(6, '0');
-    // mountain triangle
-    ctx.fillStyle = hex;
-    ctx.beginPath();
-    ctx.moveTo(x, y - h);
-    ctx.lineTo(x - h * 0.85, y + h * 0.5);
-    ctx.lineTo(x + h * 0.85, y + h * 0.5);
-    ctx.closePath();
-    ctx.fill();
-    // snow cap
-    ctx.fillStyle = 'rgba(248,246,238,0.92)';
-    ctx.beginPath();
-    ctx.moveTo(x, y - h);
-    ctx.lineTo(x - h * 0.28, y - h * 0.38);
-    ctx.lineTo(x - h * 0.1, y - h * 0.5);
-    ctx.lineTo(x + h * 0.06, y - h * 0.38);
-    ctx.lineTo(x + h * 0.28, y - h * 0.4);
-    ctx.closePath();
-    ctx.fill();
-    // shading line
-    ctx.strokeStyle = 'rgba(40,34,24,0.4)';
-    ctx.lineWidth = 0.6;
-    ctx.beginPath(); ctx.moveTo(x, y - h); ctx.lineTo(x + h * 0.25, y + h * 0.5); ctx.stroke();
-  }
-  drawGrass(ctx: any, x: number, y: number, ink: number) {
-    ctx.strokeStyle = 'rgba(' + ((ink >> 16) & 255) + ',' + ((ink >> 8) & 255) + ',' + (ink & 255) + ',0.45)';
-    ctx.lineWidth = 1;
-    // a couple of undulating grass tufts
-    for (let k = -1; k <= 1; k++) {
-      const gx = x + k * 4;
-      ctx.beginPath();
-      ctx.moveTo(gx - 3, y + 1.5);
-      ctx.quadraticCurveTo(gx, y - 2.5, gx + 3, y + 1.5);
-      ctx.stroke();
-    }
-  }
-  drawDune(ctx: any, x: number, y: number, ink: number) {
-    ctx.strokeStyle = 'rgba(' + ((ink >> 16) & 255) + ',' + ((ink >> 8) & 255) + ',' + (ink & 255) + ',0.5)';
-    ctx.lineWidth = 1.1;
-    // dune ripple lines
-    for (let k = 0; k < 2; k++) {
-      const yy = y + k * 3 - 1;
-      ctx.beginPath();
-      ctx.moveTo(x - 6, yy);
-      ctx.quadraticCurveTo(x, yy - 3, x + 6, yy);
-      ctx.stroke();
+
+  layoutIcons() {
+    // Player party.
+    const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
+    this.partyIcon.setPosition(pp.x, pp.y);
+    this.partyIcon.setScale(1 / this.zoom * 0.9 + 0.1); // keep readable at any zoom
+    this.partyBadge.setText(`${GameWorld.armySize()}`);
+    const st = GameWorld.supplyState();
+    this.supplyDot.setFillStyle(st === 'green' ? 0x4ad06b : st === 'yellow' ? 0xe6c84a : 0xd64a4a);
+
+    // AI parties (only where fog is lifted).
+    this.iconLayer.removeAll(true);
+    for (const ai of GameWorld.aiParties) {
+      if (!this.fogLifted(Math.round(ai.col), Math.round(ai.row))) continue;
+      const ap = this.tileToPx(ai.col, ai.row);
+      const g = this.add.graphics();
+      g.fillStyle(0x1a120a, 0.5); g.fillEllipse(0, 6, 18, 6);
+      g.fillStyle(ai.color, 1); g.fillCircle(0, -2, 8);
+      g.lineStyle(1.5, 0xf5ecd2, 0.85); g.strokeCircle(0, -2, 8);
+      // sword tick
+      g.lineStyle(1.5, 0xffffff, 0.9); g.lineBetween(0, -7, 0, 3);
+      g.lineBetween(-3, -3, 3, -3);
+      g.setPosition(ap.x, ap.y);
+      g.setScale(1 / this.zoom * 0.9 + 0.1);
+      this.iconLayer.add(g);
     }
   }
 
-  drawIcons() {
-    const iso = this.iso;
-    const g = this.icons;
+  // =========================================================================
+  // ROUTE drawing — dotted planned line + ETA label.
+  // =========================================================================
+  drawRoute() {
+    const g = this.overlay;
     g.clear();
-    this.iconText.removeAll(true);
-    const explored = iso.territory ? iso.territory.explored : null;
-
-    // (Completion Phase 5) Roads — illustrated DOUBLE brown lines along road tiles.
-    if (iso.roads && iso.roads.tiles) {
-      g.fillStyle(0x6b4a26, 0.5);
-      for (const k of iso.roads.tiles) { const [c, r] = k.split(',').map(Number); const p = this.toScreen(c, r); g.fillCircle(p.x, p.y, 1.9); }
-      g.fillStyle(0x8a6a3a, 0.85);
-      for (const k of iso.roads.tiles) { const [c, r] = k.split(',').map(Number); const p = this.toScreen(c, r); g.fillCircle(p.x, p.y, 1); }
+    if (!this.pathTotal.length) { if (this.etaLabel) this.etaLabel.setVisible(false); return; }
+    // Dotted line from the party through the remaining path.
+    const start = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
+    const pts: Array<{ x: number; y: number }> = [start];
+    for (const s of this.path) pts.push(this.tileToPx(s.col, s.row));
+    g.lineStyle(Math.max(1, 2 / this.zoom), 0xffe08a, 0.9);
+    for (let i = 0; i < pts.length - 1; i++) {
+      this.dotted(g, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
     }
+    // Destination marker.
+    const dest = pts[pts.length - 1];
+    g.fillStyle(0xffe08a, 0.9); g.fillCircle(dest.x, dest.y, Math.max(2, 5 / this.zoom));
+    g.lineStyle(Math.max(1, 1.5 / this.zoom), 0x6b4a16, 0.9); g.strokeCircle(dest.x, dest.y, Math.max(2, 5 / this.zoom));
 
-    // (Completion Phase 9) Caravan routes — a dotted illustrated line + a wagon dot.
-    this._caravanDots = [];
-    if (iso.caravans && iso.caravans.routes) {
-      for (const rt of iso.caravans.routes) {
-        if (!rt.from || !rt.to || rt.from.col == null || rt.to.col == null) continue;
-        const a = this.toScreen(rt.from.col, rt.from.row), b = this.toScreen(rt.to.col, rt.to.row);
-        this.dottedLine(g, a.x, a.y, b.x, b.y, 0x8a6a3a, 0.4, 4, 4);
-        const t = Phaser.Math.Clamp((rt.progress || 0) / (rt.days || 1), 0, 1);
-        const x = Phaser.Math.Linear(a.x, b.x, t), y = Phaser.Math.Linear(a.y, b.y, t);
-        g.fillStyle(0x8b5e3c, 1).fillCircle(x, y, 3); g.lineStyle(1, 0xf5ecd2, 0.8).strokeCircle(x, y, 3);
-        this._caravanDots.push({ x, y, txt: `Caravan: ${rt.resource} · ${rt.from.name}→${rt.to.name} · ~${Math.max(0, Math.round((rt.days || 1) - (rt.progress || 0)))}d` });
-      }
+    // ETA label near the destination (screen-space).
+    const remainingCost = this.estimateRemainingCost();
+    const days = remainingCost / BASE_TILES_PER_DAY;
+    if (!this.etaLabel) {
+      this.etaLabel = this.add.text(0, 0, '', {
+        fontFamily: 'Georgia, serif', fontSize: '12px', color: '#3a2810', fontStyle: 'bold',
+        backgroundColor: '#efe2bcee', padding: { x: 6, y: 3 },
+      }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(HUD_DEPTH + 10);
     }
-
-    // (Completion Phase 9) Expedition parties — compass dots drifting from castle.
-    if (iso.expeditions && iso.expeditions.state && iso.buildings.castle) {
-      const cc = this.toScreen(iso.buildings.castle.col, iso.buildings.castle.row); let ei = 0;
-      for (const key of Object.keys(iso.expeditions.state)) for (const slot of iso.expeditions.state[key]) {
-        const total = (iso.expeditions.defs[key] && iso.expeditions.defs[key].days ? iso.expeditions.defs[key].days : 1) * 300;
-        const frac = 1 - Phaser.Math.Clamp((slot.timeLeft || 0) / total, 0, 1);
-        const ang = ei * 1.27, dist = 12 + frac * 46;
-        const x = cc.x + Math.cos(ang) * dist, y = cc.y + Math.sin(ang) * dist;
-        g.fillStyle(0xf0e4c0, 1).fillCircle(x, y, 2.4); g.lineStyle(1, 0x4a3a22, 0.9).strokeCircle(x, y, 2.4);
-        g.lineStyle(1, 0x4a3a22, 0.9); g.lineBetween(x - 2, y, x + 2, y); g.lineBetween(x, y - 2, x, y + 2); ei++;
-      }
-    }
-
-    // --- AI fortresses — faction-coloured illustrated keep with banner ---
-    for (const k of iso.kingdoms || []) {
-      if (!k.castleAlive) continue;
-      const p = this.toScreen(k.castleCol, k.castleRow);
-      this.drawFortress(g, p.x, p.y, k.cfg.color);
-    }
-
-    // --- Neutral settlements (house cluster) / player settlements (small keep) ---
-    for (const s of iso.settlements ? iso.settlements.list : []) {
-      if (s.owner !== 'player' && !s.discovered) continue;
-      const p = this.toScreen(s.col, s.row);
-      if (s.owner === 'player') this.drawFortress(g, p.x, p.y, 0x3f7fd6, 0.8);
-      else this.drawVillage(g, p.x, p.y);
-    }
-
-    // --- Goblin camps — illustrated dark-red skull/X mark ---
-    for (const cmp of iso.goblinCamps ? iso.goblinCamps.list : []) {
-      if (!cmp.alive || !cmp.discovered) continue;
-      const p = this.toScreen(cmp.col, cmp.row);
-      g.fillStyle(0x1a0c0c, 0.25).fillCircle(p.x + 1, p.y + 1.5, 5);
-      g.lineStyle(2.4, 0x7a1414, 1);
-      g.lineBetween(p.x - 4, p.y - 4, p.x + 4, p.y + 4).lineBetween(p.x - 4, p.y + 4, p.x + 4, p.y - 4);
-      g.lineStyle(1, 0x3a0a0a, 0.8);
-      g.lineBetween(p.x - 4, p.y - 4, p.x + 4, p.y + 4).lineBetween(p.x - 4, p.y + 4, p.x + 4, p.y - 4);
-    }
-
-    // --- Ancient ruins (discovered) — crumbled arch ---
-    for (const ru of iso.ruins ? iso.ruins.list : []) {
-      if (!ru.discovered) continue;
-      const p = this.toScreen(ru.col, ru.row);
-      this.drawRuin(g, p.x, p.y);
-    }
-
-    // --- Player castle — illustrated keep with banner + "local view" frame ---
-    const c = iso.buildings.castle;
-    if (c) {
-      const half = 15;
-      const a = this.toScreen(c.col - half, c.row - half);
-      const b = this.toScreen(c.col + half, c.row + half);
-      // soft dashed gold frame for the local view area
-      this.dashedRect(g, a.x, a.y, b.x - a.x, b.y - a.y, 0xe6c87a, 0.85);
-      this.iconText.add(this.add.text((a.x + b.x) / 2, a.y - 4, 'local view', { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#5a3a14', fontStyle: 'italic', stroke: '#f0e4c0', strokeThickness: 3 }).setOrigin(0.5, 1));
-      const p = this.toScreen(c.col, c.row);
-      this.drawCastle(g, p.x, p.y);
-    }
-
-    // --- Armies as MAP PINS (faction-coloured, sword motif, soft shadow) + faint
-    // dotted movement trail toward their (optional) destination. ---
-    if (iso.armyMgr) {
-      const FC: Record<string, number> = { player: 0x3a7bd5, red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a };
-      for (const a of iso.armyMgr.armies) {
-        const p = this.toScreen(a.col, a.row);
-        const col = FC[a.faction] || 0x888888;
-        // movement trail (if the army has a destination)
-        const dest = a.dest || a.target || (a.path && a.path.length ? a.path[a.path.length - 1] : null);
-        if (dest && dest.col != null) { const d = this.toScreen(dest.col, dest.row); this.dottedLine(g, p.x, p.y, d.x, d.y, col, 0.35, 3, 4); }
-        this.drawArmyPin(g, p.x, p.y, col);
-      }
-    }
-
-    // (Session-1 Phase 2) Wandering factions — small coloured travellers.
-    if (iso.factions && iso.factions.continentDots) {
-      for (const d of iso.factions.continentDots()) {
-        const p = this.toScreen(d.col, d.row);
-        g.fillStyle(0x2a1c0c, 0.2).fillCircle(p.x + 0.6, p.y + 1, 3);
-        g.fillStyle(d.color, 1).fillCircle(p.x, p.y, 2.6);
-        g.lineStyle(1, 0x2a1c0c, 0.5).strokeCircle(p.x, p.y, 2.6);
-      }
-    }
-
-    // Player field army (centroid of troops) — small blue pin.
-    const units = iso.troops ? iso.troops.allUnits() : [];
-    if (units.length) {
-      let sc = 0, sr = 0;
-      for (const u of units) { const t = iso.screenToTile(u.x, u.y); sc += t.col; sr += t.row; }
-      const p = this.toScreen(sc / units.length, sr / units.length);
-      this.drawArmyPin(g, p.x, p.y, 0x3a7bd5);
-    }
-
-    // AI armies (live attack waves) — small faction dots.
-    for (const e of iso.waves ? iso.waves.enemies : []) {
-      if (!e.alive) continue;
-      const t = iso.screenToTile((e.rect || e.spr).x, (e.rect || e.spr).y);
-      const col = e.faction ? e.faction.cfg.color : 0xc0392b;
-      const p = this.toScreen(t.col, t.row);
-      g.fillStyle(col, 1).fillCircle(p.x, p.y, 2.2);
-      g.lineStyle(0.8, 0x2a1c0c, 0.6).strokeCircle(p.x, p.y, 2.2);
-    }
-
-    this.drawCouncilAftermath(iso, g); // (V2 P2)
-    this.drawLegend();                 // illustrated legend box
+    const sc = this.worldToScreen(dest.x, dest.y);
+    this.etaLabel.setText(`Arrives in ~${Math.max(1, Math.round(days))} day${Math.round(days) === 1 ? '' : 's'}`);
+    this.etaLabel.setPosition(sc.x, sc.y - 10).setVisible(true);
   }
 
-  // ----- Illustrated icon primitives (vector Graphics) -----
-  drawCastle(g: any, x: number, y: number) {
-    // soft shadow
-    g.fillStyle(0x2a1c0c, 0.28).fillEllipse(x, y + 7, 18, 6);
-    // keep body (gold-stone)
-    g.fillStyle(0xe8d49a, 1);
-    g.fillRect(x - 7, y - 4, 14, 10);
-    g.lineStyle(1, 0x6b4a26, 1).strokeRect(x - 7, y - 4, 14, 10);
-    // crenellations
-    g.fillStyle(0xe8d49a, 1);
-    for (let i = -7; i < 7; i += 4) g.fillRect(x + i, y - 7, 2.4, 3);
-    // two towers
-    g.fillStyle(0xdcc488, 1);
-    g.fillRect(x - 9, y - 7, 4, 13); g.fillRect(x + 5, y - 7, 4, 13);
-    g.lineStyle(0.8, 0x6b4a26, 1).strokeRect(x - 9, y - 7, 4, 13).strokeRect(x + 5, y - 7, 4, 13);
-    // gate
-    g.fillStyle(0x5a3a14, 1).fillRect(x - 1.6, y + 1, 3.2, 5);
-    // banner pole + blue flag
-    g.lineStyle(1, 0x4a3a22, 1).lineBetween(x, y - 7, x, y - 16);
-    g.fillStyle(0x3a7bd5, 1).fillTriangle(x, y - 16, x + 9, y - 13.5, x, y - 11);
-    g.lineStyle(0.8, 0xf5ecd2, 0.7).strokeTriangle(x, y - 16, x + 9, y - 13.5, x, y - 11);
-  }
-  drawFortress(g: any, x: number, y: number, col: number, scale = 1) {
-    const s = scale;
-    g.fillStyle(0x2a1c0c, 0.26).fillEllipse(x, y + 6 * s, 14 * s, 5 * s);
-    // keep, tinted toward faction colour but kept stony
-    const body = blend(0xcdbb90, col, 0.35);
-    g.fillStyle(body, 1).fillRect(x - 6 * s, y - 3 * s, 12 * s, 9 * s);
-    g.lineStyle(1, 0x4a3a22, 1).strokeRect(x - 6 * s, y - 3 * s, 12 * s, 9 * s);
-    for (let i = -6; i < 6; i += 3.5) g.fillRect(x + i * s, y - 6 * s, 2 * s, 2.6 * s);
-    g.fillStyle(blend(0xbcaa80, col, 0.4), 1).fillRect(x - 8 * s, y - 6 * s, 3.4 * s, 12 * s).fillRect(x + 4.5 * s, y - 6 * s, 3.4 * s, 12 * s);
-    g.lineStyle(0.7, 0x4a3a22, 1).strokeRect(x - 8 * s, y - 6 * s, 3.4 * s, 12 * s).strokeRect(x + 4.5 * s, y - 6 * s, 3.4 * s, 12 * s);
-    // faction banner
-    g.lineStyle(1, 0x4a3a22, 1).lineBetween(x, y - 6 * s, x, y - 14 * s);
-    g.fillStyle(col, 1).fillTriangle(x, y - 14 * s, x + 8 * s, y - 11.5 * s, x, y - 9.5 * s);
-  }
-  drawVillage(g: any, x: number, y: number) {
-    g.fillStyle(0x2a1c0c, 0.22).fillEllipse(x, y + 5, 12, 4);
-    // a little cluster of three thatched houses
-    const house = (hx: number, hy: number, w: number) => {
-      g.fillStyle(0xe7d3a0, 1).fillRect(hx - w / 2, hy, w, w * 0.7);
-      g.lineStyle(0.7, 0x6b4a26, 1).strokeRect(hx - w / 2, hy, w, w * 0.7);
-      g.fillStyle(0x8a5a30, 1).fillTriangle(hx - w / 2 - 1, hy, hx + w / 2 + 1, hy, hx, hy - w * 0.6);
-    };
-    house(x - 4, y - 1, 5);
-    house(x + 4, y - 1, 5);
-    house(x, y - 4, 5.5);
-  }
-  drawRuin(g: any, x: number, y: number) {
-    g.fillStyle(0x2a1c0c, 0.2).fillEllipse(x, y + 5, 11, 4);
-    // crumbled arch: two broken pillars + a partial top
-    g.fillStyle(0xb7ad9a, 1);
-    g.fillRect(x - 6, y - 5, 2.6, 11);
-    g.fillRect(x + 3.4, y - 2, 2.6, 8);
-    g.lineStyle(0.7, 0x5a5247, 1).strokeRect(x - 6, y - 5, 2.6, 11).strokeRect(x + 3.4, y - 2, 2.6, 8);
-    // arch fragment
-    g.lineStyle(2, 0xb7ad9a, 1);
-    g.beginPath(); g.arc(x - 1.5, y - 5, 4.5, Math.PI, Math.PI * 1.7); g.strokePath();
-    // rubble
-    g.fillStyle(0x9aa0a6, 1).fillCircle(x + 1, y + 5, 1.4).fillCircle(x - 3, y + 5.5, 1.1);
-  }
-  drawArmyPin(g: any, x: number, y: number, col: number) {
-    // soft shadow
-    g.fillStyle(0x2a1c0c, 0.3).fillEllipse(x, y + 1, 8, 3);
-    // teardrop pin
-    g.fillStyle(col, 1);
-    g.beginPath();
-    g.arc(x, y - 7, 5, 0, Math.PI * 2);
-    g.fillPath();
-    g.fillTriangle(x - 4, y - 4, x + 4, y - 4, x, y + 2);
-    g.lineStyle(1, 0xf5ecd2, 0.85).strokeCircle(x, y - 7, 5);
-    // sword motif on the disc
-    g.lineStyle(1.2, 0xffffff, 0.92);
-    g.lineBetween(x, y - 10, x, y - 4);          // blade
-    g.lineBetween(x - 2, y - 5.5, x + 2, y - 5.5); // crossguard
+  estimateRemainingCost(): number {
+    let c = (1 - this.subProgress) * (this.path.length ? Math.max(0.5, this.pathfinder.tileCost(this.path[0].col, this.path[0].row)) : 0);
+    for (let i = 1; i < this.path.length; i++) {
+      c += Math.max(0.5, this.pathfinder.tileCost(this.path[i].col, this.path[i].row));
+    }
+    return c;
   }
 
-  // small dashed / dotted line + dashed rect helpers
-  dottedLine(g: any, x1: number, y1: number, x2: number, y2: number, col: number, alpha: number, dash: number, gap: number) {
+  dotted(g: Phaser.GameObjects.Graphics, x1: number, y1: number, x2: number, y2: number) {
     const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
-    if (len < 1) return;
+    if (len < 0.001) return;
+    const dash = 6 / this.zoom, gap = 5 / this.zoom;
     const ux = dx / len, uy = dy / len;
-    g.lineStyle(1.4, col, alpha);
     for (let d = 0; d < len; d += dash + gap) {
       const e = Math.min(d + dash, len);
       g.lineBetween(x1 + ux * d, y1 + uy * d, x1 + ux * e, y1 + uy * e);
     }
   }
-  dashedRect(g: any, x: number, y: number, w: number, h: number, col: number, alpha: number) {
-    this.dottedLine(g, x, y, x + w, y, col, alpha, 6, 4);
-    this.dottedLine(g, x + w, y, x + w, y + h, col, alpha, 6, 4);
-    this.dottedLine(g, x + w, y + h, x, y + h, col, alpha, 6, 4);
-    this.dottedLine(g, x, y + h, x, y, col, alpha, 6, 4);
+
+  worldToScreen(wx: number, wy: number): { x: number; y: number } {
+    const cam = this.cameras.main;
+    return { x: (wx - cam.scrollX) * this.zoom, y: (wy - cam.scrollY) * this.zoom };
   }
 
-  // --- Illustrated legend box (bottom-left corner of the map) ---
-  drawLegend() {
-    const g = this.icons;
-    const x = MX + 8, y = MY + MAP_PX - 118, w = 150, h = 110;
-    g.fillStyle(0xe9dab2, 0.88).fillRoundedRect(x, y, w, h, 6);
-    g.lineStyle(1.5, 0x6b4a26, 0.85).strokeRoundedRect(x, y, w, h, 6);
-    this.iconText.add(this.add.text(x + 8, y + 6, 'Legend', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#3a2810', fontStyle: 'bold italic' }));
-    const rows: Array<[string, (gx: number, gy: number) => void]> = [
-      ['Your castle', (gx, gy) => this.drawCastle(g, gx, gy)],
-      ['Enemy keep', (gx, gy) => this.drawFortress(g, gx, gy, 0xd64a4a, 0.7)],
-      ['Village', (gx, gy) => this.drawVillage(g, gx, gy)],
-      ['Ruins', (gx, gy) => this.drawRuin(g, gx, gy)],
-      ['Goblin camp', (gx, gy) => { g.lineStyle(2, 0x7a1414, 1); g.lineBetween(gx - 4, gy - 4, gx + 4, gy + 4).lineBetween(gx - 4, gy + 4, gx + 4, gy - 4); }],
-    ];
-    let ry = y + 26;
-    for (const [label, draw] of rows) {
-      draw(x + 16, ry + 4);
-      this.iconText.add(this.add.text(x + 34, ry - 3, label, { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#4a3418' }));
-      ry += 16;
-    }
+  // =========================================================================
+  // FOG OF WAR
+  // =========================================================================
+  initFog() {
+    const cells = Math.ceil(this.world.size / FOG_CELL);
+    this.fogCells = cells;
+    this.fogExplored = new Uint8Array(cells * cells);
+    // A screen-space dark overlay image that we redraw when exploration changes.
+    const key = 'continent_fog';
+    if (this.textures.exists(key)) this.textures.remove(key);
+    // The fog texture is the whole world at 1 px per fog-cell, scaled up under
+    // the camera. We draw it as a world-space image so it pans with the map.
+    const tex = this.textures.createCanvas(key, cells, cells);
+    this.fogTex = tex;
+    this.fogImg = this.add.image(0, 0, key).setOrigin(0, 0).setDepth(15);
+    this.fogImg.setScale((this.world.size * PX_PER_TILE) / cells);
+    this._fogDirty = true;
   }
 
-  // (V2 P2) Council aftermath — restyled to fit the illustrated map.
-  drawCouncilAftermath(iso: any, g: any) {
-    const ce = iso._councilEffect; if (!ce) return;
-    const castle = iso.buildings && iso.buildings.castle;
-    const facCastle = (key: string) => { const k = (iso.kingdoms || []).find((x: any) => x.cfg.key === key); return k && k.castleAlive ? this.toScreen(k.castleCol, k.castleRow) : null; };
-    if (ce.type === 'trade' && castle) {
-      const home = this.toScreen(castle.col, castle.row);
-      for (const key of ce.participants || []) {
-        const p = facCastle(key); if (!p) continue;
-        // illustrated golden trade route (dashed) + a coin marker
-        this.dottedLine(g, home.x, home.y, p.x, p.y, 0xe0b24a, 0.85, 5, 4);
-        g.fillStyle(0xf2cf5a, 1).fillCircle(p.x, p.y - 18, 3.2);
-        g.lineStyle(1, 0x8a6a20, 0.9).strokeCircle(p.x, p.y - 18, 3.2);
+  fogIndex(col: number, row: number): number {
+    const cx = Math.floor(col / FOG_CELL), cy = Math.floor(row / FOG_CELL);
+    return cy * this.fogCells + cx;
+  }
+  fogLifted(col: number, row: number): boolean {
+    if (col < 0 || row < 0 || col >= this.world.size || row >= this.world.size) return false;
+    return this.fogExplored[this.fogIndex(col, row)] === 1;
+  }
+
+  revealAroundPlayer() {
+    this.revealCircle(GameWorld.player.col, GameWorld.player.row, FOG_REVEAL);
+    // Reveal around player-owned settlements once.
+    if (!this._revealedHome) {
+      for (const s of this.world.settlements) {
+        if (s.kind === 'player_castle') this.revealCircle(s.col, s.row, FOG_REVEAL + 4);
       }
-    } else if (ce.type === 'enemy' && ce.target) {
-      const p = facCastle(ce.target);
-      if (p) {
-        g.lineStyle(3.2, 0x9c2b2b, 1);
-        g.lineBetween(p.x - 9, p.y - 21, p.x + 9, p.y - 9);
-        g.lineBetween(p.x - 9, p.y - 9, p.x + 9, p.y - 21);
-        g.lineStyle(1, 0x3a0a0a, 0.6);
-        g.lineBetween(p.x - 9, p.y - 21, p.x + 9, p.y - 9);
-        g.lineBetween(p.x - 9, p.y - 9, p.x + 9, p.y - 21);
+      this._revealedHome = true;
+    }
+  }
+
+  revealCircle(col: number, row: number, radiusTiles: number) {
+    const cells = this.fogCells;
+    const r = Math.ceil(radiusTiles / FOG_CELL) + 1;
+    const ccx = Math.floor(col / FOG_CELL), ccy = Math.floor(row / FOG_CELL);
+    let changed = false;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const fx = ccx + dx, fy = ccy + dy;
+        if (fx < 0 || fy < 0 || fx >= cells || fy >= cells) continue;
+        if (Math.hypot(dx, dy) > r) continue;
+        const i = fy * cells + fx;
+        if (this.fogExplored[i] === 0) { this.fogExplored[i] = 1; changed = true; }
       }
-    } else if (ce.type === 'peace' && castle) {
-      const p = this.toScreen(castle.col, castle.row - 20);
-      g.fillStyle(0xfdfaf0, 0.97); g.fillCircle(p.x, p.y, 3.4);
-      g.lineStyle(2, 0xfdfaf0, 0.95); g.beginPath(); g.arc(p.x - 4, p.y - 1, 4, -0.4, 1.2); g.strokePath(); g.beginPath(); g.arc(p.x + 4, p.y - 1, 4, 1.9, 3.5); g.strokePath();
-    } else if (ce.type === 'highking') {
-      for (const k of iso.kingdoms || []) { if (!k.castleAlive) continue; const p = this.toScreen(k.castleCol, k.castleRow); g.lineStyle(2, 0xe0b24a, 0.9); g.strokeCircle(p.x, p.y - 6, 13); }
-      if (castle) { const p = this.toScreen(castle.col, castle.row); g.lineStyle(2.6, 0xf2cf5a, 1); g.strokeCircle(p.x, p.y - 6, 15); }
+    }
+    if (changed) this._fogDirty = true;
+  }
+
+  rebuildFog() {
+    const ctx = this.fogTex.getContext();
+    const cells = this.fogCells;
+    ctx.clearRect(0, 0, cells, cells);
+    const img = ctx.createImageData(cells, cells);
+    for (let i = 0; i < this.fogExplored.length; i++) {
+      const o = i * 4;
+      if (this.fogExplored[i] === 1) {
+        img.data[o + 3] = 0; // explored → transparent
+      } else {
+        img.data[o] = 8; img.data[o + 1] = 11; img.data[o + 2] = 18;
+        img.data[o + 3] = 220; // unexplored → near-opaque dark
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    this.fogTex.refresh();
+  }
+
+  // =========================================================================
+  // HUD
+  // =========================================================================
+  buildHud() {
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH);
+    // Top bar.
+    this.hudBar = fix(this.add.rectangle(0, 0, GAME_W, 34, 0x2a1d0e, 0.92).setOrigin(0, 0));
+    fix(this.add.rectangle(0, 34, GAME_W, 2, 0xc9a14a, 0.7).setOrigin(0, 0));
+
+    this.hudLeft = fix(this.add.text(14, 8, '', {
+      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#ffe9b0', fontStyle: 'bold',
+    }));
+    this.hudCenter = fix(this.add.text(GAME_W / 2, 8, '', {
+      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#f0e6d0',
+    }).setOrigin(0.5, 0));
+    this.hudRight = fix(this.add.text(GAME_W - 14, 8, '', {
+      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#f0e6d0',
+    }).setOrigin(1, 0));
+
+    // "Return to Realm" / menu button (top-right under the bar).
+    const by = 46;
+    const btn = fix(this.add.rectangle(GAME_W - 70, by, 120, 26, 0x6b4a26).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
+    fix(this.add.text(GAME_W - 70, by, 'Menu (Esc)', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5));
+    btn.on('pointerover', () => btn.setFillStyle(0x82602f));
+    btn.on('pointerout', () => btn.setFillStyle(0x6b4a26));
+    btn.on('pointerdown', () => { this._uiClick = true; });
+    btn.on('pointerup', () => { this._uiClick = true; this.toMainMenu(); });
+    this.input.keyboard?.on('keydown-ESC', () => this.toMainMenu());
+  }
+
+  updateHud() {
+    const settleCount = this.world.settlements.filter((s: Settlement) => s.kind === 'player_castle').length;
+    this.hudLeft.setText(`${GameWorld.king.kingdom}   ·   ${settleCount} settlement${settleCount === 1 ? '' : 's'}`);
+    const biome = biomeData(this.world.tileBiome[GameWorld.player.row * this.world.size + GameWorld.player.col]);
+    this.hudCenter.setText(`Day ${GameWorld.displayDay()}  |  ${GameWorld.season()}  |  ${biome.displayName}`);
+    const st = GameWorld.supplyState();
+    const supplyTag = st === 'red' ? ' (!)' : '';
+    this.hudRight.setText(`Supply ${Math.ceil(GameWorld.player.supply)}d${supplyTag}    Army ${GameWorld.armySize()}    Gold ${Math.floor(GameWorld.gold)}`);
+  }
+
+  // =========================================================================
+  // MINIMAP — whole-world overview + dots (bottom-right).
+  // =========================================================================
+  buildMinimap() {
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 5);
+    const MM = 180; // minimap px size on screen
+    this.mmSize = MM;
+    this.mmX = GAME_W - MM - 12;
+    this.mmY = GAME_H - MM - 12;
+    this._mmVisible = true;
+
+    // Build the overview texture once (whole world at 1 px/tile → 1500×1500),
+    // displayed scaled down to MM×MM.
+    const key = this.chunks.buildOverviewTexture('continent_overview', 1);
+    this.mmFrame = fix(this.add.rectangle(this.mmX - 4, this.mmY - 4, MM + 8, MM + 8, 0x2a1d0e, 0.92).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.8));
+    this.mmImg = fix(this.add.image(this.mmX, this.mmY, key).setOrigin(0, 0));
+    this.mmImg.setDisplaySize(MM, MM);
+    this.mmImg.setInteractive({ useHandCursor: true });
+    this.mmImg.on('pointerdown', () => { this._uiClick = true; });
+    this.mmImg.on('pointerup', (p: Phaser.Input.Pointer) => {
+      this._uiClick = true;
+      // Click the minimap → recentre the camera there.
+      const lx = (p.x - this.mmX) / MM, ly = (p.y - this.mmY) / MM;
+      const wx = lx * this.world.size * PX_PER_TILE, wy = ly * this.world.size * PX_PER_TILE;
+      this.followParty = false;
+      this.cameras.main.centerOn(wx, wy);
+    });
+
+    // Dots layer (redrawn each frame).
+    this.mmDots = fix(this.add.graphics());
+  }
+
+  toggleMinimap() {
+    this._mmVisible = !this._mmVisible;
+    this.mmFrame.setVisible(this._mmVisible);
+    this.mmImg.setVisible(this._mmVisible);
+    this.mmDots.setVisible(this._mmVisible);
+  }
+
+  updateMinimap() {
+    if (!this._mmVisible) return;
+    const g = this.mmDots;
+    g.clear();
+    const MM = this.mmSize, size = this.world.size;
+    const toMM = (col: number, row: number) => ({ x: this.mmX + (col / size) * MM, y: this.mmY + (row / size) * MM });
+    // Known settlements.
+    for (const s of this.world.settlements) {
+      if (!this.fogLifted(s.col, s.row) && s.kind !== 'player_castle') continue;
+      const p = toMM(s.col, s.row);
+      let col = 0xfff3c4;
+      if (s.kind === 'player_castle') col = this.colorOf(GameWorld.playerColor);
+      else if (s.kind === 'ai_castle') col = 0xd64a4a;
+      else if (s.kind === 'goblin_camp') col = 0x7cb342;
+      g.fillStyle(col, 1); g.fillRect(p.x - 1, p.y - 1, 3, 3);
+    }
+    // AI parties (where fog lifted).
+    for (const ai of GameWorld.aiParties) {
+      if (!this.fogLifted(Math.round(ai.col), Math.round(ai.row))) continue;
+      const p = toMM(ai.col, ai.row);
+      g.fillStyle(ai.color, 1); g.fillCircle(p.x, p.y, 1.6);
+    }
+    // Player dot (pulses).
+    const pp = toMM(GameWorld.player.col, GameWorld.player.row);
+    g.fillStyle(0xffffff, 1); g.fillCircle(pp.x, pp.y, 3);
+    g.fillStyle(this.colorOf(GameWorld.playerColor), 1); g.fillCircle(pp.x, pp.y, 2);
+    // Camera viewport rectangle.
+    const cam = this.cameras.main;
+    const vx = this.mmX + (cam.scrollX / (size * PX_PER_TILE)) * MM;
+    const vy = this.mmY + (cam.scrollY / (size * PX_PER_TILE)) * MM;
+    const vw = ((cam.width / this.zoom) / (size * PX_PER_TILE)) * MM;
+    const vh = ((cam.height / this.zoom) / (size * PX_PER_TILE)) * MM;
+    g.lineStyle(1, 0xffffff, 0.7);
+    g.strokeRect(vx, vy, vw, vh);
+  }
+
+  colorOf(rgb: number): number { return rgb & 0xffffff; }
+
+  // =========================================================================
+  // HOVER tooltips (settlements + AI parties).
+  // =========================================================================
+  onHover(p: Phaser.Input.Pointer) {
+    const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+    const t = this.pxToTile(wp.x, wp.y);
+    // AI party?
+    for (const ai of GameWorld.aiParties) {
+      if (!this.fogLifted(Math.round(ai.col), Math.round(ai.row))) continue;
+      if (Phaser.Math.Distance.Between(t.col, t.row, ai.col, ai.row) <= 2) {
+        const fac = this.world.factions.find((f: any) => f.key === ai.factionKey);
+        this.showTip(p, `${fac ? fac.name : ai.factionKey}\nEst. army ${ai.armyEstimate}\n${ai.destLabel}`);
+        return;
+      }
+    }
+    // Settlement?
+    for (const s of this.world.settlements) {
+      if (!this.fogLifted(s.col, s.row) && s.kind !== 'player_castle') continue;
+      if (Phaser.Math.Distance.Between(t.col, t.row, s.col, s.row) <= 2) {
+        const status = s.kind === 'player_castle' ? 'Yours' : s.kind === 'ai_castle' ? 'Enemy hold' : s.kind === 'goblin_camp' ? 'Goblin camp' : s.kind === 'ruin' ? 'Ancient ruin' : 'Neutral';
+        this.showTip(p, `${s.name}\n${status}`);
+        // Highlight if within party interaction range.
+        return;
+      }
+    }
+    this.tip.setVisible(false);
+  }
+
+  showTip(p: Phaser.Input.Pointer, text: string) {
+    this.tip.setText(text).setPosition(p.x, p.y - 8).setVisible(true);
+  }
+
+  // =========================================================================
+  // SETTLEMENT interaction
+  // =========================================================================
+  settlementNearParty(): Settlement | null {
+    let best: Settlement | null = null, bestD = Infinity;
+    for (const s of this.world.settlements) {
+      const d = Phaser.Math.Distance.Between(GameWorld.player.col, GameWorld.player.row, s.col, s.row);
+      if (d <= SETTLE_RANGE && d < bestD) { bestD = d; best = s; }
+    }
+    return best;
+  }
+
+  promptEnterSettlement(s: Settlement) {
+    if (this._modal) return;
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 40);
+    const els: any[] = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.55).setOrigin(0, 0).setInteractive()));
+    const W = 380, H = 150, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 22, `Enter ${s.name}?`, { fontFamily: 'Georgia, serif', fontSize: '18px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    const status = s.kind === 'player_castle' ? 'Your settlement' : s.kind === 'ai_castle' ? 'Enemy hold' : 'Neutral settlement';
+    els.push(fix(this.add.text(GAME_W / 2, y + 52, status, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#cfc1a6' }).setOrigin(0.5, 0)));
+
+    const yes = fix(this.add.rectangle(x + W / 2 - 90, y + H - 36, 150, 34, 0x1f5b3a).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(yes, fix(this.add.text(x + W / 2 - 90, y + H - 36, 'Enter', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const no = fix(this.add.rectangle(x + W / 2 + 90, y + H - 36, 150, 34, 0x6b3a26).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(no, fix(this.add.text(x + W / 2 + 90, y + H - 36, 'Cancel', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+
+    const closeModal = () => { els.forEach(o => o.destroy()); this._modal = null; };
+    this._modal = closeModal;
+    no.on('pointerdown', () => { this._uiClick = true; });
+    no.on('pointerup', () => { this._uiClick = true; closeModal(); });
+    yes.on('pointerdown', () => { this._uiClick = true; });
+    yes.on('pointerup', () => { this._uiClick = true; closeModal(); this.enterSettlement(s); });
+  }
+
+  // Enter a settlement: store its id in shared state and launch the per-settlement
+  // view (IsometricScene stand-in this phase). The stand-in's existing return path
+  // (its menu/back) lands the player back on MainMenu→Continue; to guarantee a
+  // clean RETURN to the continent we instead sleep this scene and resume on wake.
+  enterSettlement(s: Settlement) {
+    GameWorld.currentSettlementId = GameWorld.settlementId(s);
+    // Prefer the real IsometricScene if it can boot clean; we launch it on top
+    // and SLEEP the continent. A small Return overlay in the stand-in (or its own
+    // exit) wakes us. To keep Phase 2 robustly boot-clean, we use a lightweight
+    // in-scene overlay as the settlement view and a guaranteed Return button.
+    this.openSettlementStandIn(s);
+  }
+
+  // A lightweight, guaranteed-boot-clean per-settlement overlay. (Phase 3 turns
+  // this into a real local IsometricScene view; doing the full IsometricScene
+  // boot here risks console errors mid-phase, so we ship the safe overlay that
+  // still demonstrates the enter/leave round-trip via shared state.)
+  openSettlementStandIn(s: Settlement) {
+    if (this._settlementOverlay) return;
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 60);
+    const els: any[] = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x120c08, 1).setOrigin(0, 0).setInteractive()));
+    // Simple illustrated "inside the settlement" panel.
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x1a1208, 1).setOrigin(0, 0)));
+    for (let i = 0; i < 16; i++) {
+      const t = i / 15;
+      els.push(fix(this.add.rectangle(0, i * (GAME_H / 16), GAME_W, GAME_H / 16 + 1, Phaser.Display.Color.GetColor(Math.round(30 + t * 40), Math.round(22 + t * 28), Math.round(14 + t * 16)), 1).setOrigin(0, 0)));
+    }
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H * 0.34, s.name, { fontFamily: 'serif', fontSize: '46px', color: '#e8c66a', fontStyle: 'bold', stroke: '#1a1206', strokeThickness: 8 }).setOrigin(0.5)));
+    const status = s.kind === 'player_castle' ? 'Your settlement' : s.kind === 'ai_castle' ? 'An enemy stronghold' : 'A neutral settlement';
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H * 0.45, status, { fontFamily: 'Georgia, serif', fontSize: '18px', color: '#cfc1a6' }).setOrigin(0.5)));
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H * 0.52, 'Per-settlement view arrives in Phase 3.', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#9a8d72', fontStyle: 'italic' }).setOrigin(0.5)));
+
+    const by = GAME_H * 0.66;
+    const btn = fix(this.add.rectangle(GAME_W / 2, by, 240, 46, 0x6b4a26).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
+    els.push(btn, fix(this.add.text(GAME_W / 2, by, 'Leave settlement', { fontFamily: 'Georgia, serif', fontSize: '16px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5)));
+    btn.on('pointerover', () => btn.setFillStyle(0x82602f));
+    btn.on('pointerout', () => btn.setFillStyle(0x6b4a26));
+    const leave = () => {
+      els.forEach(o => o.destroy());
+      this._settlementOverlay = null;
+      GameWorld.currentSettlementId = null;
+    };
+    btn.on('pointerdown', () => { this._uiClick = true; });
+    btn.on('pointerup', () => { this._uiClick = true; leave(); });
+    this._settlementOverlay = leave;
+  }
+
+  // PUBLIC test hook: programmatically leave any open settlement overlay.
+  leaveSettlement() { if (this._settlementOverlay) this._settlementOverlay(); }
+
+  // =========================================================================
+  // BATTLE trigger
+  // =========================================================================
+  checkEnemyProximity() {
+    let warn = false;
+    for (const ai of GameWorld.aiParties) {
+      const d = Phaser.Math.Distance.Between(GameWorld.player.col, GameWorld.player.row, ai.col, ai.row);
+      if (d <= ENEMY_FIGHT_RANGE) { this.startBattle(ai); return; }
+      if (d <= ENEMY_WARN_RANGE && this.fogLifted(Math.round(ai.col), Math.round(ai.row))) warn = true;
+    }
+    if (warn && !this._battleWarnShown) {
+      this._battleWarnShown = true;
+      this.flashBanner('Enemy army approaching!', 0x8c2b2b);
+      this.time.delayedCall(2500, () => { this._battleWarnShown = false; });
     }
   }
 
-  // --- Night darkening of the parchment + warm settlement light dots ---
-  applyNight(iso: any) {
-    let night = typeof iso._nightness === 'number' ? iso._nightness : 0;
-    if (!night && typeof iso.dayTimer === 'number') {
-      const phase = (iso.dayTimer / 300000) % 1;
-      night = phase >= 0.84 ? (phase - 0.84) / 0.1 : phase < 0.08 ? 1 - phase / 0.08 : 0;
-    }
-    night = Phaser.Math.Clamp(night, 0, 1);
-    this.nightTint.setFillStyle(0x0c1430).setAlpha(0.5 * night);
-    const nd = this.nightDots;
-    nd.clear();
-    if (night > 0.15) {
-      const warm = 0xffdf8c, a = night;
-      const light = (cx: number, cy: number) => { const p = this.toScreen(cx, cy); nd.fillStyle(warm, 0.85 * a).fillCircle(p.x, p.y - 6, 2.2); nd.fillStyle(warm, 0.25 * a).fillCircle(p.x, p.y - 6, 4.5); };
-      const castle = iso.buildings && iso.buildings.castle;
-      if (castle) light(castle.col, castle.row);
-      for (const s of (iso.settlements ? iso.settlements.list : [])) { if (s.owner === 'player' || s.discovered) light(s.col, s.row); }
-      for (const k of (iso.kingdoms || [])) { if (k.castleAlive) light(k.castleCol, k.castleRow); }
+  startBattle(ai: AIParty) {
+    if (this._inBattle) return;
+    this._inBattle = true;
+    // Stop moving; remember where we are for the return drop.
+    this.cancelPath();
+    GameWorld.pendingBattle = {
+      returnCol: GameWorld.player.col, returnRow: GameWorld.player.row,
+      enemyPartyId: ai.id, enemyFaction: ai.factionKey,
+    };
+    // Build the enemy army from the AI estimate (mostly warriors + a few archers).
+    const warriors = Math.max(1, Math.round(ai.armyEstimate * 0.7));
+    const archers = Math.max(0, ai.armyEstimate - warriors);
+    const enemyArmy = [{ type: 'warrior', count: warriors }];
+    if (archers > 0) enemyArmy.push({ type: 'archer', count: archers });
+
+    // Pause continent, launch BattleScene with the existing contract.
+    this.scene.pause();
+    this.scene.launch('BattleScene', {
+      playerArmy: GameWorld.player.army.map(g => ({ type: g.type, count: g.count, battles: g.battles || 0 })),
+      enemyArmy,
+      terrainType: this.battleTerrain(),
+      enemyFaction: ai.factionKey,
+      onComplete: (res: any) => this.onBattleComplete(res, ai),
+    });
+  }
+
+  battleTerrain(): string {
+    const b = this.world.tileBiome[GameWorld.player.row * this.world.size + GameWorld.player.col];
+    // Map biome → BattleScene terrain palette.
+    switch (b) {
+      case 7: case 9: return 'forest';      // LUSH/ALPINE FOREST
+      case 8: case 10: return 'mountains';  // HIGHLAND/PEAK
+      case 4: case 3: return 'wildlands';   // DESERT/SCRUBLAND
+      default: return 'plains';
     }
   }
 
-  updateStats() {
-    const iso = this.iso;
-    const pct = iso.territory ? iso.territory.percentOwned.toFixed(1) : '0';
-    const owned = iso.settlements ? iso.settlements.ownedCount() : 0;
-    const total = iso.settlements ? iso.settlements.total() : 0;
-    const hostile = (iso.kingdoms || []).filter((k) => k.castleAlive && iso.gameDay >= k.startDay).length;
-    const camps = iso.goblinCamps ? iso.goblinCamps.aliveCount() : 0;
-    const season = iso.seasonHint ? iso.seasonHint(iso.gameDay) : '';
-    this.statsText.setText([
-      `Day ${iso.gameDay}  ·  ${season}`,
-      `Realm: ${pct}% of the continent`,
-      `Settlements: ${owned}/${total}   ·   Camps: ${camps}`,
-      `Hostile kingdoms: ${hostile}`,
-    ].join('\n'));
-    const r = iso.resources;
-    this.resText.setText([
-      `Wood ${Math.floor(r.wood)}   Stone ${Math.floor(r.stone)}`,
-      `Food ${Math.floor(r.food)}   Gold ${Math.floor(r.gold)}`,
-      `Iron ${Math.floor(r.iron)}`,
-    ].join('\n'));
-  }
-
-  // Hover tooltip over settlements / caravans.
-  onHover(p) {
-    const iso = this.iso;
-    let hit = null;
-    for (const s of iso.settlements ? iso.settlements.list : []) {
-      if (s.owner !== 'player' && !s.discovered) continue;
-      const sp = this.toScreen(s.col, s.row);
-      if (Phaser.Math.Distance.Between(p.x, p.y, sp.x, sp.y) < 9) { hit = { x: sp.x, y: sp.y, txt: `${s.name} — ${s.owner === 'player' ? 'Yours' : 'Neutral'} · ${s.note}` }; break; }
+  onBattleComplete(res: any, ai: AIParty) {
+    this._inBattle = false;
+    try { this.scene.resume(); } catch (e) { /* ignore */ }
+    // Restore survivors into the player party.
+    if (res && Array.isArray(res.army)) {
+      GameWorld.player.army = res.army.filter((g: any) => g.count > 0).map((g: any) => ({ type: g.type, count: g.count }));
+      if (!GameWorld.player.army.length) GameWorld.player.army = [{ type: 'warrior', count: 1 }];
     }
-    if (!hit && this._caravanDots) for (const d of this._caravanDots) { if (Phaser.Math.Distance.Between(p.x, p.y, d.x, d.y) < 7) { hit = d; break; } }
-    if (hit) this.tip.setText(hit.txt).setPosition(hit.x, hit.y - 12).setVisible(true);
-    else this.tip.setVisible(false);
-  }
-
-  // Click a player settlement / castle → zoom local view there; close.
-  onClick(p) {
-    const iso = this.iso;
-    const t = this.toTile(p.x, p.y);
-    if (t.col < 0 || t.row < 0 || t.col >= N || t.row >= N) return;
-    let target = null;
-    for (const s of iso.settlements ? iso.settlements.list : []) {
-      if (s.owner !== 'player') continue;
-      if (Phaser.Math.Distance.Between(t.col, t.row, s.col, s.row) <= 3) { target = { col: s.col, row: s.row }; break; }
+    if (res && res.victory) {
+      if (res.loot && res.loot.gold) GameWorld.gold += res.loot.gold;
+      // Defeated enemy party leaves the map.
+      const i = GameWorld.aiParties.indexOf(ai);
+      if (i >= 0) GameWorld.aiParties.splice(i, 1);
+      this.flashBanner('Victory! The enemy host is broken.', 0x2a7a4f);
+    } else {
+      // Push the player back home-ward a little on defeat.
+      this.flashBanner('Your army was defeated.', 0x8c2b2b);
+      // Move the enemy party off so it doesn't instantly re-trigger.
+      ai.col = Phaser.Math.Clamp(ai.col + 6, 1, this.world.size - 2);
+      GameWorld.pickAIObjective(ai);
     }
-    const castle = iso.buildings.castle;
-    if (!target && castle && Phaser.Math.Distance.Between(t.col, t.row, castle.col, castle.row) <= 4) target = { col: castle.col, row: castle.row };
-    if (target) this.close(target);
+    GameWorld.pendingBattle = null;
+    // Drop back on the continent at the battle location (already there).
+    const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
+    this.cameras.main.centerOn(pp.x, pp.y);
   }
 
-  // (Bug 3) Normal close: fade out, then hand back to the world.
-  close(focus?: any) {
+  // =========================================================================
+  // Banner / tutorial / menu
+  // =========================================================================
+  flashBanner(text: string, color: number) {
+    this.banner.setText(text).setBackgroundColor('#' + (color & 0xffffff).toString(16).padStart(6, '0') + 'dd').setVisible(true).setAlpha(1);
+    this.tweens.killTweensOf(this.banner);
+    this.tweens.add({ targets: this.banner, alpha: 0, delay: 2000, duration: 700, onComplete: () => this.banner.setVisible(false) });
+  }
+
+  showTutorialOnce() {
+    let seen = false;
+    try { seen = !!localStorage.getItem('kg_continent_tut'); } catch (e) { /* ignore */ }
+    if (seen) return;
+    try { localStorage.setItem('kg_continent_tut', '1'); } catch (e) { /* ignore */ }
+    this.time.delayedCall(600, () => {
+      this.flashBanner('Left-click to march · right-drag to pan · wheel to zoom · click a town to enter', 0x6b4a26);
+    });
+  }
+
+  toMainMenu() {
     if (this._closing) return;
     this._closing = true;
-    this._focus = focus || null;
-    const finish = () => this.finishClose();
-    try {
-      this.cameras.main.fadeOut(180, 20, 14, 8);
-      this.cameras.main.once('camerafadeoutcomplete', finish);
-      this.time.delayedCall(500, finish);
-    } catch (e) {
-      finish();
+    // Detach every chunk Image from its texture BEFORE we tear textures down, so
+    // no Image renders a removed CanvasTexture during the fade (canvas renderer
+    // would crash on a null frame). update() is already short-circuited by
+    // _closing, so nothing rebinds them.
+    this.detachChunkImages();
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.time.delayedCall(280, () => {
+      this.scene.start('MainMenuScene'); // SHUTDOWN handler (onShutdown) frees textures
+    });
+  }
+
+  // Point all chunk images (active + pooled) at the permanent blank texture and
+  // hide them, so they hold no reference to a chunk texture about to be removed.
+  detachChunkImages() {
+    if (this.activeChunkImgs) {
+      for (const img of this.activeChunkImgs.values()) { try { img.setTexture('continent_blank').setVisible(false); } catch (e) { /* ignore */ } }
+      this.activeChunkImgs.clear();
     }
+    if (this.chunkPool) {
+      for (const img of this.chunkPool) { try { img.setTexture('continent_blank').setVisible(false); } catch (e) { /* ignore */ } }
+    }
+    if (this.fogImg) { try { this.fogImg.setVisible(false); } catch (e) { /* ignore */ } }
   }
 
-  // (Bug 3) Guaranteed escape hatch (Escape key): instant.
-  forceClose() {
+  onShutdown() {
     this._closing = true;
-    this.finishClose();
+    this.detachChunkImages();
+    try { this.chunks && this.chunks.destroy(); } catch (e) { /* ignore */ }
+    if (this._modal) { try { this._modal(); } catch (e) { /* ignore */ } }
+    if (this._settlementOverlay) { try { this._settlementOverlay(); } catch (e) { /* ignore */ } }
   }
 
-  // (Bug 3) The single, idempotent hand-back to IsometricScene.
-  finishClose() {
-    if (this._finished) return;
-    this._finished = true;
-    const iso = this.iso || this.scene.get('IsometricScene');
-    try { if (this._focus && iso) { const w = iso.tileCenter(this._focus.col, this._focus.row); iso.cameras.main.centerOn(w.x, w.y); } } catch (e) {}
-    try {
-      this.scene.resume('IsometricScene');
-      if (iso && iso.cameras && iso.cameras.main) iso.cameras.main.fadeIn(220, 8, 12, 18);
-    } catch (e) {}
-    try { this.scene.stop(); } catch (e) {}
-  }
-
-  update(time, delta) {
-    this._refresh += delta;
-    if (this._refresh >= 500) { this._refresh = 0; this.rebuildMap(); } // keep armies / territory fresh
-  }
-}
-
-// --- tiny deterministic PRNG (no deps) for stable parchment / motif jitter ---
-function mulberry(seed: number) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function rgba(col: number, a: number) {
-  return 'rgba(' + ((col >> 16) & 255) + ',' + ((col >> 8) & 255) + ',' + (col & 255) + ',' + a + ')';
+  // The minimap dots are refreshed in update via updateMinimap, but update() does
+  // a lot; keep the call here so it always runs after layout.
+  postUpdate() { /* reserved */ }
 }
