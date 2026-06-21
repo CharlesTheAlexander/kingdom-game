@@ -260,6 +260,11 @@ export class ArmyManager {
     army._count.setText('' + this.totalUnits(army));
     const m = army.morale, mc = m >= 60 ? 0x4ad66b : m >= 30 ? 0xe6c84a : 0xd64a4a;
     army._dot.clear(); army._dot.fillStyle(mc, 1).fillCircle(0, 10, 3.5);
+    // (V2 Phase 3) Hero portrait badge on the army icon.
+    const hero = this.scene.heroes && army.faction === 'player' ? this.scene.heroes.byArmy(army.id) : null;
+    const pk = hero ? 'hero_' + hero.id : null;
+    if (pk && this.scene.textures.exists(pk)) { if (!army._heroIcon) { army._heroIcon = this.scene.add.image(16, -10, pk).setDisplaySize(20, 20).setDepth(9999.5); army.sprite.add(army._heroIcon); } army._heroIcon.setVisible(true); }
+    else if (army._heroIcon) army._heroIcon.setVisible(false);
   }
 
   selectArmy(army) {

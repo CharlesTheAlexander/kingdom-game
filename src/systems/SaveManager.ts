@@ -43,6 +43,7 @@ export function capture(scene: any) {
     banking: scene.banking && scene.banking.serialize ? scene.banking.serialize() : null,
     greatCouncil: scene.greatCouncil && scene.greatCouncil.serialize ? scene.greatCouncil.serialize() : null,
     leaders: scene.leaders && scene.leaders.serialize ? scene.leaders.serialize() : null,
+    heroes: scene.heroes && scene.heroes.serialize ? scene.heroes.serialize() : null,
     roads: scene.roads && scene.roads.serialize ? scene.roads.serialize() : null,
     stats: { battlesWon: scene._battlesWon || 0 },
     kingdomStats: scene.stats && scene.stats.serialize ? scene.stats.serialize() : null,
@@ -183,6 +184,7 @@ export function applySave(scene: any, data: any) {
   sect('banking', () => { if (data.banking && scene.banking) scene.banking.restore(data.banking); });
   sect('greatCouncil', () => { if (data.greatCouncil && scene.greatCouncil) scene.greatCouncil.restore(data.greatCouncil); });
   sect('leaders', () => { if (data.leaders && scene.leaders) scene.leaders.restore(data.leaders); });
+  sect('heroes', () => { if (data.heroes && scene.heroes) scene.heroes.restore(data.heroes); });
   sect('roads', () => { if (data.roads && scene.roads) scene.roads.restore(data.roads); });
   sect('winConditions', () => { if (data.winConditions && scene.winConditions) scene.winConditions.restore(data.winConditions); if (data.stats) scene._battlesWon = data.stats.battlesWon || 0; });
   sect('ruins', () => { if (data.ruins && scene.ruins) scene.ruins.restore(data.ruins); });

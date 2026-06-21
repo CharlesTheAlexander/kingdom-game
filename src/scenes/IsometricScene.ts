@@ -59,6 +59,7 @@ import { Banking } from '../systems/Banking.js';
 import { GreatCouncil } from '../systems/GreatCouncil.js';
 import { Roads } from '../systems/Roads.js';
 import { FactionLeaders } from '../systems/FactionLeaders.js';
+import { Heroes } from '../systems/Heroes.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -288,6 +289,7 @@ export class IsometricScene extends GameScene {
     this.DAY_SECONDS = DAY_MS / 1000;
     this.diplomacy = new Diplomacy(this); // Phase 7: relationships with kingdoms
     this.leaders = new FactionLeaders(this); // (V2 Phase 1) named AI rulers
+    this.heroes = new Heroes(this); // (V2 Phase 3) named heroes
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -944,6 +946,44 @@ export class IsometricScene extends GameScene {
     if (b && b._floatIcon) { b._floatIcon.setVisible(false); this._iconHidden = b; }
     if (b && b.typeKey === 'treasury') this.openTreasuryPanel(); // (Completion Phase 3) banking UI
     else this.closeTreasuryPanel();
+    if (b && b.typeKey === 'hallofheroes') this.openHeroPanel(); // (V2 Phase 3)
+    else this.closeHeroPanel();
+  }
+
+  // (V2 Phase 3) Hall of Heroes — living heroes (assign to army) + fallen.
+  closeHeroPanel() { if (this._heroPanel) { this._heroPanel.forEach((o) => o.destroy()); this._heroPanel = null; } }
+  openHeroPanel() {
+    this.closeHeroPanel();
+    const H = this.heroes; if (!H) return;
+    const fix = (o) => o.setScrollFactor(0).setDepth(120);
+    const W = 560, ht = 360, x = (GAME_W - W) / 2, y = (GAME_H - ht) / 2, els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.55).setOrigin(0, 0).setInteractive()));
+    els.push(fix(this.add.rectangle(x, y, W, ht, 0x161b26, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(x + W / 2, y + 12, 'HALL OF HEROES', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    const close = fix(this.add.text(x + W - 14, y + 12, '✕', { fontFamily: 'monospace', fontSize: '18px', color: '#cbb787' }).setOrigin(1, 0).setInteractive({ useHandCursor: true }));
+    close.on('pointerdown', () => this.closeHeroPanel()); els.push(close);
+    const live = H.living(), fall = H.fallen();
+    if (!live.length && !fall.length) els.push(fix(this.add.text(x + 24, y + 48, 'No heroes yet. They arrive through world events.', { fontFamily: 'monospace', fontSize: '13px', color: '#9aa0a6' })));
+    let ry = y + 44;
+    for (const h of live) {
+      const pk = 'hero_' + h.id;
+      if (this.textures.exists(pk)) els.push(fix(this.add.image(x + 18, ry, pk).setOrigin(0, 0).setDisplaySize(48, 48)));
+      els.push(fix(this.add.text(x + 74, ry, `${h.name}, ${h.title}`, { fontFamily: 'monospace', fontSize: '13px', color: '#ffe9b0', fontStyle: 'bold' })));
+      els.push(fix(this.add.text(x + 74, ry + 16, `Lv ${h.level}  ·  ${h.passive}`, { fontFamily: 'monospace', fontSize: '10px', color: '#cfc1a6', wordWrap: { width: 320 } })));
+      els.push(fix(this.add.rectangle(x + 74, ry + 38, 200, 5, 0x000000, 0.5).setOrigin(0, 0)));
+      els.push(fix(this.add.rectangle(x + 74, ry + 38, 200 * Phaser.Math.Clamp(h.xp / Math.max(1, H.xpForNext(h)), 0, 1), 5, 0x66ddff).setOrigin(0, 0)));
+      const armies = this.armyMgr ? this.armyMgr.playerArmies() : [];
+      const cur = armies.find((a) => a.id === h.armyId);
+      const lbl = cur ? `In: ${cur.name}` : (armies.length ? 'Assign →' : 'No army');
+      const ab = fix(this.add.rectangle(x + W - 116, ry + 6, 100, 26, armies.length ? 0x2d6cb0 : 0x39393f).setOrigin(0, 0).setStrokeStyle(1, 0xf0e6c8, 0.8));
+      els.push(ab); els.push(fix(this.add.text(x + W - 66, ry + 19, lbl, { fontFamily: 'monospace', fontSize: '11px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+      if (armies.length) ab.setInteractive({ useHandCursor: true }).on('pointerdown', () => { const idx = cur ? (armies.findIndex((a) => a.id === h.armyId) + 1) : 0; const next = armies[idx]; H.assign(h.id, next ? next.id : null); this.openHeroPanel(); });
+      ry += 58;
+    }
+    if (fall.length) { els.push(fix(this.add.text(x + 24, ry + 2, 'FALLEN — fighting in their memory (+5 morale each)', { fontFamily: 'monospace', fontSize: '11px', color: '#9aa6b6' }))); ry += 22; }
+    for (const h of fall) { els.push(fix(this.add.text(x + 28, ry, `† ${h.name} the ${h.title} — fell day ${h.deathDay} at ${h.deathLocation}`, { fontFamily: 'monospace', fontSize: '11px', color: '#7d8389' }))); ry += 18; }
+    this._heroPanel = els;
+    if (this.routeCameras) this.routeCameras();
   }
 
   // (Completion Phase 3) Treasury banking panel — reserves, interest, loans.
@@ -2451,7 +2491,7 @@ export class IsometricScene extends GameScene {
     // (Phase 3) K&C category panels.
     else if (this.panelMode === 'cat_castle') this.renderCastlePanel();
     else if (this.panelMode === 'cat_food') this.renderCategoryBuild('FOOD', ['farm', 'tavern', 'house']);
-    else if (this.panelMode === 'cat_industry') this.renderCategoryBuild('INDUSTRY', ['lumberyard', 'mine', 'sawmill', 'stonecutter', 'blacksmith', 'market', 'library', 'watchtower', 'treasury', 'siegeworkshop', 'grandhall']);
+    else if (this.panelMode === 'cat_industry') this.renderCategoryBuild('INDUSTRY', ['lumberyard', 'mine', 'sawmill', 'stonecutter', 'blacksmith', 'market', 'library', 'watchtower', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall']);
     else if (this.panelMode === 'cat_military') this.renderMilitaryPanel();
     else if (this.panelMode === 'build') this.renderDefaultPanel();
     // (Phase 3) 'none' → no panel (just the category bar). Map filled the screen.
@@ -2831,7 +2871,7 @@ export class IsometricScene extends GameScene {
       // (Gameplay change 1) No daily limit — trade as long as resources allow.
       const can = b.workers > 0 && this.resources.canAfford(give);
       // (Phase 4) Merchant trait + reputation improve what you receive.
-      const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0) + ((this._researchMarketMult || 1) - 1);
+      const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0) + ((this._researchMarketMult || 1) - 1) + ((this._heroMarket || 1) - 1); // (V2 P3) Caelan
       this.spriteButton(x, this.PANEL_Y + 30, 132, 40, label.split(' → ')[0] + '→', label.split(' → ')[1], can, () => {
         this.resources.spend(give); for (const [r, v] of Object.entries(get) as [string, number][]) this.resources.add(r, Math.round(v * mult)); if (this.reputation) this.reputation.add('merchant', 3); if (this.stats) this.stats.note('marketTrades'); this.refreshPanel();
       });
@@ -3107,6 +3147,7 @@ export class IsometricScene extends GameScene {
 
   onArmyBattleComplete(army, res, ctx) {
     this._inBattle = false; this.scene.resume();
+    if (this.heroes) this.heroes.onBattle(army.id, !!(res && res.victory), (ctx && ctx.enemyCount) || 0); // (V2 Phase 3) hero XP
     this.armyMgr.setUnitsFromBattle(army, res.army);
     if (res && res.victory) {
       this._lastBattleWonDay = this.gameDay;
@@ -3722,6 +3763,7 @@ export class IsometricScene extends GameScene {
     if (this.research) this.research.onNewDay(); // (Phase 5) research progress
     if (this.banking) this.banking.onNewDay(); // (Completion Phase 3) interest + loan handling
     if (this.greatCouncil) this.greatCouncil.onNewDay(); // (Completion Phase 4) council effects
+    if (this.heroes) this.heroes.checkArrivals(); // (V2 Phase 3) hero arrivals
     // (Completion Phase 7) Advance Siege Workshop training.
     for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths

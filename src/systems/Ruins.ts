@@ -156,6 +156,7 @@ export class Ruins {
     ruin.explored = true;
     this.paint(ruin.g, ruin); // excavated look + flag
     this.applyReward(ruin);
+    if (this.scene.heroes) this.scene.heroes.offer('mira'); // (V2 Phase 3) Mira found in a ruin
     if (this.scene.stats) this.scene.stats.note('ruinsExplored');
     this.scene.refreshPanel && this.scene.refreshPanel();
   }

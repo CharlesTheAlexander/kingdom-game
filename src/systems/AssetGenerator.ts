@@ -256,6 +256,14 @@ const BUILD: Record<string, (g: any, A: number) => void> = {
     g.fillStyle(0x9aa0a6, 1); g.fillCircle(38, 37, 3); // payload
     flag(g, 31, 16, 8, A);
   },
+  hallofheroes: (g, A) => {
+    box(g, 14, 30, 36, 28, STONE);
+    g.fillStyle(ROOF, 1); g.fillRect(12, 24, 40, 8);
+    for (const sx of [22, 32, 42]) { g.fillStyle(0xcfc7b4, 1); g.fillRect(sx - 3, 36, 6, 20); g.fillStyle(0xe8e2d0, 1); g.fillCircle(sx, 34, 4); } // hero statues
+    g.fillStyle(DOOR, 1); g.fillRect(29, 46, 6, 12);
+    flag(g, 16, 12, 8, A); flag(g, 48, 12, 8, A);
+    g.fillStyle(0xc9a84c, 1); g.beginPath(); g.moveTo(32, 16); for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + k * 4 * Math.PI / 5; g.lineTo(32 + Math.cos(a) * 5, 22 + Math.sin(a) * 5); } g.closePath(); g.fill(); // star
+  },
   grandhall: (g, A) => {
     box(g, 12, 28, 40, 30, STONE);                       // grand wide hall
     g.fillStyle(ROOF, 1); g.fillRect(10, 22, 44, 8);     // entablature
@@ -672,9 +680,29 @@ export function generatePortraits(scene: any) {
   });
 }
 
+// ---- V2 Phase 3: hero portraits (80x80) ------------------------------------
+export function generateHeroPortraits(scene: any) {
+  const face = (key: string, skin: number, hair: number, accent: number, draw?: (ctx: any) => void) => objSheet(scene, key, 1, 80, 80, (ctx) => {
+    ctx.fillStyle = '#1a1f28'; ctx.fillRect(0, 0, 80, 80); ctx.fillStyle = '#2a3242'; ctx.fillRect(2, 2, 76, 76);
+    ctx.fillStyle = css(accent); ctx.fillRect(8, 62, 64, 18); // shoulders
+    ctx.fillStyle = css(skin); ctx.beginPath(); ctx.arc(40, 40, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = css(hair); ctx.beginPath(); ctx.arc(40, 30, 24, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#20140c'; ctx.fillRect(31, 39, 4, 3); ctx.fillRect(46, 39, 4, 3);
+    if (draw) draw(ctx);
+    ctx.strokeStyle = '#c9a14a'; ctx.lineWidth = 2; ctx.strokeRect(2, 2, 76, 76);
+  });
+  face('hero_aldric', 0xd8b48c, 0x9aa0a6, 0x7a8088, (ctx) => { ctx.fillStyle = '#cfcfcf'; ctx.fillRect(26, 50, 28, 12); }); // gray beard, armor
+  face('hero_maren', 0xe6c2a0, 0xeae0c8, 0xeef0f4, (ctx) => { ctx.fillStyle = 'rgba(255,242,168,0.6)'; ctx.beginPath(); ctx.arc(40, 58, 10, 0, Math.PI * 2); ctx.fill(); }); // healing light
+  face('hero_caelan', 0xe0b890, 0x3a2a1a, 0x6a3aa0, (ctx) => { ctx.fillStyle = '#c9a84c'; ctx.beginPath(); ctx.arc(58, 50, 4, 0, Math.PI * 2); ctx.fill(); }); // coin
+  face('hero_mira', 0xd8b48c, 0x2f5a2f, 0x3a6a3a, (ctx) => { ctx.fillStyle = '#2f5a2f'; ctx.beginPath(); ctx.arc(40, 26, 26, Math.PI * 1.05, -Math.PI * 0.05); ctx.fill(); }); // green hood
+  face('hero_tomas', 0xe0c4a0, 0xeef0f4, 0x5a5a6a, (ctx) => { ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1.5; ctx.strokeRect(28, 36, 10, 8); ctx.strokeRect(42, 36, 10, 8); }); // spectacles
+  face('hero_ravel', 0xcda884, 0x3a2a1a, 0xd6c04a, (ctx) => { ctx.strokeStyle = '#a04a3a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(48, 30); ctx.lineTo(54, 46); ctx.stroke(); }); // scar, yellow armor
+}
+
 // Master entry — generates the entire game's art. Call once at scene create().
 export function generateAll(scene: any) {
   generatePortraits(scene);
+  generateHeroPortraits(scene);
   generateTerrain(scene);
   generateBuildings(scene);
   generateAIBuildings(scene);

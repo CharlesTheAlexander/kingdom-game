@@ -317,7 +317,10 @@ export class WorldEvents {
     els.push(fix(s.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.55).setOrigin(0, 0).setDepth(110).setInteractive()));
     els.push(fix(s.add.rectangle(x, y, W, H, 0x241a0e, 0.99).setOrigin(0, 0).setDepth(111).setStrokeStyle(3, 0xc9a14a, 0.9)));
     els.push(fix(s.add.text(x + W / 2, y + 22, def.title, { fontFamily: 'monospace', fontSize: '17px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0).setDepth(112)));
-    els.push(fix(s.add.text(x + 24, y + 60, def.body(), { fontFamily: 'monospace', fontSize: '13px', color: '#f0e6d0', wordWrap: { width: W - 48 }, lineSpacing: 4 }).setDepth(112)));
+    // (V2 Phase 3) Hero arrival events show the hero's portrait.
+    const bodyX = (def.heroPortrait && s.textures.exists(def.heroPortrait)) ? x + 92 : x + 24;
+    if (def.heroPortrait && s.textures.exists(def.heroPortrait)) els.push(fix(s.add.image(x + 22, y + 56, def.heroPortrait).setOrigin(0, 0).setDisplaySize(60, 60).setDepth(112)));
+    els.push(fix(s.add.text(bodyX, y + 56, def.body(), { fontFamily: 'monospace', fontSize: '13px', color: '#f0e6d0', wordWrap: { width: W - (bodyX - x) - 24 }, lineSpacing: 4 }).setDepth(112)));
     const choices = def.choices || [{ label: 'OK', effect: () => {} }];
     const bw = Math.min(220, (W - 48) / choices.length - 8);
     choices.forEach((ch, i) => {

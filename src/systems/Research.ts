@@ -54,7 +54,7 @@ export class Research {
     const lib = this.library();
     if (!lib || lib.workers <= 0) return;
     // (Session-1 Phase 3) Wandering Scholar patronage speeds research.
-    const speed = this.scene._researchSpeedMult || 1;
+    const speed = (this.scene._researchSpeedMult || 1) * (this.scene._heroResearch || 1); // (V2 P3) Tomas
     this.progress += (lib.workers >= 2 ? 1.5 : 1) * speed;
     if (this.progress >= 3) this.complete();
   }
