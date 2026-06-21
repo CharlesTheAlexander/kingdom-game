@@ -283,6 +283,30 @@ export class ContinentScene extends Phaser.Scene {
       const p = this.toScreen(t.col, t.row);
       g.fillStyle(col, 1).fillCircle(p.x, p.y, 2);
     }
+    this.drawCouncilAftermath(iso, g); // (V2 P2)
+  }
+
+  // (V2 P2) After a Great Council, the continent shows what was decided:
+  //  trade → golden routes to partners · enemy → red X on the target ·
+  //  peace → a white dove · high king → gold rings around every faction.
+  drawCouncilAftermath(iso: any, g: any) {
+    const ce = iso._councilEffect; if (!ce) return;
+    const castle = iso.buildings && iso.buildings.castle;
+    const facCastle = (key: string) => { const k = (iso.kingdoms || []).find((x: any) => x.cfg.key === key); return k && k.castleAlive ? this.toScreen(k.castleCol, k.castleRow) : null; };
+    if (ce.type === 'trade' && castle) {
+      const home = this.toScreen(castle.col, castle.row);
+      g.lineStyle(2, 0xffd24a, 0.8);
+      for (const key of ce.participants || []) { const p = facCastle(key); if (p) { g.lineBetween(home.x, home.y, p.x, p.y); g.fillStyle(0xffd24a, 0.9).fillCircle(p.x, p.y, 3); } }
+    } else if (ce.type === 'enemy' && ce.target) {
+      const p = facCastle(ce.target); if (p) { g.lineStyle(3, 0xc0392b, 1); g.lineBetween(p.x - 8, p.y - 8, p.x + 8, p.y + 8); g.lineBetween(p.x - 8, p.y + 8, p.x + 8, p.y - 8); }
+    } else if (ce.type === 'peace' && castle) {
+      const p = this.toScreen(castle.col, castle.row - 18); // a small white dove above the realm
+      g.fillStyle(0xffffff, 0.95); g.fillCircle(p.x, p.y, 3);
+      g.lineStyle(2, 0xffffff, 0.9); g.beginPath(); g.arc(p.x - 4, p.y - 1, 4, -0.4, 1.2); g.strokePath(); g.beginPath(); g.arc(p.x + 4, p.y - 1, 4, 1.9, 3.5); g.strokePath();
+    } else if (ce.type === 'highking') {
+      for (const k of iso.kingdoms || []) { if (!k.castleAlive) continue; const p = this.toScreen(k.castleCol, k.castleRow); g.lineStyle(2, 0xffd24a, 0.9); g.strokeCircle(p.x, p.y, 11); }
+      if (castle) { const p = this.toScreen(castle.col, castle.row); g.lineStyle(2.5, 0xffd24a, 1); g.strokeCircle(p.x, p.y, 13); }
+    }
   }
 
   updateStats() {
