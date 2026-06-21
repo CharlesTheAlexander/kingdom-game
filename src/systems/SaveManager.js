@@ -216,6 +216,8 @@ export function applySave(scene, data) {
     scene._inBattle = false;
     scene._loadGraceUntil = (scene.time ? scene.time.now : 0) + 10000;
     if (scene.armyMgr) for (const a of scene.armyMgr.aiArmies()) a._resumeDay = (scene.gameDay || 0) + 3;
+    // (BUG 5) Stop any lingering BattleScene so a load never lands mid-battle.
+    try { if (scene.scene.isActive('BattleScene')) scene.scene.stop('BattleScene'); } catch (e) {}
   });
 
   if (scene.refreshPanel) scene.refreshPanel();

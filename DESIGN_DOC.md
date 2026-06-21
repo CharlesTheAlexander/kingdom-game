@@ -766,3 +766,53 @@ reputation bars). Resource totals captured by wrapping `Resources.add`; counters
 **Decisions:** ruins/factions/discovery are world-space Graphics (no new art);
 caravan "dropdown" rendered as a list; AI-vs-AI war modeled by delaying both kingdoms'
 waves ~5 days; tax applies only to the three specified gold sources, not all gold.
+
+---
+
+## SECTION 20: PLAYTEST BUG FIXES + K&C UI REDESIGN ✅
+
+Six-phase session: fix every playtest bug, then rebuild the UI around the
+Kingdoms-and-Castles philosophy (map-filling, minimal, panels only when needed).
+All phases build clean and were headless-verified at 1440×900 with zero console
+errors; a final 3× burst held a stable framerate.
+
+**Phase 1 — 13 critical bug fixes:**
+1. Soldier cap now counts army units (`soldierTotal` override) and is enforced at
+   every add site (training, mercenaries, expedition returns discharge excess).
+2. Alliance (+80 or treaty) sets `attackModifier 0` and recalls that faction's
+   marching armies; Break Alliance added.
+3. Battles never trigger with 0 enemy units (guards in spawn/arrive/intercept).
+4. AI capped at 2 armies/kingdom, ≤15 units each, 30-unit standing cap.
+5. Loading clears pending battle, blocks battles for 10s, pauses mid-march AI
+   armies 3 days, and stops any lingering BattleScene.
+6. Roaming faction sprites are NaN/bounds-clamped.
+7. Opaque fog overlay (depth 99998, viewport-bounded) hides everything unexplored.
+8. Torches removed entirely (clean removal).
+9. `playerCommanded` persists through deselection; explicit Return-to-Castle resets it.
+10. Offer Ceasefire (100g → −20 rel, 5-day cooldown) with accept/refuse logic.
+11. Flank L/R moves units to the left/right 30% then advances, with an arrow cue.
+12. Battles with >10 units a side render as formation BLOCKS ("Warriors x24").
+13. Discovery toasts slide in bottom-right, small, queued (max 2), auto-dismiss.
+
+**Phase 2 — Fullscreen:** 16:10 design resolution (1440×900) via `Scale.FIT` +
+resize listener; canvas fills the window (dark letterbox, never white).
+
+**Phase 3 — K&C UI:** slim bottom **category bar** (Castle / Food / Industry /
+Military / Research / Armies / Map) replacing the old tabs; panels toggle open
+above the bar, one at a time; default is no panel (map fills the screen). Top-left
+clickable **kingdom identity** (name / ruler-title-stage / pop-happiness / tax);
+centred **resource bar** with click-for-breakdown; top-right status cluster
+(stats / log / menu / messenger). Research renders as a visual tree.
+
+**Phase 4 — Design changes:** Wall building removed → **auto-walls** drawn along
+the territory border by tier (fence→wood→stone→fortification) with a 5s breach
+delay; **unassigned units defend only** (must form an Army to attack); **3 small
+stone deposits** (20 each) near the start; **continent view** restyled (saturated
+biomes, brighter river, star/circle/diamond/X/triangle icons, vignette).
+
+**Phase 5 — BattleScene:** "⚔ Start Battle Now" button appears after 3s to skip
+the timer; formations animate into place during pre-battle.
+
+**Decisions:** building-selection and unit-selection still use the bottom panel
+(functional; world-space floating panels deferred); the Wall type def is retained
+only for save compatibility; centred-resource HUD keeps the existing chip system.
