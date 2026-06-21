@@ -99,6 +99,9 @@ import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js
 import { GameWorld } from '../systems/GameWorld.js';
 import { generateWorld } from '../systems/WorldGenerator.js';
 import { Biome } from '../data/Biomes.js';
+// (Phase 4 Pioneer) Aliased so the in-scene helpers read clearly as a reference
+// to the shared static PioneerSystem (all state lives in GameWorld).
+import { PioneerSystem as PioneerSystemRef } from '../systems/PioneerSystem.js';
 
 // ---- Isometric world constants -------------------------------------------
 // PHASE 3 (Bannerlord rebuild): IsometricScene is now a PER-SETTLEMENT view, so
@@ -231,6 +234,7 @@ export class IsometricScene extends GameScene {
     this._popHud = null; this._kingName = null; this._kingTitle = null; this._kingEls = null; this._logEls = null;
     this._logBtnBadge = null; this._logOpen = false; this._pauseBtn = null; this._paused = false; // (Phase 7) reset on restart
     this._endScreenEls = null; this._speedBeforeEnd = null; this._repExpanded = false; // (Audit FIX 2/5) reset on restart
+    this._pioneerModal = null; this._leaveModal = null; // (Phase 4) reset transient pioneer/leave dialogs
     this._discEls = null; this._promptEls = null; this._taxText = null; this._statsEls = null; this._discQueue = []; this._discActive = []; // (Session-1) reset transient UI
 
     // Day cycle (new this rebuild).
@@ -359,6 +363,13 @@ export class IsometricScene extends GameScene {
     this.ai = null;
     this.kingdoms = [];                       // no AI kingdoms on a local map
     this.DAY_SECONDS = DAY_MS / 1000;
+    // (Phase 4 Pioneer) Specialty production bonus: a founded colony's biome-derived
+    // specialty grants +25% output of its matching raw resource. Stored as a map
+    // resource->multiplier that Buildings.produce() reads (like _seasonFarmMult).
+    this._specialtyMult = {};
+    if (this._settle && this._settle.specialtyResource) {
+      this._specialtyMult[this._settle.specialtyResource] = 1.25;
+    }
     this.diplomacy = this._inertSystem();     // continent-scale (P6)
     this.leaders = this._inertSystem();       // continent-scale (P6)
     this.heroes = this._inertSystem();        // hero system (P6)
@@ -431,6 +442,7 @@ export class IsometricScene extends GameScene {
     this.createLogButton();   // (Expansion Phase 7) notifications log
     this.createStatsButton(); // (Session-1 Phase 6) statistics panel
     this.createPauseButton(); // (Expansion Phase 7) pause control
+    this.createPioneerButton(); // (Phase 4) Send Pioneer Party action
     this.setupHotkeys();      // (Expansion Phase 7) keyboard shortcuts
     this.input.keyboard.on('keydown-S', (e) => { if (this._typing) return; this.quickSave(); });
     // (Phase 3) The old beforeunload auto-save wrote the LEGACY single-scene save
@@ -485,6 +497,11 @@ export class IsometricScene extends GameScene {
       // must be an array, not a method.
       list: [],
       ownedCount: () => 0, total: () => 0,
+      // (Phase 4) Wildlife.spawnGoblinRaid() asks goblinCamps.nearestAliveTo();
+      // goblin camps live on the CONTINENT now, so the local stub returns null
+      // (the raid code already falls back to a region point) — without this the
+      // first in-settlement goblin raid threw a console error.
+      nearestAliveTo: () => null,
     };
   }
 
@@ -565,6 +582,143 @@ export class IsometricScene extends GameScene {
     bg.on('pointerup', () => this.confirmLeave());
     this._leaveBtn = bg; this._leaveTxt = txt;
     this.routeCameras && this.routeCameras();
+  }
+
+  // (Phase 4) "Send Pioneer Party" — only for player-owned settlements. Sits just
+  // below the Leave button, top-right. Opens a confirm modal showing the cost
+  // (10 workers + 200 wood + 100 stone, keep >=5 workers) before dispatching.
+  createPioneerButton() {
+    if (!this._settle || this._settle.faction !== 'player') return; // player towns only
+    const fix = (o: any) => o.setScrollFactor(0);
+    const D = 212;
+    const w = 158, h = 26, x = GAME_W - 46 - w - 8, y = 62;
+    const bg = fix(this.add.rectangle(x, y, w, h, 0x2f5b3a, 0.95).setOrigin(0, 0).setDepth(D).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
+    const txt = fix(this.add.text(x + w / 2, y + h / 2, '⚑ Send Pioneer Party', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5).setDepth(D + 1));
+    bg.on('pointerover', () => bg.setFillStyle(0x3a7049));
+    bg.on('pointerout', () => bg.setFillStyle(0x2f5b3a));
+    bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); });
+    bg.on('pointerup', () => this.confirmSendPioneer());
+    this._pioneerBtn = bg; this._pioneerBtnTxt = txt;
+    this.routeCameras && this.routeCameras();
+  }
+
+  // Confirm dialog → sendPioneer(). Shows cost + requirement status; on confirm,
+  // deducts costs (mirrored from the live scene into the SettlementState first so
+  // PioneerSystem reads the up-to-date stockpile), spawns the party on the
+  // continent at this settlement, and returns the player to the continent to guide
+  // it. (The player may keep building here; the pioneer travels in real time.)
+  confirmSendPioneer() {
+    if (this._pioneerModal || this._leaving) return;
+    // Mirror live resources/population into the persisted state so the cost check
+    // and deduction see current values (saveSettlementState normally does this on
+    // Leave; we do a focused sync here).
+    this.syncSettlementForPioneer();
+    const sys = PioneerSystemRef;
+    const st = this._settle;
+    const haveWorkers = Math.max(st.workers || 0, st.population || 0);
+    const haveWood = st.resources.wood || 0;
+    const haveStone = st.resources.stone || 0;
+    const okWorkers = haveWorkers - sys.PIONEER_WORKER_COST >= sys.PIONEER_MIN_REMAIN;
+    const okWood = haveWood >= sys.PIONEER_WOOD_COST;
+    const okStone = haveStone >= sys.PIONEER_STONE_COST;
+    const canSend = okWorkers && okWood && okStone;
+
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(400);
+    const els: any[] = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.6).setOrigin(0, 0).setInteractive()));
+    const W = 440, H = 230, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 18, 'Send Pioneer Party', { fontFamily: 'Georgia, serif', fontSize: '19px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 48, 'Send colonists to found a new settlement on the continent.', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#cfc1a6', align: 'center', wordWrap: { width: W - 40 } }).setOrigin(0.5, 0)));
+
+    const row = (i: number, label: string, ok: boolean, have: string) => {
+      const ry = y + 78 + i * 22;
+      els.push(fix(this.add.text(x + 30, ry, (ok ? '✓ ' : '✗ ') + label, { fontFamily: 'Georgia, serif', fontSize: '13px', color: ok ? '#9fe6a4' : '#ff9a9a' })));
+      els.push(fix(this.add.text(x + W - 30, ry, have, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#cfc1a6' }).setOrigin(1, 0)));
+    };
+    row(0, `${sys.PIONEER_WORKER_COST} population (keep ${sys.PIONEER_MIN_REMAIN})`, okWorkers, `have ${Math.floor(haveWorkers)}`);
+    row(1, `${sys.PIONEER_WOOD_COST} wood`, okWood, `have ${Math.floor(haveWood)}`);
+    row(2, `${sys.PIONEER_STONE_COST} stone`, okStone, `have ${Math.floor(haveStone)}`);
+
+    const send = fix(this.add.rectangle(x + W / 2 - 100, y + H - 38, 170, 34, canSend ? 0x1f5b3a : 0x39393f).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: canSend }));
+    els.push(send, fix(this.add.text(x + W / 2 - 100, y + H - 38, 'Send', { fontFamily: 'Georgia, serif', fontSize: '14px', color: canSend ? '#fff' : '#888', fontStyle: 'bold' }).setOrigin(0.5)));
+    const cancel = fix(this.add.rectangle(x + W / 2 + 100, y + H - 38, 170, 34, 0x6b3a26).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(cancel, fix(this.add.text(x + W / 2 + 100, y + H - 38, 'Cancel', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+
+    const close = () => { els.forEach(o => o.destroy()); this._pioneerModal = null; };
+    this._pioneerModal = close;
+    cancel.on('pointerup', () => close());
+    send.on('pointerup', () => {
+      if (!canSend) return;
+      close();
+      this.dispatchPioneer();
+    });
+    this.routeCameras && this.routeCameras();
+  }
+
+  // Push the live scene's resources/population into the SettlementState so the
+  // PioneerSystem cost check + deduction operate on current values.
+  syncSettlementForPioneer() {
+    const st = this._settle;
+    if (!st || !this.resources) return;
+    st.resources = st.resources || { wood: 0, stone: 0, food: 0, iron: 0 };
+    st.resources.wood = Math.round(this.resources.wood);
+    st.resources.stone = Math.round(this.resources.stone);
+    st.resources.food = Math.round(this.resources.food);
+    st.resources.iron = Math.round(this.resources.iron || 0);
+    if (this.population) st.population = Math.round(this.population.count || st.population);
+    st.workers = this.buildings ? this.buildings.workersUsed() : (st.workers || 0);
+  }
+
+  // Deduct via PioneerSystem, spawn the party at this settlement, mirror the new
+  // (reduced) stockpile back into the LIVE scene, notify, then return to the
+  // continent so the player can guide the pioneers to their founding site.
+  dispatchPioneer() {
+    const st = this._settle;
+    if (!st) return;
+    // Choose a default founding destination a moderate distance from this town on
+    // passable ground (the player re-guides on the continent). Falls back to the
+    // settlement tile if nothing better is found (still valid to re-guide later).
+    const dest = this.pickDefaultPioneerDest();
+    const res = PioneerSystemRef.sendPioneer(this._settlementId, dest.col, dest.row);
+    if (!res.ok) { this.notify(res.reason || 'Cannot send pioneers.', 0x8c2b2b); return; }
+    // Mirror the reduced stockpile/population back into the LIVE scene so the HUD
+    // and economy reflect the cost immediately.
+    this.resources.wood = st.resources.wood;
+    this.resources.stone = st.resources.stone;
+    if (this.population && typeof st.population === 'number') this.population.count = st.population;
+    this.updateSettlementHud && this.updateSettlementHud();
+    this.notify('Pioneer party dispatched — guide them on the continent!', 0x2a7a4f);
+    if (this.logEvent) this.logEvent('Sent a pioneer party to found a new settlement', 'info');
+    // Return to the continent to guide the pioneers.
+    this.time.delayedCall(500, () => { if (!this._leaving) this.leaveToContinent(); });
+  }
+
+  // Pick a default founding tile: scan a ring of candidate offsets around this
+  // settlement for a passable tile that satisfies the founding rules; else just
+  // aim a bit away (the player can re-guide). Uses GameWorld directly (the
+  // continent biome map) since the local scene has no continent pathfinder.
+  pickDefaultPioneerDest(): { col: number; row: number } {
+    const s = GameWorld.settlementById(this._settlementId);
+    const w = GameWorld.world;
+    if (!s || !w) return { col: 10, row: 10 };
+    const sys = PioneerSystemRef;
+    // Spiral out in rings beyond the min-distance and look for a valid spot.
+    for (let r = sys.FOUND_MIN_DISTANCE + 2; r <= 40; r += 3) {
+      for (let a = 0; a < 12; a++) {
+        const ang = (a / 12) * Math.PI * 2;
+        const c = Math.round(s.col + Math.cos(ang) * r);
+        const rr = Math.round(s.row + Math.sin(ang) * r);
+        if (sys.canFoundAt(c, rr).ok) return { col: c, row: rr };
+      }
+    }
+    // Fallback: a passable tile ~18 away in +x, or the settlement itself.
+    for (const dx of [18, -18, 0]) for (const dy of [0, 18, -18]) {
+      const c = Math.max(0, Math.min(w.size - 1, s.col + dx));
+      const rr = Math.max(0, Math.min(w.size - 1, s.row + dy));
+      if (sys.isPassable(c, rr)) return { col: c, row: rr };
+    }
+    return { col: s.col, row: s.row };
   }
 
   // Confirm dialog → leaveToContinent().
@@ -649,8 +803,12 @@ export class IsometricScene extends GameScene {
   restoreSettlementState() {
     const st = this._settle;
     if (!st) return;
-    // Seed local resources from the persisted stockpile.
-    if (st.visited && st.resources) {
+    // Seed local resources from the persisted stockpile. We apply this on any
+    // revisit (st.visited) AND on the FIRST entry into a player-FOUNDED colony,
+    // so the founding materials carried by the pioneer party (200 wood / 100
+    // stone, deposited into the SettlementState on founding) are present in the
+    // new camp instead of the generic Resources() defaults.
+    if ((st.visited || st.founded) && st.resources) {
       this.resources.wood = st.resources.wood;
       this.resources.stone = st.resources.stone;
       this.resources.food = st.resources.food;

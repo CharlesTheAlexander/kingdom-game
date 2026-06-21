@@ -86,7 +86,51 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       DEFERRED: garrison/population are stored but not yet richly simulated on the local map; administrator
       "while-you-were-away" diffing is a hook (lastVisitedDay) not yet computed (P5-7); the disabled world-scale
       systems need re-homing to the continent in later phases; SaveManager rewrite is P12.
-- [ ] P4 — Pioneer system (found settlements anywhere)
+- [x] P4 — Pioneer system (found settlements anywhere)
+      Files: src/systems/PioneerSystem.ts (NEW — all send/found/specialty/ambush LOGIC, static class, state in
+      GameWorld), src/systems/GameWorld.ts (PioneerParty type + pioneers[] + pioneerCounter, reset in
+      startNewCampaign + serializable), src/systems/SettlementState.ts (added specialty/specialtyResource/founded),
+      src/scenes/ContinentScene.ts (pioneer movement/icons/tooltip/guide/found-prompt + founded-flag icons + ambush
+      tick), src/scenes/IsometricScene.ts (Send Pioneer Party button + confirm/dispatch + _specialtyMult +25% hook +
+      founding-stockpile restore + nearestAliveTo stub fix), src/systems/Buildings.ts (apply _specialtyMult in
+      produce()), src/main.ts (DEV __PioneerSystem hook).
+      INTEGRATION: a PioneerParty is a THIRD continent-party flavour reusing the existing player/AI framework —
+      plain data in GameWorld.pioneers[], advanced each frame by ContinentScene.updatePioneers() with the SAME A*
+      (ContinentPathfinder) + per-biome BASE_TILES_PER_DAY budget as advanceParty/updateAIParties, drawn by
+      layoutIcons() as a player-colour cart/wagon (HP pip) with a hover tooltip (purpose + dest + ETA). No new
+      movement engine; only ARRIVAL behaviour differs ("offer to found" vs fight/patrol).
+      SEND: IsometricScene "⚑ Send Pioneer Party" button (player towns only) → confirm modal showing cost
+      (10 workers/200 wood/100 stone, keep ≥5 workers) → PioneerSystem.sendPioneer(fromId,dc,dr) deducts from the
+      origin SettlementState, spawns the party at the origin tile, returns to the continent to guide it. Also a
+      programmatic test entry point.
+      GUIDE: click a pioneer to select (travelling) then click a tile to set its course (PioneerSystem.guidePioneer);
+      arrived pioneer click → found prompt. Pioneers travel in real time.
+      FOUND: on arrival, "Found Settlement Here?" + DOM name input. tryFound(id,name) validates passable + ≥15 tiles
+      from any settlement + not within 12 tiles of an enemy hold → appends a kind:'player_castle' Settlement
+      (founded:true) to WorldState.settlements (renders immediately as a planted-flag icon) AND creates its tier-1
+      SettlementState (carried 10 pop + 200 wood/100 stone, local map themed by the destination biome via the P3
+      system, empty founding camp) → player can Enter and build up.
+      SPECIALTY by destination biome (stored on Settlement.specialty + SettlementState.specialty/specialtyResource,
+      shown in continent tooltip, applied as +25% in Buildings.produce via scene._specialtyMult): highland/mountain→
+      Iron Colony (+25% iron), forest→Lumber Camp (+25% wood), plains→Farmstead (+25% food), river/wetland→River Post
+      (+25% fish), coast→Harbor Town (+25% fish, future naval).
+      VULNERABILITY: PioneerSystem.tickAmbush(dayDelta) — each continent tick a goblin_camp within 10 tiles of a
+      travelling pioneer deals 4 HP/game-day; pioneers have 20 HP; 0 → party destroyed, resources lost, "Pioneer
+      party was ambushed!" notify (banner + GameWorld.notify). Optional escortStrength halves damage; no-escort never
+      crashes.
+      ICONS: founded settlements = planted-flag (player colour, distinct from conquered castle); pioneers = moving
+      cart with HP pip; both also on the minimap. Notifications fire on found + ambush.
+      Audit (headless, full new-game flow, /tmp/audit/p4_pioneer.mjs): sendPioneer → party exists + moving + costs
+      deducted (wood 400→200, stone 200→100, pop 20→10); fast-forward → tryFound('Newhaven') → Settlement added
+      (Farmstead, +25% food), SettlementState exists, founded flags set, materials deposited, empty camp (0 bldgs),
+      pioneer removed; Enter → IsometricScene active, _specialtyMult{food:1.25}, only castle present; goblin ambush
+      seed → HP 20→0, party wiped, ambush path runs frame-safe. Screenshots p4_continent_pioneer/p4_founded/
+      p4_new_settlement. FPS 57-60; ZERO console errors; tsc clean; build clean. Also fixed a PRE-EXISTING
+      crash: in-settlement goblin raid called goblinCamps.nearestAliveTo() (missing on the inert stub) → added it.
+      REAL vs STUBBED: send/guide/found/specialty/ambush/icons/tooltips/notifications are all REAL. STUBBED/simple:
+      ambush is a proximity-damage model (no pitched escort battle); the in-settlement Send button auto-picks a
+      default founding tile (player re-guides on the continent); colony population growth uses the existing local
+      Population system. DEFERRED: escort armies protecting pioneers (P5/P6), richer colony economy.
 - [ ] P5 — Living expedition system (parties on the continent)
 - [ ] P6 — Hero world integration (dialogue, quests, stationing)
 - [ ] P7 — Diplomatic narrative continuity (leader memory, honor)

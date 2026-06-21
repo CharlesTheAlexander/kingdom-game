@@ -66,6 +66,36 @@ export interface AIParty {
   destLabel: string;
 }
 
+/** (Phase 4 Pioneer) A pioneer/colonist party roaming the continent toward a tile
+ *  the player chose, carrying the founding population + materials. It reuses the
+ *  same A* + per-biome movement as the player/AI parties (ContinentScene drives
+ *  it), but on arrival it can FOUND a brand-new settlement instead of fighting.
+ *  Plain JSON-friendly data so Phase 12's SaveManager can serialize it. */
+export interface PioneerParty {
+  id: string;
+  /** real-time continent position (fractional while moving). */
+  col: number;
+  row: number;
+  /** chosen founding destination tile. */
+  destCol: number;
+  destRow: number;
+  /** founding population carried (the future settlement's starting workers). */
+  workers: number;
+  /** founding materials carried, deposited into the new settlement on founding. */
+  wood: number;
+  stone: number;
+  /** vulnerability: pioneers have HP; goblin proximity damages it; 0 = wiped out. */
+  hp: number;
+  maxHp: number;
+  /** which settlement id this party set out from (for notifications/flavour). */
+  fromSettlementId: string | null;
+  /** 'travelling' (en route), 'arrived' (waiting at dest for a Found decision),
+   *  'founded' (settled — removed from the map) or 'lost' (ambushed). */
+  status: 'travelling' | 'arrived' | 'founded' | 'lost';
+  /** human label for the hover tooltip ("Pioneers → The Frontier"). */
+  destLabel: string;
+}
+
 /** King identity chosen at creation (mirrors the legacy kg_king localStorage). */
 export interface KingInfo { kingdom: string; ruler: string; trait: string | null; }
 
@@ -93,6 +123,13 @@ class GameWorldState {
   };
 
   aiParties: AIParty[] = [];
+
+  /** (Phase 4 Pioneer) live pioneer parties on the continent. ContinentScene
+   *  renders + advances them every frame; PioneerSystem owns the spawn/found logic. */
+  pioneers: PioneerParty[] = [];
+
+  /** Monotonic counter for unique pioneer ids (stable across the session). */
+  pioneerCounter = 0;
 
   gold = 500;
 
@@ -209,6 +246,8 @@ class GameWorldState {
     this.currentSettlementId = null;
     this.pendingBattle = null;
     this.aiParties = [];
+    this.pioneers = [];
+    this.pioneerCounter = 0;
     this.settlementStates = {};
     this.pendingNotifications = [];
     this.spawnAIParties();
@@ -280,6 +319,8 @@ class GameWorldState {
       king: this.king,
       player: this.player,
       aiParties: this.aiParties,
+      pioneers: this.pioneers,
+      pioneerCounter: this.pioneerCounter,
       gold: this.gold,
       day: this.day,
       currentSettlementId: this.currentSettlementId,

@@ -165,12 +165,19 @@ export class Building {
       if (node) {
         // (Balance pass 2) Iron is a scarce strategic resource — a 3-worker iron
         // mine yields ~30/day (chance per tick scales with workers), not 600/day.
-        if (Math.random() < 0.04 * this.workers) { resources.add('iron', 1); if (Math.random() < 0.5 && node.harvest) node.harvest(); }
+        // (Phase 4 Pioneer) Iron Colony specialty raises the per-tick chance +25%.
+        const ironMult = (scene && scene._specialtyMult && scene._specialtyMult.iron) ? scene._specialtyMult.iron : 1;
+        if (Math.random() < 0.04 * this.workers * ironMult) { resources.add('iron', 1); if (Math.random() < 0.5 && node.harvest) node.harvest(); }
         return;
       }
     }
     if (this.condition < 3) rate *= this.condMult(); // (V2 P6) deterioration cuts output
     if (scene && scene._plagueMult && this.type.maxWorkers > 0) rate *= scene._plagueMult; // (V2 P6) plague
+    // (Phase 4 Pioneer) A founded colony's biome specialty grants +25% on its
+    // matching raw resource (e.g. a Lumber Camp produces +25% wood).
+    if (scene && scene._specialtyMult && this.type.produces && scene._specialtyMult[this.type.produces]) {
+      rate *= scene._specialtyMult[this.type.produces];
+    }
     if (rate > 0) resources.add(this.type.produces, rate);
     // (Feature #3) Mine L4+: occasionally finds iron ore without an expedition.
     if (scene && this.typeKey === 'mine' && this.level >= 4 && this.workers > 0 && Math.random() < 0.10) {

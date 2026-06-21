@@ -59,4 +59,9 @@ if (import.meta.env.DEV) {
   import('./systems/GameWorld.js').then((gw) => {
     (window as any).__gw = gw.GameWorld;
   });
+  // (Phase 4) Expose the Pioneer system so the headless audit can drive
+  // sendPioneer / tryFound / tickAmbush programmatically per the spec.
+  import('./systems/PioneerSystem.js').then((ps) => {
+    (window as any).__PioneerSystem = ps.PioneerSystem;
+  });
 }

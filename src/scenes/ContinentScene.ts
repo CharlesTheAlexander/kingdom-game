@@ -8,6 +8,8 @@ import { ChunkManager, PX_PER_TILE } from '../systems/ChunkManager.js';
 import { ContinentPathfinder } from '../systems/ContinentPathfinder.js';
 import type { PathStep } from '../systems/ContinentPathfinder.js';
 import { biomeData } from '../data/Biomes.js';
+import { PioneerSystem } from '../systems/PioneerSystem.js';
+import type { PioneerParty } from '../systems/GameWorld.js';
 
 // ============================================================================
 // ContinentScene — Phase 2 (Bannerlord rebuild) PRIMARY game loop.
@@ -144,6 +146,13 @@ export class ContinentScene extends Phaser.Scene {
     this.lastNewDay = GameWorld.displayDay();
     this._closing = false;
 
+    // --- Pioneer movement state (Phase 4) ---------------------------------
+    // Per-pioneer A* path cache (keyed by pioneer id). Each entry holds the
+    // remaining tile steps + sub-step progress + the destination it was planned
+    // for, so we only re-path when a pioneer's destination changes.
+    this._pioneerPaths = new Map();
+    this._pioneerIcons = new Map(); // id -> { container, badge }
+
     // --- Input ------------------------------------------------------------
     this.setupInput();
 
@@ -250,6 +259,28 @@ export class ContinentScene extends Phaser.Scene {
     const t = this.pxToTile(wp.x, wp.y);
     if (t.col < 0 || t.row < 0 || t.col >= this.world.size || t.row >= this.world.size) return;
 
+    // (Phase 4) Clicked a pioneer party? Arrived → found prompt; travelling →
+    // select it so the next click GUIDES it to a new destination tile.
+    for (const pio of GameWorld.pioneers) {
+      if (pio.status === 'founded' || pio.status === 'lost') continue;
+      if (Phaser.Math.Distance.Between(t.col, t.row, pio.col, pio.row) <= 2) {
+        if (pio.status === 'arrived') { this.promptFound(pio); }
+        else { this._selectedPioneerId = pio.id; this.flashBanner('Pioneer selected — click a tile to set their course.', 0x6b4a26); }
+        return;
+      }
+    }
+
+    // (Phase 4) A pioneer is selected → this click GUIDES it to the chosen tile.
+    if (this._selectedPioneerId) {
+      const sel = GameWorld.pioneers.find((x: PioneerParty) => x.id === this._selectedPioneerId);
+      this._selectedPioneerId = null;
+      if (sel && sel.status !== 'founded' && sel.status !== 'lost') {
+        PioneerSystem.guidePioneer(sel.id, t.col, t.row);
+        this.flashBanner('Pioneers set out for their new home.', 0x2a7a4f);
+        return;
+      }
+    }
+
     // Settlement under/near the click within interaction range of the PARTY?
     const near = this.settlementNearParty();
     if (near) {
@@ -326,6 +357,9 @@ export class ContinentScene extends Phaser.Scene {
 
     // --- AI parties -------------------------------------------------------
     this.updateAIParties(delta);
+
+    // --- Pioneer parties (Phase 4): real-time travel + goblin ambush -------
+    this.updatePioneers(delta);
 
     // --- Camera follow ----------------------------------------------------
     if (this.followParty) {
@@ -439,6 +473,77 @@ export class ContinentScene extends Phaser.Scene {
   }
 
   // =========================================================================
+  // PIONEER parties (Phase 4) — advance each along an A* path using the SAME
+  // per-biome movement budget as the player party, then run the goblin ambush
+  // proximity model. Pioneers that reach their destination flip to 'arrived'.
+  // =========================================================================
+  updatePioneers(delta: number) {
+    const dayDelta = delta / DAY_MS;
+    // Drop cached paths/icons for pioneers that no longer exist (founded/lost).
+    const live = new Set<string>(GameWorld.pioneers.map(p => p.id));
+    for (const id of Array.from(this._pioneerPaths.keys()) as string[]) if (!live.has(id)) this._pioneerPaths.delete(id);
+
+    for (const p of GameWorld.pioneers) {
+      if (p.status !== 'travelling') continue;
+      // (Re)plan if we have no cached path, or the destination changed.
+      let pc = this._pioneerPaths.get(p.id);
+      if (!pc || pc.destCol !== p.destCol || pc.destRow !== p.destRow) {
+        const startC = Math.round(p.col), startR = Math.round(p.row);
+        const res = this.pathfinder.find(startC, startR, p.destCol, p.destRow);
+        pc = { path: res.path.slice(), sub: 0, destCol: p.destCol, destRow: p.destRow };
+        this._pioneerPaths.set(p.id, pc);
+        // Snap onto the integer start tile so motion is consistent.
+        p.col = startC; p.row = startR;
+      }
+      // No path (already there, or unreachable) → mark arrived if at destination.
+      if (!pc.path.length) {
+        if (Math.hypot(p.destCol - p.col, p.destRow - p.row) <= 1.5) p.status = 'arrived';
+        continue;
+      }
+      // Advance along the path on the same tile budget as the player party.
+      let tileBudget = dayDelta * BASE_TILES_PER_DAY * 0.85; // slightly slower (laden carts)
+      while (tileBudget > 0 && pc.path.length) {
+        const next = pc.path[0];
+        const cost = Math.max(0.5, this.pathfinder.tileCost(next.col, next.row));
+        const tileFraction = tileBudget / cost;
+        const remaining = 1 - pc.sub;
+        if (tileFraction >= remaining) {
+          tileBudget -= remaining * cost;
+          p.col = next.col; p.row = next.row;
+          pc.sub = 0;
+          pc.path.shift();
+          if (!pc.path.length) { p.status = 'arrived'; break; }
+        } else {
+          pc.sub += tileFraction;
+          tileBudget = 0;
+        }
+      }
+    }
+
+    // Goblin ambush proximity model (documented in PioneerSystem.tickAmbush).
+    const lost = PioneerSystem.tickAmbush(dayDelta);
+    if (lost.length) {
+      this.flashBanner('Pioneer party was ambushed!', 0x8c2b2b);
+      for (const p of lost) { this._pioneerPaths.delete(p.id); this.removePioneerIcon(p.id); }
+    }
+  }
+
+  // PUBLIC test hook: instantly fast-forward a pioneer to its destination tile and
+  // mark it 'arrived' (so headless tests don't need to simulate minutes of travel).
+  fastForwardPioneer(id: string): boolean {
+    const p = GameWorld.pioneers.find((x: PioneerParty) => x.id === id);
+    if (!p || p.status === 'founded' || p.status === 'lost') return false;
+    p.col = p.destCol; p.row = p.destRow; p.status = 'arrived';
+    this._pioneerPaths.delete(id);
+    return true;
+  }
+
+  removePioneerIcon(id: string) {
+    const ic = this._pioneerIcons.get(id);
+    if (ic) { try { ic.container.destroy(); } catch (e) { /* ignore */ } this._pioneerIcons.delete(id); }
+  }
+
+  // =========================================================================
   // CHUNK RENDER — bind pooled images to ChunkManager's visible texture keys.
   // =========================================================================
   refreshChunks() {
@@ -542,6 +647,51 @@ export class ContinentScene extends Phaser.Scene {
       g.lineBetween(-3, -3, 3, -3);
       g.setPosition(ap.x, ap.y);
       g.setScale(1 / this.zoom * 0.9 + 0.1);
+      this.iconLayer.add(g);
+    }
+
+    // (Phase 4) Founded-settlement flag icons. The chunk overview texture was
+    // baked at world-gen, so settlements created AFTER (player-founded camps) are
+    // not in it — we draw a distinct planted-flag marker for them here, in the
+    // player colour, so they appear on the continent the instant they are founded.
+    const sc = 1 / this.zoom * 0.9 + 0.1;
+    for (const s of this.world.settlements) {
+      if (!(s as any).founded) continue; // only player-founded camps
+      const sp = this.tileToPx(s.col, s.row);
+      const fg = this.add.graphics();
+      fg.fillStyle(0x1a120a, 0.5); fg.fillEllipse(0, 8, 16, 6);   // shadow
+      fg.lineStyle(2, 0x4a3318, 1); fg.lineBetween(0, 9, 0, -14); // flag pole
+      fg.fillStyle(GameWorld.playerColor, 1);                     // pennant in player colour
+      fg.fillTriangle(0, -14, 0, -4, 13, -9);
+      fg.lineStyle(1.2, 0xf5ecd2, 0.9); fg.strokeTriangle(0, -14, 0, -4, 13, -9);
+      fg.setPosition(sp.x, sp.y);
+      fg.setScale(sc);
+      this.iconLayer.add(fg);
+    }
+
+    // (Phase 4) Pioneer cart/wagon icons (always visible — they are the player's
+    // own parties). A wagon body + wheels + a small HP pip, in the player colour.
+    for (const p of GameWorld.pioneers) {
+      if (p.status === 'founded' || p.status === 'lost') continue;
+      const wp = this.tileToPx(p.col, p.row);
+      const g = this.add.graphics();
+      g.fillStyle(0x1a120a, 0.5); g.fillEllipse(0, 7, 22, 6);     // shadow
+      // wagon canopy
+      g.fillStyle(0xf2e8cf, 1);
+      g.fillRoundedRect(-9, -10, 18, 9, 3);
+      g.lineStyle(1.2, 0x6b4a26, 0.95); g.strokeRoundedRect(-9, -10, 18, 9, 3);
+      // wagon bed in player colour
+      g.fillStyle(GameWorld.playerColor, 1); g.fillRect(-10, -1, 20, 4);
+      g.lineStyle(1, 0x2a1c0c, 0.8); g.strokeRect(-10, -1, 20, 4);
+      // wheels
+      g.fillStyle(0x2a1c0c, 1); g.fillCircle(-6, 4, 2.6); g.fillCircle(6, 4, 2.6);
+      // HP pip (green→red) above the cart
+      const hpFrac = Math.max(0, Math.min(1, p.hp / p.maxHp));
+      const hpCol = hpFrac > 0.5 ? 0x4ad06b : hpFrac > 0.25 ? 0xe6c84a : 0xd64a4a;
+      g.fillStyle(0x000000, 0.5); g.fillRect(-9, -16, 18, 3);
+      g.fillStyle(hpCol, 1); g.fillRect(-9, -16, 18 * hpFrac, 3);
+      g.setPosition(wp.x, wp.y);
+      g.setScale(sc);
       this.iconLayer.add(g);
     }
   }
@@ -779,6 +929,13 @@ export class ContinentScene extends Phaser.Scene {
       const p = toMM(ai.col, ai.row);
       g.fillStyle(ai.color, 1); g.fillCircle(p.x, p.y, 1.6);
     }
+    // (Phase 4) Pioneer parties — small player-coloured diamonds.
+    for (const pio of GameWorld.pioneers) {
+      if (pio.status === 'founded' || pio.status === 'lost') continue;
+      const p = toMM(pio.col, pio.row);
+      g.fillStyle(0xffffff, 0.9); g.fillRect(p.x - 1.6, p.y - 1.6, 3.2, 3.2);
+      g.fillStyle(this.colorOf(GameWorld.playerColor), 1); g.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
     // Player dot (pulses).
     const pp = toMM(GameWorld.player.col, GameWorld.player.row);
     g.fillStyle(0xffffff, 1); g.fillCircle(pp.x, pp.y, 3);
@@ -801,6 +958,18 @@ export class ContinentScene extends Phaser.Scene {
   onHover(p: Phaser.Input.Pointer) {
     const wp = this.cameras.main.getWorldPoint(p.x, p.y);
     const t = this.pxToTile(wp.x, wp.y);
+    // (Phase 4) Pioneer party? Tooltip = purpose + destination + ETA.
+    for (const pio of GameWorld.pioneers) {
+      if (pio.status === 'founded' || pio.status === 'lost') continue;
+      if (Phaser.Math.Distance.Between(t.col, t.row, pio.col, pio.row) <= 2) {
+        const eta = this.pioneerETA(pio);
+        const dest = `${Math.round(pio.destCol)}, ${Math.round(pio.destRow)}`;
+        const etaLine = pio.status === 'arrived' ? 'Arrived — ready to found'
+          : `ETA ~${eta} day${eta === 1 ? '' : 's'}`;
+        this.showTip(p, `Pioneer Party\n→ founding site (${dest})\n${etaLine}\nHP ${Math.ceil(pio.hp)}/${pio.maxHp}`);
+        return;
+      }
+    }
     // AI party?
     for (const ai of GameWorld.aiParties) {
       if (!this.fogLifted(Math.round(ai.col), Math.round(ai.row))) continue;
@@ -814,8 +983,16 @@ export class ContinentScene extends Phaser.Scene {
     for (const s of this.world.settlements) {
       if (!this.fogLifted(s.col, s.row) && s.kind !== 'player_castle') continue;
       if (Phaser.Math.Distance.Between(t.col, t.row, s.col, s.row) <= 2) {
-        const status = s.kind === 'player_castle' ? 'Yours' : s.kind === 'ai_castle' ? 'Enemy hold' : s.kind === 'goblin_camp' ? 'Goblin camp' : s.kind === 'ruin' ? 'Ancient ruin' : 'Neutral';
-        this.showTip(p, `${s.name}\n${status}`);
+        const founded = !!(s as any).founded;
+        const status = founded ? 'Founded colony'
+          : s.kind === 'player_castle' ? 'Yours' : s.kind === 'ai_castle' ? 'Enemy hold' : s.kind === 'goblin_camp' ? 'Goblin camp' : s.kind === 'ruin' ? 'Ancient ruin' : 'Neutral';
+        // (Phase 4) Show the colony's specialty label (from its SettlementState).
+        let extra = '';
+        if (founded) {
+          const stt = GameWorld.settlementStates[GameWorld.settlementId(s)];
+          if (stt && stt.specialty) extra = `\n${stt.specialty}`;
+        }
+        this.showTip(p, `${s.name}\n${status}${extra}`);
         // Highlight if within party interaction range.
         return;
       }
@@ -825,6 +1002,19 @@ export class ContinentScene extends Phaser.Scene {
 
   showTip(p: Phaser.Input.Pointer, text: string) {
     this.tip.setText(text).setPosition(p.x, p.y - 8).setVisible(true);
+  }
+
+  // (Phase 4) Rough ETA in days for a travelling pioneer from its cached path.
+  pioneerETA(pio: PioneerParty): number {
+    const pc = this._pioneerPaths.get(pio.id);
+    if (!pc || !pc.path || !pc.path.length) {
+      // No cached path → estimate from straight-line distance on plains cost.
+      const d = Math.hypot(pio.destCol - pio.col, pio.destRow - pio.row);
+      return Math.max(1, Math.round(d / BASE_TILES_PER_DAY));
+    }
+    let cost = (1 - (pc.sub || 0)) * Math.max(0.5, this.pathfinder.tileCost(pc.path[0].col, pc.path[0].row));
+    for (let i = 1; i < pc.path.length; i++) cost += Math.max(0.5, this.pathfinder.tileCost(pc.path[i].col, pc.path[i].row));
+    return Math.max(1, Math.round(cost / (BASE_TILES_PER_DAY * 0.85)));
   }
 
   // =========================================================================
@@ -861,6 +1051,72 @@ export class ContinentScene extends Phaser.Scene {
     no.on('pointerup', () => { this._uiClick = true; closeModal(); });
     yes.on('pointerdown', () => { this._uiClick = true; });
     yes.on('pointerup', () => { this._uiClick = true; closeModal(); this.enterSettlement(s); });
+  }
+
+  // =========================================================================
+  // PIONEER founding (Phase 4) — "Found Settlement Here?" + a name input.
+  // Validates the site (passable, ≥15 tiles from any settlement, not in enemy
+  // territory), shows the destination biome's specialty, takes a name, and on
+  // confirm calls PioneerSystem.tryFound → a new player colony on the continent.
+  // =========================================================================
+  promptFound(pio: PioneerParty) {
+    if (this._modal) return;
+    const col = Math.round(pio.col), row = Math.round(pio.row);
+    const valid = PioneerSystem.canFoundAt(col, row);
+    const biome = this.world.tileBiome[row * this.world.size + col];
+    const spec = PioneerSystem.specialtyForBiome(biome);
+
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 40);
+    const els: any[] = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.6).setOrigin(0, 0).setInteractive()));
+    const W = 420, H = 220, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 18, 'Found Settlement Here?', { fontFamily: 'Georgia, serif', fontSize: '19px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    const biomeName = biomeData(biome).displayName;
+    els.push(fix(this.add.text(GAME_W / 2, y + 48, `${biomeName} site  ·  ${spec.label} (+25% ${spec.resource})`, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#cfc1a6' }).setOrigin(0.5, 0)));
+
+    // DOM name input (canvas-scaling-robust, same approach as KingCreationScene).
+    const input = document.createElement('input');
+    input.type = 'text'; input.placeholder = 'Name your colony'; input.value = 'Newhaven'; input.maxLength = 24;
+    input.style.cssText = `position:fixed;left:50%;transform:translateX(-50%);top:${window.innerHeight / 2 - 18}px;width:280px;padding:7px 9px;font-family:Georgia,serif;font-size:14px;z-index:9999;background:#0e1219;color:#fff;border:1px solid #c9a14a;border-radius:4px;text-align:center;`;
+    document.body.appendChild(input);
+    input.focus(); input.select();
+
+    const reason = valid.ok ? '' : valid.reason || 'Cannot settle here.';
+    if (reason) els.push(fix(this.add.text(GAME_W / 2, y + 96, reason, { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#ff9a9a', align: 'center', wordWrap: { width: W - 40 } }).setOrigin(0.5, 0)));
+
+    const found = fix(this.add.rectangle(x + W / 2 - 95, y + H - 40, 160, 36, valid.ok ? 0x1f5b3a : 0x39393f).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: valid.ok }));
+    els.push(found, fix(this.add.text(x + W / 2 - 95, y + H - 40, 'Found', { fontFamily: 'Georgia, serif', fontSize: '14px', color: valid.ok ? '#fff' : '#888', fontStyle: 'bold' }).setOrigin(0.5)));
+    const cancel = fix(this.add.rectangle(x + W / 2 + 95, y + H - 40, 160, 36, 0x6b3a26).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(cancel, fix(this.add.text(x + W / 2 + 95, y + H - 40, 'Cancel', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+
+    const closeModal = () => {
+      els.forEach(o => o.destroy());
+      try { input.remove(); } catch (e) { /* ignore */ }
+      this._modal = null;
+    };
+    this._modal = closeModal;
+    cancel.on('pointerdown', () => { this._uiClick = true; });
+    cancel.on('pointerup', () => { this._uiClick = true; closeModal(); });
+    found.on('pointerdown', () => { this._uiClick = true; });
+    found.on('pointerup', () => {
+      this._uiClick = true;
+      if (!valid.ok) return;
+      const name = input.value;
+      closeModal();
+      const res = PioneerSystem.tryFound(pio.id, name);
+      this._pioneerPaths.delete(pio.id);
+      this.removePioneerIcon(pio.id);
+      if (res.ok && res.settlement) {
+        // Reveal the new colony, recentre, and offer to enter it.
+        this.revealCircle(res.settlement.col, res.settlement.row, FOG_REVEAL);
+        this._fogDirty = true;
+        this.flashBanner(`${res.settlement.name} founded!`, 0x2a7a4f);
+        this.time.delayedCall(120, () => { if (!this._closing && res.settlement) this.promptEnterSettlement(res.settlement); });
+      } else {
+        this.flashBanner(res.reason || 'Could not found here.', 0x8c2b2b);
+      }
+    });
   }
 
   // Enter a settlement: store its id in shared state and launch the REAL

@@ -83,6 +83,16 @@ export interface SettlementState {
   name: string;
   /** owning faction key ('player' for the home castle). */
   faction: string;
+  /** (Phase 4 Pioneer) biome-derived economic specialty label, e.g. 'Iron Colony'.
+   *  Drives the +25% local-production bonus and the continent tooltip. Optional so
+   *  existing (pre-P4) saved states stay valid; undefined = no specialty. */
+  specialty?: string;
+  /** (Phase 4 Pioneer) which raw resource the specialty boosts (wood/stone/iron/food
+   *  /fish), so production code can apply the +25% without re-deriving from biome. */
+  specialtyResource?: string;
+  /** (Phase 4 Pioneer) true for a settlement the player FOUNDED via a pioneer party
+   *  (vs the starting castle or a conquered hold) — drives the planted-flag icon. */
+  founded?: boolean;
   /** settlement tier index 0..8 (Small Village → Large Castle). */
   tier: number;
   buildings: SavedBuilding[];
