@@ -694,3 +694,29 @@ Other high priority:
 *Git repo: github.com/CharlesTheAlexander/kingdom-game*
 *Local: ~/Desktop/kingdom-game*
 *Dev server: localhost:5174*
+---
+
+## SECTION: OVERNIGHT AUTONOMOUS IMPROVEMENT LOOP ✅
+
+Ran an autonomous play→fix→improve loop. Each loop: headless playthrough to find
+issues, fix CRITICAL/HIGH, then build ONE priority feature fully. Every loop ended
+with `npm run build` passing and a zero-console-error headless verification.
+
+**Pre-loop audit:** game was healthy (all systems pass, console clean, ~38 FPS).
+Added a **Conquest-progress indicator** to the Diplomacy panel (X/total, need N).
+
+**Loop 1 — In-battle unit box-select:** drag a rectangle in BattleScene to select
+specific player units (cyan rings that follow them); command-bar orders apply only
+to the selection (empty selection = whole army); click empty ground to clear.
+
+**Loop 2 — Battlefield terrain bonuses:** high ground (top band) +20% attack,
+river crossing (bottom band) −20% attack, forest (scenery clusters) +30% defense.
+Zones drawn with labels; applied to melee, ranged and area attacks.
+
+**Loop 3 — Building upgrades to 5 levels:** `MAX_LEVEL` 5 with a gentle output
+curve; Mine L4 finds iron, Lumberyard L5 +25%, Farm L5 halves army upkeep,
+Barracks L4 trains Elites (+50%), Barracks L5 unlocks the Champion (1 max).
+
+**Deferred (documented):** Planks/Cut-Stone manufacturing (priority #4) — would add
+the new resource types that Lumberyard-L4 planks / Farm-L4 meat depend on; left for
+a future session rather than half-implemented. Per-loop notes in LOOP_REPORT_*.md.
