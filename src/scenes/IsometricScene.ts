@@ -2535,6 +2535,12 @@ export class IsometricScene extends GameScene {
     }
     // House build button (population housing lives under the kingdom core).
     if (this.buildingUnlocked('house')) this.buildPaletteButton(14, this.PANEL_Y + 64, 92, 44, 'house', this.buildings.canPlace('house', this.resources, this.maxBuildings()).ok);
+    // (Completion Phase 8) Reinforce the castle (+50 max HP, up to 5 times).
+    if (c) {
+      const f = c._fortify || 0;
+      this.panelText(280, this.PANEL_Y + 30, `Fortifications: ${f}/5`, { color: '#cfc1a6', size: '12px' });
+      this.spriteButton(280, this.PANEL_Y + 48, 150, 30, f < 5 ? 'Reinforce Castle' : 'Fully Fortified', '100g → +50 max HP', f < 5 && this.resources.gold >= 100, () => this.reinforceCastle(), { gold: f < 5 });
+    }
     // Upgrade to next tier.
     const uy = this.PANEL_Y + 26;
     if (this.tierIndex < this.TIERS.length - 1) {
@@ -2547,6 +2553,16 @@ export class IsometricScene extends GameScene {
     } else {
       this.spriteButton(GAME_W - 220, uy, 200, 56, 'Large Castle', 'max stage reached', false, null);
     }
+  }
+
+  // (Completion Phase 8) Permanently raise the keep's max HP (5× max).
+  reinforceCastle() {
+    const c = this.buildings.castle; if (!c) return;
+    if ((c._fortify || 0) >= 5) { this.showToast('Castle fully fortified'); return; }
+    if (!this.resources.spend({ gold: 100 })) { this.showToast('Need 100 gold'); return; }
+    c._fortify = (c._fortify || 0) + 1; c.maxHp += 50; c.hp += 50;
+    if (c.refreshHpBar) c.refreshHpBar();
+    this.showToast(`Castle reinforced (+50 HP) — ${c._fortify}/5`); this.refreshPanel();
   }
 
   // (Phase 3) Military category — barracks/tower build, training, expeditions.
@@ -2581,6 +2597,41 @@ export class IsometricScene extends GameScene {
     // Expeditions + Ruins access.
     this.spriteButton(GAME_W - 230, this.PANEL_Y + 28, 100, 28, 'Expeditions', '', true, () => { this.panelMode = 'expedition'; this.refreshPanel(); });
     this.spriteButton(GAME_W - 120, this.PANEL_Y + 28, 100, 28, 'Ruins', '', !!(this.ruins && this.ruins.list.some((r) => r.discovered)), () => { this.panelMode = 'ruins'; this.refreshPanel(); });
+    // (Completion Phase 8) Gold sinks — emergency levy + mercenary hire.
+    const day = this.gameDay || 0;
+    const levyReady = day - (this._lastLevyDay ?? -99) >= 5;
+    this.spriteButton(GAME_W - 348, this.PANEL_Y + 70, 158, 28, levyReady ? 'Emergency Levy' : 'Levy (on cooldown)', '200g → 3 warriors', levyReady && this.resources.gold >= 200 && this.soldierRoom() >= 1, () => this.emergencyLevy(), { gold: true });
+    const mercs = this.troops.warriors.filter((w) => w.mercenary).length;
+    this.spriteButton(GAME_W - 184, this.PANEL_Y + 70, 164, 28, 'Hire Mercenary', `80g  (${mercs}/5)`, mercs < 5 && this.resources.gold >= 80 && this.soldierRoom() > 0, () => this.hireMercenary(), { gold: true });
+  }
+
+  // (Completion Phase 8) Instantly raise 3 warriors (once per 5 days).
+  emergencyLevy() {
+    if ((this.gameDay || 0) - (this._lastLevyDay ?? -99) < 5) { this.showToast('Levy on cooldown'); return; }
+    if (!this.resources.spend({ gold: 200 })) { this.showToast('Need 200 gold'); return; }
+    const c = this.buildings.castle;
+    for (let i = 0; i < 3; i++) this.troops.spawnAt(c.x + Phaser.Math.Between(-30, 30), c.y + Phaser.Math.Between(20, 40));
+    this._lastLevyDay = this.gameDay; this.showToast('Emergency levy — 3 warriors raised'); this.refreshPanel();
+  }
+  hireMercenary() {
+    const mercs = this.troops.warriors.filter((w) => w.mercenary).length;
+    if (mercs >= 5) { this.showToast('Max 5 mercenaries'); return; }
+    if (this.soldierRoom() <= 0) { this.showToast('No soldier capacity'); return; }
+    if (!this.resources.spend({ gold: 80 })) { this.showToast('Need 80 gold'); return; }
+    this.troops.spawnMercenary(); this.refreshPanel();
+  }
+  // (Completion Phase 8) +30 happiness for 150 gold (once per 10 days).
+  distributeWealth() {
+    if ((this.gameDay || 0) - (this._lastTributeDay ?? -99) < 10) { this.showToast('Already distributed recently'); return; }
+    if (!this.resources.spend({ gold: 150 })) { this.showToast('Need 150 gold'); return; }
+    if (this.population) this.population.happiness = Math.min(100, this.population.happiness + 30);
+    this._lastTributeDay = this.gameDay; this.showToast('Wealth distributed — happiness +30'); this.updatePopulationHud && this.updatePopulationHud(); this.refreshPanel();
+  }
+  // (Completion Phase 8) Buy detailed intel on one faction for 5 days.
+  spyOn(key) {
+    if (!this.resources.spend({ gold: 75 })) { this.showToast('Need 75 gold'); return; }
+    const k = (this.kingdoms || []).find((x) => x.cfg.key === key); if (k) k._spyUntil = (this.gameDay || 0) + 5;
+    this.showToast('Spies dispatched — intel for 5 days'); this.refreshPanel();
   }
 
   // (Phase 5) A build-palette button: name on top, cost as icon+number pairs,
@@ -3242,8 +3293,9 @@ export class IsometricScene extends GameScene {
       this.panel.add(this.add.rectangle(16, y + 8, 16, 16, k.cfg.color).setOrigin(0, 0).setStrokeStyle(1, 0x000000, 0.6).setScrollFactor(0));
       this.panelText(40, y + 1, k.cfg.name, { bold: true, color: '#ffffff', size: '16px' });
       const n = k.estimatedArmy();
-      const army = k.castleAlive ? `${scouted ? '' : '~'}${n} ${n === 1 ? 'Warrior' : 'Warriors'}` : 'defeated';
-      this.panelText(40, y + 20, army, { color: '#b9c6d6', size: '11px' });
+      const spied = k._spyUntil && (this.gameDay || 0) < k._spyUntil; // (Completion Phase 8)
+      const army = k.castleAlive ? `${scouted || spied ? '' : '~'}${n} ${n === 1 ? 'Warrior' : 'Warriors'}` : 'defeated';
+      this.panelText(40, y + 20, army, { color: spied ? '#9af0a0' : '#b9c6d6', size: '11px' });
       // Status label — 14px bold, coloured (Bug 7).
       const rel = this.diplomacy ? this.diplomacy.get(key) : 0;
       const relStatus = this.diplomacy ? this.diplomacy.status(key) : 'Neutral';
@@ -3297,8 +3349,18 @@ export class IsometricScene extends GameScene {
       } else {
         this.diploButton(702, y + 1, 116, 32, 'War', '→ -100 rel', 0x5c1a1a, 0x8a2a2a, !!this.diplomacy, () => this.diplomacy.declareWar(key));
       }
+      // (Completion Phase 8) Espionage — 75g buys 5 days of detailed intel.
+      if (spied) {
+        this.panelText(826, y + 2, `INTEL (${Math.max(0, Math.ceil(k._spyUntil - (this.gameDay || 0)))}d)`, { color: '#9af0a0', size: '10px', bold: true });
+        this.panelText(826, y + 16, `~${Math.round((k.barracksCount || 1) * 120 + 200)}g · ${k.regrouping ? 'regrouping' : 'mustering'}`, { color: '#cfc1a6', size: '10px' });
+      } else {
+        this.diploButton(826, y + 1, 96, 32, 'Spy', '75g · 5d', 0x2a4a5c, 0x3a6a7c, this.resources.gold >= 75, () => this.spyOn(key));
+      }
     });
     this.spriteButton(GAME_W - 84, this.PANEL_Y + 4, 76, 20, 'Back', '', true, () => { this.panelMode = 'armies'; this.refreshPanel(); });
+    // (Completion Phase 8) Distribute Wealth — +30 happiness (once per 10 days).
+    const tribReady = (this.gameDay || 0) - (this._lastTributeDay ?? -99) >= 10;
+    this.spriteButton(GAME_W - 250, this.PANEL_Y + PANEL_H - 26, 160, 22, tribReady ? 'Distribute Wealth' : 'Wealth (cooldown)', '150g → +30 happy', tribReady && this.resources.gold >= 150, () => this.distributeWealth(), { gold: tribReady });
   }
 
   // Right-click attacks the nearest enemy castle (any faction), else move/gather.
