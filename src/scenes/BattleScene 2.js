@@ -102,7 +102,6 @@ class BUnit {
     this.hpBg.destroy(); this.hpFill.destroy();
     if (this.blockRect) this.blockRect.destroy();
     if (this.label) this.label.destroy();
-    if (this._selRing) { this._selRing.destroy(); this._selRing = null; } // (Loop 1)
     this.scene.tweens.add({ targets: this.shadow, alpha: 0, duration: 500, onComplete: () => this.shadow.destroy() });
     this.spr.setTintFill(0xff3333);
     this.scene.tweens.add({ targets: this.spr, alpha: 0, angle: this.side === 'player' ? 30 : -30, y: this.y + 6, duration: 600, onComplete: () => this.spr.destroy() });
@@ -112,7 +111,6 @@ class BUnit {
     this.shadow.x = this.x; this.shadow.y = this.y + 22;
     if (this.blockRect) { this.blockRect.x = this.x; this.blockRect.y = this.y; }
     if (this.label) { this.label.x = this.x; this.label.y = this.y + 16; }
-    if (this._selRing) { this._selRing.x = this.x; this._selRing.y = this.y; } // (Loop 1) follow selection
     this.hpBg.x = this.x; this.hpBg.y = this.y - 30;
     this.hpFill.x = this.x - this.hpW / 2; this.hpFill.y = this.y - 30;
   }
@@ -165,55 +163,7 @@ export class BattleScene extends Phaser.Scene {
 
     this.buildHud();
     this.createStartButton(); // (Phase 5) skip the pre-battle timer
-    this.setupBattleInput();  // (Loop 1) in-battle box-select
     this.cameras.main.fadeIn(400, 0, 0, 0);
-  }
-
-  // (Loop 1, Feature #1) Drag a rectangle to select specific player units;
-  // command-bar orders then apply ONLY to the selection (empty selection =
-  // whole army). Click empty ground to clear the selection.
-  setupBattleInput() {
-    this.selectBox = this.add.graphics().setDepth(45);
-    this._drag = null;
-    this.input.on('pointerdown', (p) => {
-      if (this.phase === 'done') return;
-      if (p.y > GAME_H - 120 || p.y < 60) return; // ignore the button bar + top HUD
-      this._drag = { x0: p.x, y0: p.y, moved: false };
-    });
-    this.input.on('pointermove', (p) => {
-      if (!this._drag) return;
-      if (Math.abs(p.x - this._drag.x0) + Math.abs(p.y - this._drag.y0) > 4) this._drag.moved = true;
-      this.selectBox.clear();
-      if (this._drag.moved) {
-        const x = Math.min(p.x, this._drag.x0), y = Math.min(p.y, this._drag.y0), w = Math.abs(p.x - this._drag.x0), h = Math.abs(p.y - this._drag.y0);
-        this.selectBox.fillStyle(0x66ddff, 0.12).fillRect(x, y, w, h);
-        this.selectBox.lineStyle(1.5, 0x66ddff, 0.9).strokeRect(x, y, w, h);
-      }
-    });
-    this.input.on('pointerup', (p) => {
-      if (!this._drag) return;
-      const d = this._drag; this._drag = null; this.selectBox.clear();
-      if (!d.moved) { this.clearBattleSelection(); this.banner.setText(this.phase === 'pre' ? 'Choose a formation — battle begins automatically' : 'Orders apply to the whole army'); return; }
-      const x = Math.min(p.x, d.x0), y = Math.min(p.y, d.y0), w = Math.abs(p.x - d.x0), h = Math.abs(p.y - d.y0);
-      const sel = this.sideUnits('player').filter((u) => u.x >= x && u.x <= x + w && u.y >= y && u.y <= y + h);
-      this.setBattleSelection(sel);
-    });
-  }
-
-  setBattleSelection(units) {
-    this.clearBattleSelection();
-    this.selected = units;
-    for (const u of units) this.addSelRing(u);
-    if (units.length) this.banner.setText(`${units.length} unit${units.length > 1 ? 's' : ''} selected — orders apply to them`);
-  }
-  clearBattleSelection() {
-    for (const u of this.selected || []) { if (u._selRing) { u._selRing.destroy(); u._selRing = null; } }
-    this.selected = [];
-  }
-  addSelRing(u) {
-    if (u._selRing) return;
-    const r = u.block ? (u.blockW / 2 + 4) : 18;
-    u._selRing = this.add.circle(u.x, u.y, r, 0x66ddff, 0).setStrokeStyle(2, 0x66ddff, 0.95).setDepth(13);
   }
 
   // (Phase 5) A "Start Battle Now" button that appears after 3s and skips the
