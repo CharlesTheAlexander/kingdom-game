@@ -205,6 +205,8 @@ export class BattleScene extends Phaser.Scene {
     this.spawnArmy('player', this.cfg.playerArmy || [], 0xffffff);
     this.spawnArmy('enemy', this.cfg.enemyArmy || [], null);
     this.spawnCommander(); // (V2 P5) the King/Queen leads the host
+    this.spawnArmyBanners(); // (Visual P9) planted waving banner at each host
+    this.spawnLeaves();      // (Visual P9) drifting forest leaves
     this.applyFormation('player', 'LINE');
     this.applyFormation('enemy', 'LINE');
 
@@ -356,43 +358,323 @@ export class BattleScene extends Phaser.Scene {
     this.time.delayedCall(3000, () => { if (this.phase === 'pre' && this.startBtn) { this.startBtn.setVisible(true); this.startBtnTxt.setVisible(true); } });
   }
 
-  // Phase 3: terrain-themed battlefield — a banded sky+ground gradient (opaque
-  // rectangles so it fully covers the paused world scene), a horizon haze, and
-  // scattered background scenery sized/dimmed by depth.
+  // (Visual P9) Painterly battlefield with cinematic depth — a dramatic clouded
+  // sky, an atmospheric haze horizon, light shafts, and per-terrain foreground:
+  // plains (perspective grass strokes), forest (tree masses on both flanks +
+  // drifting leaves), mountains (boulders, misty valley, distant peaks). The
+  // terrain bonus ZONES (high ground / river / forest) and their labels are kept.
   drawBattlefield() {
     const p = this.pal;
+    const terrain = this.cfg.terrainType || 'plains';
+    this._terrain = terrain;
     const lerp = (a, b, t) => {
       const ca = Phaser.Display.Color.IntegerToColor(a), cb = Phaser.Display.Color.IntegerToColor(b);
-      const c = Phaser.Display.Color.Interpolate.ColorWithColor(ca, cb, 100, Math.round(t * 100));
+      const c = Phaser.Display.Color.Interpolate.ColorWithColor(ca, cb, 100, Math.round(Phaser.Math.Clamp(t, 0, 1) * 100));
       return Phaser.Display.Color.GetColor(c.r, c.g, c.b);
     };
-    const band = (y, h, color) => this.add.rectangle(0, y, GAME_W, h + 1, color, 1).setOrigin(0, 0).setDepth(-20);
-    const SKY_N = 8, skyH = HORIZON / SKY_N;
-    for (let i = 0; i < SKY_N; i++) band(i * skyH, skyH, lerp(p.sky, p.horizon, i / (SKY_N - 1)));
-    const GR_N = 10, grH = (GAME_H - HORIZON) / GR_N;
-    for (let i = 0; i < GR_N; i++) band(HORIZON + i * grH, grH, lerp(p.horizon, p.ground, i / (GR_N - 1)));
-    // Horizon haze line.
-    this.add.rectangle(0, HORIZON, GAME_W, 3, 0xffffff, 0.06).setOrigin(0, 0).setDepth(-19);
-    // Background scenery clustered near the horizon (non-blocking decoration).
+    this._lerp = lerp;
+
+    // ---- 1. SKY: a deep painterly gradient drawn as a graphics fill ----------
+    const sky = this.add.graphics().setDepth(-30);
+    const SKY_N = 24, skyStep = HORIZON / SKY_N;
+    for (let i = 0; i < SKY_N; i++) {
+      sky.fillStyle(lerp(p.sky, p.horizon, i / (SKY_N - 1)), 1);
+      sky.fillRect(0, i * skyStep, GAME_W, skyStep + 1);
+    }
+    // Warm cinematic light pooling near the horizon centre (the sun's glow).
+    const sunX = GAME_W * 0.5, glow = this.add.graphics().setDepth(-29).setBlendMode(Phaser.BlendModes.ADD);
+    const sunWarm = terrain === 'mountains' ? 0xbfc8d8 : 0xffe0a0;
+    for (let r = 360; r > 0; r -= 24) { glow.fillStyle(sunWarm, 0.018); glow.fillCircle(sunX, HORIZON + 8, r); }
+
+    // ---- 2. CLOUDS: soft layered painterly cloud masses -----------------------
+    this.drawClouds(terrain);
+
+    // ---- 3. LIGHT SHAFTS: cheap god-rays fanning down from the sun ------------
+    const shafts = this.add.graphics().setDepth(-28).setBlendMode(Phaser.BlendModes.ADD);
+    const shaftTint = terrain === 'mountains' ? 0xaab4c8 : 0xfff0c0;
+    for (let i = 0; i < 7; i++) {
+      const a = Phaser.Math.FloatBetween(-0.5, 0.5);
+      const x0 = sunX + a * 120, len = GAME_H * 0.7, spread = 26 + Math.abs(a) * 60;
+      shafts.fillStyle(shaftTint, 0.05);
+      shafts.beginPath();
+      shafts.moveTo(x0 - 10, HORIZON - 30);
+      shafts.lineTo(x0 + 10, HORIZON - 30);
+      shafts.lineTo(x0 + Math.sin(a) * len + spread, HORIZON - 30 + len);
+      shafts.lineTo(x0 + Math.sin(a) * len - spread, HORIZON - 30 + len);
+      shafts.closePath(); shafts.fillPath();
+    }
+    this._shafts = shafts;
+
+    // ---- 4. DISTANT TERRAIN SILHOUETTE on the horizon (atmospheric haze) ------
+    this.drawHorizonMasses(terrain);
+    // Atmospheric haze band blending sky into land.
+    const haze = this.add.graphics().setDepth(-21);
+    for (let i = 0; i < 10; i++) { haze.fillStyle(lerp(p.horizon, p.ground, i / 9), 0.5 - i * 0.03); haze.fillRect(0, HORIZON - 16 + i * 4, GAME_W, 6); }
+    this.add.rectangle(0, HORIZON, GAME_W, 2, 0xffffff, 0.10).setOrigin(0, 0).setDepth(-20);
+
+    // ---- 5. GROUND: painterly gradient + terrain-specific strokes -------------
+    const ground = this.add.graphics().setDepth(-19);
+    const GR_N = 22, grStep = (GAME_H - HORIZON) / GR_N;
+    for (let i = 0; i < GR_N; i++) {
+      ground.fillStyle(lerp(p.horizon, p.ground, i / (GR_N - 1)), 1);
+      ground.fillRect(0, HORIZON + i * grStep, GAME_W, grStep + 1);
+    }
+    // A pool of warm light on the contested centre ground.
+    const groundGlow = this.add.graphics().setDepth(-18).setBlendMode(Phaser.BlendModes.ADD);
+    for (let r = 380; r > 0; r -= 30) { groundGlow.fillStyle(sunWarm, 0.012); groundGlow.fillEllipse(GAME_W * 0.5, GAME_H * 0.62, r * 1.6, r * 0.7); }
+
+    this.drawTerrainGround(terrain);
+
+    // ---- 6. Background scenery clustered near the horizon (decoration) --------
     const key = this.textures.exists(p.deco) ? p.deco : 'iso_rock';
     for (let i = 0; i < p.bg; i++) {
       const x = Phaser.Math.Between(20, GAME_W - 20);
-      const y = Phaser.Math.Between(HORIZON - 14, HORIZON + 70);
-      const t = (y - (HORIZON - 14)) / 84;            // 0 far .. 1 near
-      this.add.image(x, y, key).setScale(0.7 + t * 0.7).setAlpha(0.4 + t * 0.4).setDepth(-18 + Math.round(t * 3)).setTint(0x8090a0);
+      const y = Phaser.Math.Between(HORIZON - 4, HORIZON + 60);
+      const t = (y - (HORIZON - 4)) / 64;            // 0 far .. 1 near
+      this.add.image(x, y, key).setScale(0.6 + t * 0.7).setAlpha(0.32 + t * 0.38).setDepth(-17 + Math.round(t * 3)).setTint(lerp(0x7a8696, p.ground, t));
     }
-    // Vignette.
-    this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0.16).setOrigin(0, 0).setDepth(-10);
+    // Painterly vignette — darkened EDGES that frame the lit centre like a
+    // canvas. Drawn as graded dark bands on each edge (no blend mode → never
+    // bleeds the world scene; the opaque sky/ground above fully covers it).
+    const vig = this.add.graphics().setDepth(-10);
+    const EB = 26;
+    for (let i = 0; i < EB; i++) {
+      vig.fillStyle(0x05060a, 0.32 * Math.pow(1 - i / EB, 1.6));
+      vig.fillRect(0, i * 4, GAME_W, 4);                       // top
+      vig.fillRect(0, GAME_H - 4 - i * 4, GAME_W, 4);          // bottom
+      vig.fillRect(i * 5, 0, 5, GAME_H);                       // left
+      vig.fillRect(GAME_W - 5 - i * 5, 0, 5, GAME_H);          // right
+    }
 
-    // (Loop 2, Feature #2) Terrain bonus zones — drawn so the player can read them.
-    // High ground: a brighter elevated band across the top of the field.
+    // ---- 7. TERRAIN BONUS ZONES (kept — gameplay reads off _hiY / _riverY) ----
     this._hiY = HORIZON + (GAME_H - HORIZON) * 0.22;     // above this = high ground
     this._riverY = GAME_H - 70;                            // below this = river crossing
-    this.add.rectangle(0, HORIZON, GAME_W, this._hiY - HORIZON, 0xffffff, 0.06).setOrigin(0, 0).setDepth(-17);
-    this.add.text(GAME_W / 2, HORIZON + 6, 'High Ground  ·  +20% damage', { fontFamily: 'monospace', fontSize: '11px', color: '#e8e0cc' }).setOrigin(0.5, 0).setAlpha(0.45).setDepth(-16);
-    // River crossing: a blue band along the bottom edge.
-    this.add.rectangle(0, this._riverY, GAME_W, GAME_H - this._riverY, 0x2a5a8a, 0.32).setOrigin(0, 0).setDepth(-17);
-    this.add.text(GAME_W / 2, this._riverY + 4, 'River Crossing  ·  −20% damage', { fontFamily: 'monospace', fontSize: '11px', color: '#cfe0ff' }).setOrigin(0.5, 0).setAlpha(0.55).setDepth(-16);
+    // High ground: a sunlit elevated rise across the top of the field.
+    const hi = this.add.graphics().setDepth(-16).setBlendMode(Phaser.BlendModes.ADD);
+    hi.fillStyle(sunWarm, 0.05); hi.fillRect(0, HORIZON, GAME_W, this._hiY - HORIZON);
+    hi.fillStyle(0xffffff, 0.08); hi.fillRect(0, this._hiY - 3, GAME_W, 3); // ridge highlight
+    this.add.text(GAME_W / 2, HORIZON + 6, 'High Ground  ·  +20% damage', { fontFamily: 'monospace', fontSize: '11px', color: '#fff0cc', stroke: '#3a2c10', strokeThickness: 2 }).setOrigin(0.5, 0).setAlpha(0.5).setDepth(-15);
+    // River crossing: a reflective blue band along the bottom edge.
+    this.drawRiver(this._riverY);
+    this.add.text(GAME_W / 2, this._riverY + 4, 'River Crossing  ·  −20% damage', { fontFamily: 'monospace', fontSize: '11px', color: '#dcefff', stroke: '#0a2030', strokeThickness: 2 }).setOrigin(0.5, 0).setAlpha(0.6).setDepth(-14);
+  }
+
+  // (Visual P9) Soft layered painterly cloud masses drifting across the sky.
+  drawClouds(terrain: string) {
+    const dark = terrain === 'mountains' || terrain === 'forest';
+    const layers = [
+      { y: HORIZON * 0.28, n: 5, sc: 1.3, alpha: dark ? 0.20 : 0.16, tint: dark ? 0x2a2e38 : 0xf6ead0, sp: 5 },
+      { y: HORIZON * 0.55, n: 6, sc: 1.0, alpha: dark ? 0.26 : 0.22, tint: dark ? 0x3a3f4c : 0xfff4dc, sp: 9 },
+    ];
+    this._clouds = [];
+    for (const L of layers) {
+      for (let i = 0; i < L.n; i++) {
+        const cx = (i / L.n) * GAME_W + Phaser.Math.Between(-40, 40);
+        const g = this.add.graphics().setDepth(-27).setBlendMode(dark ? Phaser.BlendModes.NORMAL : Phaser.BlendModes.ADD);
+        // A cloud = a cluster of overlapping soft ellipses.
+        const w = Phaser.Math.Between(120, 220) * L.sc;
+        for (let k = 0; k < 5; k++) {
+          g.fillStyle(L.tint, L.alpha * Phaser.Math.FloatBetween(0.5, 1));
+          g.fillEllipse(Phaser.Math.Between(-w / 2, w / 2), Phaser.Math.Between(-10, 10), Phaser.Math.Between(50, 100) * L.sc, Phaser.Math.Between(22, 40) * L.sc);
+        }
+        g.x = cx; g.y = L.y;
+        this._clouds.push({ g, sp: L.sp * Phaser.Math.FloatBetween(0.7, 1.3) });
+      }
+    }
+  }
+
+  // (Visual P9) Distant horizon masses — peaks / treeline / hills behind the haze.
+  drawHorizonMasses(terrain: string) {
+    const g = this.add.graphics().setDepth(-23);
+    const base = HORIZON + 4;
+    if (terrain === 'mountains') {
+      // Two ranges of distant peaks for depth.
+      g.fillStyle(this._lerp(this.pal.horizon, 0x6a6e7a, 0.5), 0.7);
+      let x = -40; while (x < GAME_W + 40) { const w = Phaser.Math.Between(120, 220), h = Phaser.Math.Between(70, 150); g.fillTriangle(x, base, x + w / 2, base - h, x + w, base); x += w * 0.7; }
+      g.fillStyle(this._lerp(this.pal.horizon, 0x8088a0, 0.7), 0.9);
+      x = -60; while (x < GAME_W + 40) { const w = Phaser.Math.Between(90, 160), h = Phaser.Math.Between(40, 90); g.fillTriangle(x, base, x + w / 2, base - h, x + w, base); g.fillStyle(0xffffff, 0.12); g.fillTriangle(x + w / 2 - 8, base - h + 14, x + w / 2, base - h, x + w / 2 + 8, base - h + 14); g.fillStyle(this._lerp(this.pal.horizon, 0x8088a0, 0.7), 0.9); x += w * 0.8; } // snowcaps
+    } else if (terrain === 'forest') {
+      // A jagged distant treeline silhouette.
+      g.fillStyle(this._lerp(this.pal.horizon, 0x101c12, 0.6), 0.85);
+      let x = -10; while (x < GAME_W + 10) { const w = Phaser.Math.Between(18, 40), h = Phaser.Math.Between(28, 64); g.fillTriangle(x, base, x + w / 2, base - h, x + w, base); x += w * 0.6; }
+    } else {
+      // Plains / wildlands: gentle rolling distant hills.
+      g.fillStyle(this._lerp(this.pal.horizon, this.pal.ground, 0.4), 0.6);
+      for (let i = 0; i < 3; i++) { const cy = base + i * 6; g.fillEllipse(GAME_W * (0.2 + i * 0.3), cy + 30, GAME_W * 0.6, 80); }
+    }
+  }
+
+  // (Visual P9) Terrain-specific foreground ground painting.
+  drawTerrainGround(terrain: string) {
+    const g = this.add.graphics().setDepth(-17);
+    const top = HORIZON + 30;
+    if (terrain === 'plains' || terrain === 'wildlands') {
+      // Perspective grass: short tufts near the horizon, long sweeping strokes
+      // in the foreground (drawn denser/larger toward the bottom).
+      const blade = terrain === 'wildlands' ? 0x6a5f2e : 0x3c5226;
+      const blade2 = terrain === 'wildlands' ? 0x877a3c : 0x52703a;
+      for (let i = 0; i < 900; i++) {
+        const t = Math.pow(Math.random(), 0.6);          // bias toward foreground
+        const y = top + t * (GAME_H - top);
+        const x = Phaser.Math.Between(0, GAME_W);
+        const len = 3 + t * 16, lean = Phaser.Math.FloatBetween(-2, 2) * (1 + t);
+        g.lineStyle(1 + t * 1.2, Math.random() < 0.5 ? blade : blade2, 0.3 + t * 0.4);
+        g.beginPath(); g.moveTo(x, y); g.lineTo(x + lean, y - len); g.strokePath();
+      }
+    } else if (terrain === 'forest') {
+      // Dappled clearing: scattered soft light pools + scattered undergrowth.
+      const dap = this.add.graphics().setDepth(-16).setBlendMode(Phaser.BlendModes.ADD);
+      for (let i = 0; i < 26; i++) { const t = Math.random(); dap.fillStyle(0xcfe0a0, 0.04 + t * 0.05); dap.fillEllipse(Phaser.Math.Between(GAME_W * 0.2, GAME_W * 0.8), Phaser.Math.Between(top + 30, GAME_H - 80), Phaser.Math.Between(40, 120), Phaser.Math.Between(16, 40)); }
+      for (let i = 0; i < 220; i++) { const t = Math.pow(Math.random(), 0.7); const y = top + t * (GAME_H - top); g.lineStyle(1 + t, 0x223a1c, 0.3 + t * 0.3); const x = Phaser.Math.Between(0, GAME_W), len = 4 + t * 10; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Phaser.Math.FloatBetween(-3, 3), y - len); g.strokePath(); }
+    } else { // mountains
+      // Rocky ground: scattered stones and cracks, cool slate tones.
+      for (let i = 0; i < 70; i++) {
+        const t = Math.pow(Math.random(), 0.6); const y = top + 20 + t * (GAME_H - top - 20);
+        const x = Phaser.Math.Between(0, GAME_W), r = 3 + t * 14;
+        const c = this._lerp(0x3a3c44, 0x222329, Math.random());
+        g.fillStyle(c, 0.6); g.fillEllipse(x, y, r * 1.6, r * 0.8);
+        g.fillStyle(0x55585f, 0.4); g.fillEllipse(x - r * 0.2, y - r * 0.2, r * 0.9, r * 0.4); // top light
+      }
+      // A misty valley pooling in the contested centre.
+      const mist = this.add.graphics().setDepth(-15).setBlendMode(Phaser.BlendModes.ADD);
+      for (let i = 0; i < 8; i++) { mist.fillStyle(0xaab4c8, 0.04); mist.fillEllipse(GAME_W * 0.5 + Phaser.Math.Between(-200, 200), GAME_H * 0.5 + i * 18, Phaser.Math.Between(300, 520), Phaser.Math.Between(40, 80)); }
+    }
+    // FOREST FLANKS: dark tree masses pressing in from both sides (drawn over
+    // ground, under units). Done for forest only.
+    if (terrain === 'forest') this.drawForestFlanks();
+  }
+
+  // (Visual P9) Dense dark tree masses crowding both flanks of a forest battle.
+  drawForestFlanks() {
+    const g = this.add.graphics().setDepth(7.5); // over ground, under most units
+    const drawSide = (left: boolean) => {
+      const edge = left ? 0 : GAME_W;
+      const dir = left ? 1 : -1;
+      for (let i = 0; i < 18; i++) {
+        const depth = Math.random();                 // 0 near edge .. 1 reaching in
+        const x = edge + dir * depth * 240 + dir * Phaser.Math.Between(0, 40);
+        const y = Phaser.Math.Between(HORIZON + 40, GAME_H - 40);
+        const h = Phaser.Math.Between(80, 180) * (1 - depth * 0.4);
+        const w = h * 0.6;
+        // trunk
+        g.fillStyle(0x1a130c, 0.9); g.fillRect(x - 4, y - h * 0.25, 8, h * 0.25);
+        // canopy = stacked dark triangles
+        const dark = this._lerp(0x0e1a0e, 0x1c2e16, depth);
+        for (let k = 0; k < 3; k++) { const ch = h * (0.7 - k * 0.18); g.fillStyle(dark, 0.95); g.fillTriangle(x - w / 2, y - h * 0.2 - k * h * 0.22, x, y - h * 0.2 - k * h * 0.22 - ch, x + w / 2, y - h * 0.2 - k * h * 0.22); }
+        // rim light from clearing
+        g.fillStyle(0x4a6a2c, 0.18 * (1 - depth)); g.fillTriangle(x - w / 2 + 2, y - h * 0.3, x, y - h * 0.9, x - w / 2 + 8, y - h * 0.3);
+      }
+    };
+    drawSide(true); drawSide(false);
+  }
+
+  // (Visual P9) A reflective river band along the bottom of the field.
+  drawRiver(y: number) {
+    const g = this.add.graphics().setDepth(-15);
+    const h = GAME_H - y;
+    for (let i = 0; i < h; i += 3) { g.fillStyle(this._lerp(0x2a5a8a, 0x14406a, i / h), 0.5); g.fillRect(0, y + i, GAME_W, 3); }
+    // Shimmer streaks.
+    const sh = this.add.graphics().setDepth(-14).setBlendMode(Phaser.BlendModes.ADD);
+    for (let i = 0; i < 30; i++) { sh.fillStyle(0xbfe0ff, Phaser.Math.FloatBetween(0.04, 0.12)); const sy = y + Phaser.Math.Between(4, h - 4); sh.fillRect(Phaser.Math.Between(0, GAME_W - 120), sy, Phaser.Math.Between(40, 120), 1.5); }
+    // Bank highlight.
+    g.fillStyle(0xbfe0ff, 0.10); g.fillRect(0, y, GAME_W, 2);
+  }
+
+  // (Visual P9) Per-frame battle atmosphere: drifting clouds, waving army
+  // banners, and (forest) drifting leaves. All cheap, no per-frame allocations.
+  updateAtmosphere(dt: number, time: number) {
+    // Drift clouds; wrap around the screen.
+    if (this._clouds) for (const c of this._clouds) { c.g.x += c.sp * dt; if (c.g.x > GAME_W + 240) c.g.x = -240; }
+    // Wave the planted army banners (a gentle flag flutter via skew/scale).
+    if (this._banners) for (const b of this._banners) { const w = Math.sin(time * 0.004 + b.phase); b.flag.scaleX = b.dir * (0.9 + w * 0.18); b.flag.y = b.baseY + Math.sin(time * 0.003 + b.phase) * 1.5; }
+    // Drifting leaves (forest only) — recycle a small pool.
+    if (this._leaves) for (const l of this._leaves) {
+      l.x += l.vx * dt; l.y += l.vy * dt; l.rotation += l.vr * dt;
+      if (l.y > GAME_H + 20 || l.x < -20 || l.x > GAME_W + 20) { l.x = Phaser.Math.Between(0, GAME_W); l.y = HORIZON; l.vx = Phaser.Math.FloatBetween(-18, 6); }
+    }
+  }
+
+  // (Visual P9) Plant a waving banner pole at each army's back line.
+  spawnArmyBanners() {
+    this._banners = [];
+    const plant = (side: string) => {
+      const x = side === 'player' ? GAME_W * 0.93 : GAME_W * 0.07;
+      const y = GAME_H * 0.40;
+      const col = side === 'player' ? 0x4a7bd5 : (FACTION_COLOR[this.faction] || 0xd64a4a);
+      const dark = this._lerp(col, 0x000000, 0.45);
+      // Pole.
+      this.add.rectangle(x, y, 4, 150, 0x3a2c18).setOrigin(0.5, 0).setDepth(8);
+      this.add.circle(x, y - 4, 5, 0xffd24a).setDepth(9); // finial
+      // Flag = a triangular pennant graphic anchored at the pole.
+      const dir = side === 'player' ? -1 : 1;
+      const flag = this.add.graphics().setDepth(9);
+      flag.fillStyle(col, 0.95); flag.beginPath(); flag.moveTo(0, 0); flag.lineTo(dir * 60, 14); flag.lineTo(0, 30); flag.closePath(); flag.fillPath();
+      flag.fillStyle(dark, 0.95); flag.beginPath(); flag.moveTo(0, 30); flag.lineTo(dir * 38, 28); flag.lineTo(0, 16); flag.closePath(); flag.fillPath();
+      flag.fillStyle(0xffffff, 0.5); flag.fillCircle(dir * 16, 15, 4); // emblem
+      flag.x = x + dir * 2; flag.y = y + 4;
+      this._banners.push({ flag, baseY: flag.y, dir, phase: side === 'player' ? 0 : 1.6 });
+    };
+    plant('player'); plant('enemy');
+  }
+
+  // (Visual P9) Subtle ground markers + a floating formation label so the army
+  // reads as deliberately arrayed. Purely decorative; never touches unit math.
+  drawFormationMarkers() {
+    if (this._fmG) this._fmG.clear(); else this._fmG = this.add.graphics().setDepth(1);
+    if (this._fmLabels) { for (const t of this._fmLabels) t.destroy(); }
+    this._fmLabels = [];
+    const g = this._fmG;
+    const markSide = (side: string) => {
+      const us = this.sideUnits(side).filter((u) => !u.isCommander);
+      if (!us.length) return;
+      const col = side === 'player' ? 0x4a7bd5 : (FACTION_COLOR[this.faction] || 0xd64a4a);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const u of us) { minX = Math.min(minX, u.x); maxX = Math.max(maxX, u.x); minY = Math.min(minY, u.y); maxY = Math.max(maxY, u.y); }
+      const cx = (minX + maxX) / 2;
+      // A soft footprint plate beneath the formation.
+      g.fillStyle(col, 0.06); g.fillEllipse(cx, (minY + maxY) / 2 + 20, (maxX - minX) + 90, (maxY - minY) + 70);
+      // Rank lines — short dashes the units stand along.
+      g.lineStyle(1.5, col, 0.22);
+      const cols = new Set<number>();
+      for (const u of us) cols.add(Math.round(u.x / 28) * 28);
+      for (const colX of cols) { g.beginPath(); g.moveTo(colX, minY - 12); g.lineTo(colX, maxY + 24); g.strokePath(); }
+      // Floating formation label.
+      const name = side === 'player' ? (this._playerForm || 'LINE') : (this._enemyForm || 'LINE');
+      const lab = this.add.text(cx, minY - 30, `${side === 'player' ? 'Your Host' : (FACTION_LABEL[this.faction] || 'Enemy')} · ${name}`, { fontFamily: 'monospace', fontSize: '12px', color: side === 'player' ? '#bcd9ff' : '#ffd0d0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(2).setAlpha(0.7);
+      this._fmLabels.push(lab);
+    };
+    markSide('player'); markSide('enemy');
+  }
+
+  // (Visual P9) Forest leaves drifting down across the field.
+  spawnLeaves() {
+    if (this._terrain !== 'forest') return;
+    this._leaves = [];
+    for (let i = 0; i < 22; i++) {
+      const c = [0x6a8c3a, 0xa8983c, 0x8a5a2a][i % 3];
+      const l = this.add.rectangle(Phaser.Math.Between(0, GAME_W), Phaser.Math.Between(HORIZON, GAME_H), 6, 3, c, 0.7).setDepth(34).setRotation(Math.random() * Math.PI);
+      (l as any).vx = Phaser.Math.FloatBetween(-18, 6); (l as any).vy = Phaser.Math.FloatBetween(10, 26); (l as any).vr = Phaser.Math.FloatBetween(-2, 2);
+      this._leaves.push(l as any);
+    }
+  }
+
+  // (Visual P9) A cinematic flourish when the battle is joined: clashing flash,
+  // a sweeping light bloom and a rolling dust wave from each advancing line.
+  battleStartFlourish() {
+    // Bright additive flash sweeping from the centre.
+    const flash = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0xffe9b0, 0).setDepth(64).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: flash, fillAlpha: 0.28, duration: 120, yoyo: true, hold: 60, onComplete: () => flash.destroy() });
+    // Dust kicked up along each army's front as they surge forward.
+    if (this.textures.exists('fx_soft')) {
+      for (const side of ['player', 'enemy']) {
+        const dir = side === 'player' ? -1 : 1;
+        const x = side === 'player' ? GAME_W * 0.74 : GAME_W * 0.26;
+        const d = this.add.particles(x, GAME_H * 0.54, 'fx_soft', { lifespan: 700, speedX: { min: dir * 30, max: dir * 110 }, speedY: { min: -40, max: 20 }, x: { min: -10, max: 10 }, y: { min: -120, max: 120 }, scale: { start: 0.6, end: 2 }, alpha: { start: 0.35, end: 0 }, tint: [0xc8b48c, 0xa8946c], quantity: 16, emitting: false }).setDepth(9);
+        d.explode(16);
+        this.time.delayedCall(760, () => d.destroy());
+      }
+    }
+    this.cameras.main.shake(160, 0.004);
   }
 
   // (Feature #2) Attacker damage multiplier by terrain position.
@@ -444,6 +726,7 @@ export class BattleScene extends Phaser.Scene {
   // Arrange a side's living units into a dense, ranked formation. Player holds
   // the right ~35%, the enemy the left ~35%, leaving the centre contested.
   applyFormation(side, name) {
+    if (side === 'player') this._playerForm = name; else this._enemyForm = name; // (Visual P9) label tracking
     const us = this.sideUnits(side);
     if (!us.length) return;
     // (Phase 5) Remember start positions so we can ANIMATE into the new formation.
@@ -485,6 +768,8 @@ export class BattleScene extends Phaser.Scene {
         const nx = u.x, ny = u.y; u.x = x; u.y = y; u.sync();
         this.tweens.add({ targets: u, x: nx, y: ny, duration: 320, ease: 'Cubic.out', onUpdate: () => u.sync() });
       }
+      // (Visual P9) Redraw ordered ground markers/labels once units settle.
+      this.time.delayedCall(340, () => { if (this.phase === 'pre') this.drawFormationMarkers(); });
     } else {
       us.forEach((u) => u.sync());
     }
@@ -523,20 +808,79 @@ export class BattleScene extends Phaser.Scene {
       b.hide();
       this.cmdBtns.push(b);
     });
+
+    this.updateMoraleBars(); // (Visual P9) initial pip/banner render
   }
 
-  // A morale bar with a faction icon, label, coloured fill, and numeric value.
+  // (Visual P9) A dramatic, weighty morale gauge: a faction banner above that
+  // visually WILTS as morale drops, a segmented row of shield/sword pips that
+  // empty out, green→yellow→red colour, and a shake at low morale. Driven from
+  // the existing morale values via updateMoraleBars (math unchanged).
   makeMoraleBar(x, y, anchorRight, accent, label, icon) {
-    const W = 220, H = 28;
+    const W = 236, H = 30, PIPS = 10;
     const ox = anchorRight ? x - W : x;
-    const bg = this.add.rectangle(ox, y, W, H, 0x0a0d14, 0.85).setOrigin(0, 0).setDepth(40).setStrokeStyle(2, accent, 0.7);
-    const fill = this.add.rectangle(ox + 3, y + 3, W - 6, H - 6, 0x4ad66b).setOrigin(0, 0).setDepth(41);
-    const ic = this.add.graphics().setDepth(43);
-    if (icon === 'shield') this.drawShield(ic, ox + (anchorRight ? W - 16 : 16), y + H / 2, accent);
-    else this.drawSkull(ic, ox + (anchorRight ? W - 16 : 16), y + H / 2);
-    const val = this.add.text(ox + W / 2, y + H / 2, '70', { fontFamily: 'monospace', fontSize: '15px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(43);
-    this.add.text(anchorRight ? ox + W - 30 : ox + 30, y + H + 3, label, { fontFamily: 'monospace', fontSize: '12px', color: '#dcd2bf' }).setOrigin(anchorRight ? 1 : 0, 0).setDepth(41);
-    return { fill, val, W };
+    const cont = this.add.container(0, 0).setDepth(40);
+
+    // --- Faction banner that hangs above and wilts with morale ---------------
+    const bnX = anchorRight ? ox + W - 26 : ox + 26;
+    const banner = this.add.graphics().setDepth(40);
+    const drawBanner = (col: number, droop: number) => {
+      banner.clear();
+      banner.fillStyle(0x2a1d10, 1); banner.fillRect(bnX - 1.5, y - 30, 3, 28); // pole
+      banner.fillStyle(0xffd24a, 1); banner.fillCircle(bnX, y - 31, 3);          // finial
+      const w = 26, sag = droop * 8;
+      banner.fillStyle(col, 0.96);
+      banner.beginPath(); banner.moveTo(bnX + 2, y - 28);
+      banner.lineTo(bnX + 2 + w, y - 28 + sag * 0.4);
+      banner.lineTo(bnX + 2 + w, y - 10 + sag);
+      banner.lineTo(bnX + 2 + w / 2, y - 14 + sag * 1.3);
+      banner.lineTo(bnX + 2, y - 10 + sag * 0.6);
+      banner.closePath(); banner.fillPath();
+      banner.fillStyle(0xffffff, 0.45); banner.fillCircle(bnX + 2 + w / 2, y - 19 + sag * 0.7, 3);
+    };
+    drawBanner(accent, 0);
+
+    // --- Bar frame -----------------------------------------------------------
+    const frameOuter = this.add.rectangle(ox, y, W, H, 0x1a140c, 0.92).setOrigin(0, 0).setStrokeStyle(2, 0xc9a84c, 0.85).setDepth(40);
+    const frameInner = this.add.rectangle(ox + 2, y + 2, W - 4, H - 4, 0x0a0d14, 0.9).setOrigin(0, 0).setDepth(40);
+
+    // --- Segmented pips (shield = player, sword = enemy) ---------------------
+    const padL = 8, padR = 8;
+    const slotW = (W - padL - padR) / PIPS;
+    const pips: any[] = [];
+    const pg = this.add.graphics().setDepth(41);
+    for (let i = 0; i < PIPS; i++) {
+      const px = ox + padL + i * slotW + slotW / 2;
+      pips.push({ x: px, y: y + H / 2 });
+    }
+
+    // --- Numeric value + label ----------------------------------------------
+    const val = this.add.text(ox + W / 2, y + H + 2, '70', { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(43);
+    this.add.text(anchorRight ? ox + W - 4 : ox + 4, y + H + 2, label, { fontFamily: 'monospace', fontSize: '11px', color: '#dcd2bf', stroke: '#000', strokeThickness: 2 }).setOrigin(anchorRight ? 1 : 0, 0).setDepth(41);
+
+    return { val, W, H, ox, y, pips, pg, icon, accent, banner, drawBanner, frameOuter, frameInner, _shakeX: ox, _low: false };
+  }
+
+  // (Visual P9) Render the pip row for a morale bar at fraction f (0..1).
+  drawMoralePips(bar: any, f: number, col: number) {
+    const g = bar.pg; g.clear();
+    const filled = f * bar.pips.length;
+    for (let i = 0; i < bar.pips.length; i++) {
+      const p = bar.pips[i];
+      const amt = Phaser.Math.Clamp(filled - i, 0, 1);
+      // empty socket
+      g.fillStyle(0x000000, 0.5); this.drawMoralePip(g, p.x, p.y, 1, 0x222831, 0.0);
+      if (amt <= 0) continue;
+      this.drawMoralePip(g, p.x, p.y, amt, col, 1);
+    }
+  }
+  drawMoralePip(g: any, x: number, y: number, scale: number, col: number, alpha: number) {
+    const s = 5 * scale;
+    if (alpha <= 0) { g.fillStyle(col, 0.55); g.fillCircle(x, y, 5.5); g.lineStyle(1, 0x000000, 0.4); g.strokeCircle(x, y, 5.5); return; }
+    g.fillStyle(col, 1);
+    // a tiny shield glyph
+    g.beginPath(); g.moveTo(x - s, y - s); g.lineTo(x + s, y - s); g.lineTo(x + s, y); g.lineTo(x, y + s * 1.3); g.lineTo(x - s, y); g.closePath(); g.fillPath();
+    g.fillStyle(0xffffff, 0.4 * alpha); g.fillRect(x - 0.8, y - s + 1, 1.6, s * 1.6);
   }
 
   drawShield(g, x, y, color) {
@@ -784,6 +1128,7 @@ export class BattleScene extends Phaser.Scene {
 
   update(time, delta) {
     const dt = delta / 1000;
+    this.updateAtmosphere(dt, time); // (Visual P9) drifting clouds / waving banners / leaves
     if (this.phase === 'done') return;
 
     if (this.phase === 'pre') {
@@ -829,6 +1174,10 @@ export class BattleScene extends Phaser.Scene {
     this.phase = 'battle';
     if (this.startBtn) this.startBtn.setVisible(false); // (Phase 5) hide skip button
     if (this.startBtnTxt) this.startBtnTxt.setVisible(false);
+    // (Visual P9) Clear the pre-battle ordered ground markers + labels.
+    if (this._fmG) { this._fmG.clear(); }
+    if (this._fmLabels) { for (const t of this._fmLabels) t.destroy(); this._fmLabels = []; }
+    this.battleStartFlourish(); // (Visual P9) cinematic clash flourish
     sfx.play('battle_start'); // (Polish Phase 2)
     this.countdown.setScale(1);
     this.countdown.setText('');
@@ -977,11 +1326,66 @@ export class BattleScene extends Phaser.Scene {
     this.tweens.add({ targets: dot, x: x2, y: y2, duration: 180, onComplete: () => dot.destroy() });
   }
 
+  // (Visual P9) Drive the dramatic morale gauges from the (unchanged) morale
+  // values: pips empty out, colour shifts green→yellow→red, the faction banner
+  // wilts as morale falls, and the bar shakes/pulses when morale is low.
   updateMoraleBars() {
     const col = (m) => (m >= 70 ? 0x4ad66b : m >= 40 ? 0xe6c84a : 0xd64a4a);
-    const set = (bar, m) => { bar.fill.width = (bar.W - 6) * (m / 100); bar.fill.fillColor = col(m); bar.val.setText(`${Math.round(m)}`); };
+    const set = (bar, m) => {
+      if (!bar || !bar.pips) return;
+      const f = Phaser.Math.Clamp(m / 100, 0, 1);
+      const c = col(m);
+      this.drawMoralePips(bar, f, c);
+      bar.val.setText(`${Math.round(m)}`);
+      bar.val.setColor(m >= 70 ? '#bdf0c8' : m >= 40 ? '#f2e29a' : '#ffb0a8');
+      // Banner wilts: droop grows as morale drops; colour desaturates toward red.
+      const droop = 1 - f;
+      bar.drawBanner(this._lerp(bar.accent, 0x6a3030, droop * 0.7), droop);
+      // Low-morale alarm: shake the frame + pulse stroke colour.
+      const low = m <= 30;
+      if (low) {
+        const sh = Math.sin(this.time.now * 0.04) * 2.2;
+        bar.frameOuter.x = bar.ox + sh; bar.frameInner.x = bar.ox + 2 + sh; bar.pg.x = sh;
+        bar.frameOuter.setStrokeStyle(2, 0xff5a4a, 0.95);
+      } else if (bar._low) {
+        bar.frameOuter.x = bar.ox; bar.frameInner.x = bar.ox + 2; bar.pg.x = 0;
+        bar.frameOuter.setStrokeStyle(2, 0xc9a84c, 0.85);
+      }
+      bar._low = low;
+    };
     set(this.playerBar, this.morale.player);
     set(this.enemyBar, this.morale.enemy);
+  }
+
+  // (Visual P9) A grand heraldic banner for the end overlay. Victory: it
+  // unfurls from above with a proud flutter. Defeat: it tears free and falls.
+  endBanner(victory: boolean, retreated: boolean, D: number) {
+    const col = victory ? 0x4a7bd5 : (retreated ? 0x6a5a3a : 0x5a3540);
+    const dark = this._lerp(col, 0x000000, 0.5);
+    const cx = GAME_W / 2, w = 150, h = 230;
+    const g = this.add.graphics().setDepth(D + 1);
+    g.fillStyle(0x2a1d10, 1); g.fillRect(-3, -16, 6, 14);                 // pole stub
+    g.fillStyle(0xffd24a, 1); g.fillCircle(0, -18, 6);                    // finial
+    g.fillStyle(col, 0.97); g.fillRect(-w / 2, 0, w, h);                 // cloth
+    g.fillStyle(dark, 0.97); g.beginPath(); g.moveTo(-w / 2, h); g.lineTo(0, h - 34); g.lineTo(w / 2, h); g.lineTo(w / 2, h - 4); g.lineTo(0, h - 30); g.lineTo(-w / 2, h - 4); g.closePath(); g.fillPath(); // swallowtail
+    g.lineStyle(3, 0xffd24a, 0.85); g.strokeRect(-w / 2, 0, w, h);        // gold trim
+    // Heraldic emblem.
+    g.fillStyle(0xffd24a, 0.95);
+    if (victory) { // crown
+      g.beginPath(); g.moveTo(-34, h * 0.42); g.lineTo(-34, h * 0.30); g.lineTo(-17, h * 0.40); g.lineTo(0, h * 0.26); g.lineTo(17, h * 0.40); g.lineTo(34, h * 0.30); g.lineTo(34, h * 0.42); g.closePath(); g.fillPath();
+      g.fillRect(-34, h * 0.42, 68, 8);
+    } else { // sword (point-down, fallen)
+      g.fillRect(-3, h * 0.22, 6, h * 0.34); g.fillRect(-16, h * 0.30, 32, 7); g.fillCircle(0, h * 0.20, 6);
+    }
+    g.x = cx;
+    if (victory) {
+      g.y = -h - 30; g.setAlpha(0);
+      this.tweens.add({ targets: g, y: GAME_H * 0.16, alpha: 1, duration: 800, ease: 'Bounce.out' });
+      this.tweens.add({ targets: g, scaleX: 1.03, duration: 1500, yoyo: true, repeat: -1, delay: 850 }); // proud flutter
+    } else {
+      g.y = GAME_H * 0.16;
+      this.tweens.add({ targets: g, y: GAME_H + 120, angle: retreated ? 12 : 38, alpha: retreated ? 0.6 : 0.25, duration: 1700, delay: 500, ease: 'Cubic.in' }); // banner falls
+    }
   }
 
   endBattle(kind) {
@@ -1002,27 +1406,47 @@ export class BattleScene extends Phaser.Scene {
 
     // (V2 P4 #4) Surviving troops raise their weapons in celebration on victory.
     if (victory) { for (const u of this.sideUnits('player')) this.tweens.add({ targets: u.spr, y: u.spr.y - 10, angle: u.side === 'player' ? -8 : 8, yoyo: true, repeat: 2, duration: 220, delay: Phaser.Math.Between(0, 300) }); }
-    // (Feel pass) Victory confetti rains down; defeat washes the screen gray.
+
+    const D = 70;
     if (victory) {
+      // (Visual P9) THE SUN BREAKS THROUGH — a warm bloom swells from the horizon.
+      const sun = this.add.graphics().setDepth(D - 2).setBlendMode(Phaser.BlendModes.ADD);
+      sun.fillStyle(0xffe8b0, 1); sun.fillCircle(GAME_W / 2, HORIZON, 40);
+      for (let r = 520; r > 0; r -= 22) { sun.fillStyle(0xffd88a, 0.02); sun.fillCircle(GAME_W / 2, HORIZON, r); }
+      sun.setScale(0.3).setAlpha(0);
+      this.tweens.add({ targets: sun, alpha: 1, scaleX: 1, scaleY: 1, duration: 900, ease: 'Cubic.out' });
+      // Rays sweep out.
+      const rays = this.add.graphics().setDepth(D - 2).setBlendMode(Phaser.BlendModes.ADD);
+      for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; rays.fillStyle(0xfff0c0, 0.05); rays.beginPath(); rays.moveTo(GAME_W / 2 + Math.cos(a) * 30, HORIZON + Math.sin(a) * 30); rays.lineTo(GAME_W / 2 + Math.cos(a + 0.06) * 900, HORIZON + Math.sin(a + 0.06) * 900); rays.lineTo(GAME_W / 2 + Math.cos(a - 0.06) * 900, HORIZON + Math.sin(a - 0.06) * 900); rays.closePath(); rays.fillPath(); }
+      rays.setAlpha(0); this.tweens.add({ targets: rays, alpha: 1, duration: 1200 });
+      this.tweens.add({ targets: rays, angle: 12, duration: 6000, repeat: -1, yoyo: true });
+      // Gold confetti / cinders rising.
       if (!this.textures.exists('confetti_px')) { const cg = this.make.graphics({ x: 0, y: 0, add: false } as any); cg.fillStyle(0xffffff, 1); cg.fillRect(0, 0, 4, 4); cg.generateTexture('confetti_px', 4, 4); cg.destroy(); }
-      this.add.particles(0, -10, 'confetti_px', { x: { min: 0, max: GAME_W }, y: -10, lifespan: 2600, speedY: { min: 120, max: 260 }, speedX: { min: -40, max: 40 }, scale: { min: 0.8, max: 2 }, rotate: { min: 0, max: 360 }, tint: [0xffd24a, 0x4ad66b, 0x66ddff, 0xff6b6b, 0xffffff], quantity: 4, frequency: 30, duration: 1500 }).setDepth(72);
+      this.add.particles(0, -10, 'confetti_px', { x: { min: 0, max: GAME_W }, y: -10, lifespan: 2600, speedY: { min: 120, max: 260 }, speedX: { min: -40, max: 40 }, scale: { min: 0.8, max: 2 }, rotate: { min: 0, max: 360 }, tint: [0xffd24a, 0x4ad66b, 0x66ddff, 0xff6b6b, 0xffffff], quantity: 4, frequency: 30, duration: 1500 }).setDepth(D + 4);
     } else if (!retreated) {
-      const gray = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x202028, 0).setOrigin(0, 0).setDepth(69);
-      this.tweens.add({ targets: gray, fillAlpha: 0.4, duration: 700 });
+      // (Visual P9) DEFEAT — the sky darkens and cold rain falls.
+      const dark = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x10121a, 0).setOrigin(0, 0).setDepth(D - 2);
+      this.tweens.add({ targets: dark, fillAlpha: 0.5, duration: 900 });
+      if (!this.textures.exists('battle_wx')) { const wg = this.make.graphics({ x: 0, y: 0, add: false } as any); wg.fillStyle(0xffffff, 1); wg.fillRect(0, 0, 2, 12); wg.generateTexture('battle_wx', 2, 12); wg.destroy(); }
+      this.add.particles(0, -10, 'battle_wx', { x: { min: 0, max: GAME_W }, y: -10, lifespan: 900, speedY: { min: 700, max: 950 }, speedX: { min: -80, max: -50 }, scaleY: { min: 1, max: 1.8 }, alpha: { start: 0.4, end: 0.1 }, quantity: 8, frequency: 18, tint: 0x8aa0b0 }).setDepth(D - 1);
     }
 
-    // Phase 3: full-screen outcome overlay.
+    // Phase 3 / Visual P9: full-screen outcome overlay (kept flow + onComplete).
     const survCount = Object.values(survivors).reduce((s, n) => s + n, 0);
     const finalSurv = army.reduce((s, g) => s + g.count, 0);
-    const D = 70;
-    this.add.rectangle(0, 0, GAME_W, GAME_H, victory ? 0x0c1a0c : 0x1a0c0c, 0.72).setOrigin(0, 0).setDepth(D);
-    const big = this.add.text(GAME_W / 2, GAME_H / 2 - 60, victory ? 'VICTORY' : retreated ? 'RETREAT' : 'DEFEAT', { fontFamily: 'monospace', fontSize: '64px', color: victory ? '#ffd24a' : '#e74c3c', fontStyle: 'bold', stroke: '#000', strokeThickness: 7 }).setOrigin(0.5).setDepth(D + 1);
+    this.add.rectangle(0, 0, GAME_W, GAME_H, victory ? 0x0c1a0c : 0x1a0c0c, victory ? 0.55 : 0.7).setOrigin(0, 0).setDepth(D);
+
+    // (Visual P9) A grand player banner: unfurls on victory, falls on defeat.
+    this.endBanner(victory, retreated, D);
+
+    const big = this.add.text(GAME_W / 2, GAME_H / 2 - 60, victory ? 'VICTORY' : retreated ? 'RETREAT' : 'DEFEAT', { fontFamily: 'monospace', fontSize: '64px', color: victory ? '#ffd24a' : '#e74c3c', fontStyle: 'bold', stroke: '#000', strokeThickness: 7 }).setOrigin(0.5).setDepth(D + 3);
     this.tweens.add({ targets: big, scale: { from: 1.4, to: 1 }, duration: 450, ease: 'Back.out' });
+    if (victory) this.tweens.add({ targets: big, scale: 1.04, duration: 1400, yoyo: true, repeat: -1, delay: 500 });
     const lines = [];
     lines.push(`Survivors: ${finalSurv} of ${survCount}`);
     if (victory && loot) lines.push(`Loot: +${loot.gold} gold${loot.iron ? `  +${loot.iron} iron` : ''}`);
     else if (!victory) lines.push(`You keep ${Math.round(keepFrac * 100)}% of survivors`);
-    this.add.text(GAME_W / 2, GAME_H / 2 + 8, lines.join('\n'), { fontFamily: 'monospace', fontSize: '20px', color: '#fff', align: 'center', stroke: '#000', strokeThickness: 3, lineSpacing: 8 }).setOrigin(0.5, 0).setDepth(D + 1);
+    this.add.text(GAME_W / 2, GAME_H / 2 + 8, lines.join('\n'), { fontFamily: 'monospace', fontSize: '20px', color: '#fff', align: 'center', stroke: '#000', strokeThickness: 3, lineSpacing: 8 }).setOrigin(0.5, 0).setDepth(D + 3);
 
     this.time.delayedCall(3000, () => {
       this.cameras.main.fadeOut(400, 0, 0, 0);
