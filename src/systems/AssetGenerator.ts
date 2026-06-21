@@ -44,7 +44,7 @@ function dots(g: any, color: number, n: number, r: number, alpha = 1) {
 // ---- core tile builder -----------------------------------------------------
 // base = top colour; detail(g) draws extra marks on the top face.
 function makeTile(scene: any, key: string, base: number, detail?: (g: any) => void) {
-  if (scene.textures.exists(key)) scene.textures.remove(key); // allow re-gen on scene.restart
+  if (scene.textures.exists(key)) return; // generate once; textures persist across scene.restart
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
   const D = 16; // side-face depth (matches the HH row step so faces tile cleanly)
   // Side faces first (top face will overlap their upper edge).
@@ -143,7 +143,7 @@ function shadow(g: any, cx = 32, cy = 60, rw = 24) { g.fillStyle(0x000000, 0.25)
 
 // Draw one building texture (accent-coloured) under `key`.
 function makeBuilding(scene: any, key: string, draw: (g: any, A: number) => void, accent = 0x1a3a8b) {
-  if (scene.textures.exists(key)) scene.textures.remove(key);
+  if (scene.textures.exists(key)) return;
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
   shadow(g);
   draw(g, accent);
@@ -337,7 +337,7 @@ function fillRect2(ctx: any, x: number, y: number, w: number, h: number, c: numb
 function disc(ctx: any, x: number, y: number, r: number, c: number) { ctx.fillStyle = css(c); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
 
 function spriteSheet(scene: any, key: string, frames: number, draw: (ctx: any, t: number, i: number) => void) {
-  if (scene.textures.exists(key)) scene.textures.remove(key);
+  if (scene.textures.exists(key)) return;
   const tex = scene.textures.createCanvas(key, frames * 192, 192);
   const ctx = tex.getContext();
   for (let i = 0; i < frames; i++) {
@@ -512,7 +512,7 @@ export function generateEnemyUnits(scene: any) {
 // ---- world-object helpers --------------------------------------------------
 // Object spritesheet with custom frame size + numeric frames.
 function objSheet(scene: any, key: string, frames: number, fw: number, fh: number, draw: (ctx: any, t: number, i: number) => void) {
-  if (scene.textures.exists(key)) scene.textures.remove(key);
+  if (scene.textures.exists(key)) return;
   const tex = scene.textures.createCanvas(key, frames * fw, fh);
   const ctx = tex.getContext();
   for (let i = 0; i < frames; i++) { ctx.save(); ctx.translate(i * fw, 0); draw(ctx, frames > 1 ? i / (frames - 1) : 0, i); ctx.restore(); tex.add(i, 0, i * fw, 0, fw, fh); }
@@ -521,9 +521,9 @@ function objSheet(scene: any, key: string, frames: number, fw: number, fh: numbe
 // Reskin a single-image texture key, keeping its native pixel size so the
 // existing node scale/oy values still position it correctly.
 function reskinImage(scene: any, key: string, fallbackW: number, fallbackH: number, draw: (ctx: any, w: number, h: number) => void) {
-  let w = fallbackW, h = fallbackH;
-  if (scene.textures.exists(key)) { const src: any = scene.textures.get(key).getSourceImage(); if (src && src.width) { w = src.width; h = src.height; } scene.textures.remove(key); }
-  const tex = scene.textures.createCanvas(key, w, h);
+  if (scene.textures.exists(key)) return; // generate once; persists across restarts
+  const tex = scene.textures.createCanvas(key, fallbackW, fallbackH);
+  const w = fallbackW, h = fallbackH;
   draw(tex.getContext(), w, h);
   tex.refresh();
 }
