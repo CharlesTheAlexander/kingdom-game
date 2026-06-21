@@ -130,120 +130,12 @@ export class IsometricScene extends GameScene {
     this.sys.settings.key = 'IsometricScene';
   }
 
-  // ---- Asset loading (iso terrain + buildings + Tiny Swords overlays) ------
+  // ---- Asset loading -------------------------------------------------------
+  // (Assets Phase 8) The art packs are gone — EVERY texture is generated
+  // procedurally in create() via AssetGenerator.generateAll(). preload() only
+  // installs a missing-texture fallback so a stray key can never crash the game.
   preload() {
-    const ISO = 'assets/Isometric Strategy - Medieval Pixel Art Tiles';
-    const IND = `${ISO}/individual`;
-    const SH = `${ISO}/sprite_sheets`;
-    const TS = 'assets/Tiny Swords (Free Pack)';
-    const RED = `${TS}/Buildings/Red Buildings`;
-    const UNITS = `${TS}/Units`;
-    const TERR = `${TS}/Terrain`;
-    const RES = `${TERR}/Resources`;
-    const FX = `${TS}/Particle FX`;
-
-    // --- Isometric terrain tiles (64x64) ---
-    // (Assets Phase 1) Terrain is now generated procedurally in create() via
-    // AssetGenerator.generateTerrain() into the iso_* keys below — no art-pack
-    // images are loaded for terrain anymore.
-
-    // --- Player buildings: texture key == building key (Buildings.js) ---
-    // Distinct individual iso tiles for the smaller buildings:
-    this.load.image('house', `${IND}/img_1.png`);       // cottage
-    this.load.image('lumberyard', `${IND}/img_12.png`); // wood pile
-    this.load.image('mine', `${IND}/img_2.png`);        // mine w/ scaffolding
-    this.load.image('tower', `${IND}/img_137.png`);     // stone tower
-    // Construction sheets — frame 13 = finished. Sliced into standalone textures
-    // (castle / castle_town / castle_castle / barracks / farm) in create().
-    this.load.spritesheet('village_sheet', `${SH}/village_sheet.png`, { frameWidth: 64, frameHeight: 64 });
-    this.load.spritesheet('wooden_fort_sheet', `${SH}/wooden_fort_sheet.png`, { frameWidth: 64, frameHeight: 64 });
-    this.load.spritesheet('stone_fort_sheet', `${SH}/stone_fort_sheet.png`, { frameWidth: 64, frameHeight: 64 });
-    this.load.spritesheet('wind_mill_sheet', `${SH}/wind_mill_sheet.png`, { frameWidth: 64, frameHeight: 64 });
-
-    // --- AI red faction buildings (Tiny Swords overlays) ---
-    this.load.image('enemy_castle', `${RED}/Castle.png`);
-    this.load.image('ai_barracks', `${RED}/Barracks.png`);
-    this.load.image('ai_tower', `${RED}/Tower.png`);
-    this.load.image('ai_house', `${RED}/House1.png`);
-
-    // --- Phase 6: Purple (NE) + Yellow (SE) AI kingdom buildings + warriors ---
-    const PUR = `${TS}/Buildings/Purple Buildings`;
-    const YEL = `${TS}/Buildings/Yellow Buildings`;
-    this.load.image('purple_castle', `${PUR}/Castle.png`);
-    this.load.image('purple_barracks', `${PUR}/Barracks.png`);
-    this.load.image('purple_tower', `${PUR}/Tower.png`);
-    this.load.image('purple_house', `${PUR}/House1.png`);
-    this.load.image('yellow_castle', `${YEL}/Castle.png`);
-    this.load.image('yellow_barracks', `${YEL}/Barracks.png`);
-    this.load.image('yellow_tower', `${YEL}/Tower.png`);
-    this.load.image('yellow_house', `${YEL}/House1.png`);
-    this.load.spritesheet('purple_warrior_idle', `${UNITS}/Purple Units/Warrior/Warrior_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('purple_warrior_run', `${UNITS}/Purple Units/Warrior/Warrior_Run.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('yellow_warrior_idle', `${UNITS}/Yellow Units/Warrior/Warrior_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('yellow_warrior_run', `${UNITS}/Yellow Units/Warrior/Warrior_Run.png`, { frameWidth: 192, frameHeight: 192 });
-
-    // --- Phase 2: Wildlife placeholders (tinted Tiny Swords sprites) ---
-    // Wolves = red warrior; Goblins = black warrior; Boars = black pawn. Yellow
-    // warrior is reused for expedition Mercenaries (Phase 5).
-    this.load.spritesheet('goblin_idle', `${UNITS}/Black Units/Warrior/Warrior_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('goblin_run', `${UNITS}/Black Units/Warrior/Warrior_Run.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('boar_idle', `${UNITS}/Black Units/Pawn/Pawn_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-
-    // --- Units (Tiny Swords, 192px frames) — same keys the systems expect ---
-    this.load.spritesheet('warrior_idle', `${UNITS}/Red Units/Warrior/Warrior_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('red_warrior_run', `${UNITS}/Red Units/Warrior/Warrior_Run.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('red_archer_idle', `${UNITS}/Red Units/Archer/Archer_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_idle', `${UNITS}/Blue Units/Pawn/Pawn_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_run', `${UNITS}/Blue Units/Pawn/Pawn_Run.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_run_wood', `${UNITS}/Blue Units/Pawn/Pawn_Run Wood.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_run_gold', `${UNITS}/Blue Units/Pawn/Pawn_Run Gold.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_run_meat', `${UNITS}/Blue Units/Pawn/Pawn_Run Meat.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('blue_warrior_idle', `${UNITS}/Blue Units/Warrior/Warrior_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('blue_warrior_run', `${UNITS}/Blue Units/Warrior/Warrior_Run.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('blue_archer_idle', `${UNITS}/Blue Units/Archer/Archer_Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('monk_idle', `${UNITS}/Blue Units/Monk/Idle.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('heal_effect', `${UNITS}/Blue Units/Monk/Heal_Effect.png`, { frameWidth: 192, frameHeight: 192 });
-
-    // --- (Polish Phase 1) Extra animation frames: attack / shoot / heal / tool work ---
-    this.load.spritesheet('blue_warrior_attack', `${UNITS}/Blue Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('red_warrior_attack', `${UNITS}/Red Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('yellow_warrior_attack', `${UNITS}/Yellow Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('purple_warrior_attack', `${UNITS}/Purple Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('goblin_attack', `${UNITS}/Black Units/Warrior/Warrior_Attack1.png`, { frameWidth: 192, frameHeight: 192 });
-    // Attack2 frames — the combined Attack1→Attack2 swing (see Animations.js).
-    this.load.spritesheet('blue_warrior_attack2', `${UNITS}/Blue Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('red_warrior_attack2', `${UNITS}/Red Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('yellow_warrior_attack2', `${UNITS}/Yellow Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('purple_warrior_attack2', `${UNITS}/Purple Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('goblin_attack2', `${UNITS}/Black Units/Warrior/Warrior_Attack2.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('blue_archer_run', `${UNITS}/Blue Units/Archer/Archer_Run.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('blue_archer_shoot', `${UNITS}/Blue Units/Archer/Archer_Shoot.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('red_archer_shoot', `${UNITS}/Red Units/Archer/Archer_Shoot.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('monk_run', `${UNITS}/Blue Units/Monk/Run.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('monk_heal', `${UNITS}/Blue Units/Monk/Heal.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_run_axe', `${UNITS}/Blue Units/Pawn/Pawn_Run Axe.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_run_pickaxe', `${UNITS}/Blue Units/Pawn/Pawn_Run Pickaxe.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_interact_axe', `${UNITS}/Blue Units/Pawn/Pawn_Interact Axe.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('pawn_interact_pickaxe', `${UNITS}/Blue Units/Pawn/Pawn_Interact Pickaxe.png`, { frameWidth: 192, frameHeight: 192 });
-
-    // --- Particle FX ---
-    this.load.spritesheet('explosion', `${FX}/Explosion_01.png`, { frameWidth: 192, frameHeight: 192 });
-    this.load.spritesheet('dust', `${FX}/Dust_01.png`, { frameWidth: 64, frameHeight: 64 });
-
-    // --- Resource node art ---
-    this.load.spritesheet('tree1', `${RES}/Wood/Trees/Tree1.png`, { frameWidth: 128, frameHeight: 256 });
-    this.load.spritesheet('tree2', `${RES}/Wood/Trees/Tree2.png`, { frameWidth: 128, frameHeight: 256 });
-    this.load.image('rock1', `${TERR}/Decorations/Rocks/Rock1.png`);
-    this.load.image('rock2', `${TERR}/Decorations/Rocks/Rock2.png`);
-    this.load.image('rock3', `${TERR}/Decorations/Rocks/Rock3.png`);
-    this.load.image('rock4', `${TERR}/Decorations/Rocks/Rock4.png`);
-    this.load.image('gold_stone', `${RES}/Gold/Gold Stones/Gold Stone 1.png`);
-    this.load.spritesheet('sheep_idle', `${RES}/Meat/Sheep/Sheep_Idle.png`, { frameWidth: 128, frameHeight: 128 });
-
-    // --- Resource icons (HUD) ---
-    this.load.image('icon_wood', `${RES}/Wood/Wood Resource/Wood Resource.png`);
-    this.load.image('icon_gold', `${RES}/Gold/Gold Resource/Gold_Resource.png`);
-    this.load.image('icon_food', `${RES}/Meat/Meat Resource/Meat Resource.png`);
+    AssetGenerator.installFallback(this);
   }
 
   // ---- Scene setup (mirrors GameScene.create with iso dimensions) ----------
@@ -353,15 +245,11 @@ export class IsometricScene extends GameScene {
       { key: 'tome', name: "Healer's Tome", desc: 'Monks heal 50% more HP/sec', apply: (s) => (s.buffs.monkHeal *= 1.5) },
     ];
 
-    AssetGenerator.generateBuildings(this); // (Assets Phase 2) procedural buildings; slice/alias below then no-op
-    AssetGenerator.generateAIBuildings(this); // (Assets Phase 3) faction-accented AI buildings
-    this.sliceBuildingTextures();
-    AssetGenerator.generateUnits(this); // (Assets Phase 4) procedural player-unit spritesheets (override pack keys)
-    AssetGenerator.generateEnemyUnits(this); // (Assets Phase 5) enemy faction + wildlife sprites
-    AssetGenerator.generateWorldObjects(this); // (Assets Phase 6) trees, rocks, gold, sheep
-    AssetGenerator.generateUI(this); // (Assets Phase 7) resource icons
+    // (Assets Phase 8) Generate the ENTIRE game's art before anything uses it.
+    // Order matters only in that this must precede createAnimations()/drawGrid().
+    AssetGenerator.generateAll(this);
+    this.sliceBuildingTextures(); // legacy slice/alias calls now early-return (keys exist)
     this.createAnimations();
-    AssetGenerator.generateTerrain(this); // (Assets Phase 1) procedural terrain into iso_* keys
     this.drawGrid();
     this.scatterDecorations();
     this.nodes.spawnInitial();

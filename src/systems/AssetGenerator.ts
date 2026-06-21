@@ -423,8 +423,12 @@ export function generateUnits(scene: any) {
   spriteSheet(scene, 'monk_idle', 6, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', ...idlePose(t), armAng: Math.PI * 0.5 }));
   spriteSheet(scene, 'monk_run', 4, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', ...runPose(t), armAng: Math.PI * 0.55 }));
   spriteSheet(scene, 'monk_heal', 11, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', armAng: Math.PI * 0.2, healGlow: Math.sin(t * Math.PI) }));
-  // Heal effect sprite (single frame glow).
-  spriteSheet(scene, 'heal_effect', 1, (ctx) => { disc(ctx, 96, 96, 26, 0xfff2a8); ctx.globalAlpha = 0.5; disc(ctx, 96, 96, 40, 0xffffff); ctx.globalAlpha = 1; });
+  // Heal effect — 11-frame one-shot: a rising green-gold glow + sparkles.
+  spriteSheet(scene, 'heal_effect', 11, (ctx, t) => {
+    ctx.globalAlpha = 0.6 * (1 - t * 0.7); disc(ctx, 96, 110 - t * 40, 22 + t * 14, 0x9be88a);
+    ctx.globalAlpha = 0.9 * (1 - t); disc(ctx, 96, 110 - t * 40, 8, 0xfff2a8);
+    ctx.globalAlpha = 1;
+  });
 
   // Pawn / worker — peasant; run variants carry resources / hold tools; interact
   // variants are the chopping / mining poses.
@@ -562,7 +566,33 @@ export function generateUI(scene: any) {
   objSheet(scene, 'icon_cutstone', 1, 32, 32, (ctx) => { fillRect2(ctx, 6, 8, 20, 16, 0x9a9a90); fillRect2(ctx, 6, 8, 20, 3, 0xb6b6ac); ctx.strokeStyle = css(0x6f6f68); ctx.lineWidth = 1; ctx.strokeRect(6, 8, 20, 16); ctx.beginPath(); ctx.moveTo(16, 8); ctx.lineTo(16, 24); ctx.stroke(); });
 }
 
-// Master entry — phases are added here as they are built.
+// ---- PHASE 8: particle FX + full replacement -------------------------------
+// Explosion (192px, 8 one-shot frames) and dust (64px, 8 frames) replace the
+// last pack art so every pack image load can be removed from preload().
+export function generateFX(scene: any) {
+  objSheet(scene, 'explosion', 8, 192, 192, (ctx, t) => {
+    const r = 20 + t * 70; ctx.globalAlpha = 1 - t;
+    disc(ctx, 96, 96, r, 0xff7a1a); ctx.globalAlpha = (1 - t) * 0.8; disc(ctx, 96, 96, r * 0.6, 0xffd24a); ctx.globalAlpha = (1 - t) * 0.6; disc(ctx, 96, 96, r * 0.3, 0xfff2c8);
+    ctx.globalAlpha = 1;
+  });
+  objSheet(scene, 'dust', 8, 64, 64, (ctx, t) => {
+    ctx.globalAlpha = 0.6 * (1 - t); for (const [dx, dy] of [[0, 0], [-10, 4], [10, 2], [-4, -8]] as any[]) disc(ctx, 32 + dx, 40 + dy - t * 8, 6 + t * 8, 0xc9bfa8);
+    ctx.globalAlpha = 1;
+  });
+}
+
+// Belt-and-suspenders: if any texture key is ever missing at use time, register
+// a neutral placeholder so the game never shows the engine's missing-texture box.
+export function installFallback(scene: any) {
+  scene.load.on('loaderror', (file: any) => {
+    const key = file && file.key; if (!key || scene.textures.exists(key)) return;
+    const g = scene.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0x39455a, 1); g.fillRect(0, 0, 48, 48); g.lineStyle(2, 0x8a93a6, 1); g.strokeRect(1, 1, 46, 46);
+    g.generateTexture(key, 48, 48); g.destroy();
+  });
+}
+
+// Master entry — generates the entire game's art. Call once at scene create().
 export function generateAll(scene: any) {
   generateTerrain(scene);
   generateBuildings(scene);
@@ -571,4 +601,5 @@ export function generateAll(scene: any) {
   generateEnemyUnits(scene);
   generateWorldObjects(scene);
   generateUI(scene);
+  generateFX(scene);
 }
