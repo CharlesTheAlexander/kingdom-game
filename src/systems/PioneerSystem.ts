@@ -345,6 +345,8 @@ export class PioneerSystem {
     if (i >= 0) GameWorld.pioneers.splice(i, 1);
 
     GameWorld.notify(`${cleanName} founded — a ${specialty.label}!`, 0x2a7a4f);
+    // (Phase 8) Record the founding in the Chronicle of the Kingdom.
+    GameWorld.recordChronicle(`A new settlement, ${cleanName}, is founded — a ${specialty.label}.`, 'founded_' + id);
     return { ok: true, settlementId: id, settlement, state: st, specialty };
   }
 

@@ -160,6 +160,57 @@ export interface PioneerParty {
 /** King identity chosen at creation (mirrors the legacy kg_king localStorage). */
 export interface KingInfo { kingdom: string; ruler: string; trait: string | null; }
 
+// ----------------------------------------------------------------------------
+// Phase 8 (Late-game content — Stage 8 Medium Castle & Stage 9 Large Castle)
+// ----------------------------------------------------------------------------
+// The "kingdom stage" is the player's HOME CASTLE settlement tier (1..9). All
+// Phase-8 unlocks gate on GameWorld.kingdomStage(). Every new field below is
+// plain JSON (numbers/strings/small objects/booleans) so Phase 12's SaveManager
+// can serialize it verbatim. The heavier logic lives in LateGame.ts (a static
+// system like WorldDiplomacy/HeroWorld); GameWorld holds the state + thin
+// wrapper methods so both `GameWorld.startTournament()` and the audit's `__P8`
+// hook drive the same code.
+
+/** (Phase 8) Live state of the Grand Tournament (stage-8 home-castle action). A
+ *  multi-day festival: when active, tournament grounds (tents/flags) are drawn
+ *  near the home castle; on completion a faction champion joins the army, all
+ *  factions warm +10, happiness +30 for 5 days, +10 Protector reputation. */
+export interface TournamentState {
+  active: boolean;
+  /** game-day the tournament finishes (resolved by the daily tick). */
+  endDay: number;
+  /** continent tile the grounds sit on (just outside the home castle). */
+  col: number;
+  row: number;
+  /** how many tournaments have been held (flavour / chronicle). */
+  held: number;
+}
+
+/** (Phase 8) A named emissary travelling the continent as a continent party
+ *  (scroll/envelope icon) toward a faction's territory. On arrival it founds a
+ *  PERMANENT embassy → passive +2 relations/day with that faction. If the target
+ *  faction is hostile it may be captured en route (ransom 200 gold to free).
+ *  Plain JSON for Phase 12. */
+export interface EmissaryParty {
+  id: string;
+  name: string;
+  /** target AI faction key (red/purple/yellow). */
+  faction: string;
+  color: number;
+  /** real-time continent position (fractional while moving). */
+  col: number;
+  row: number;
+  /** the faction-castle tile the emissary is travelling toward. */
+  destCol: number;
+  destRow: number;
+  /** lifecycle: travelling → embassy (arrived, passive bonus active) | captured. */
+  status: 'travelling' | 'embassy' | 'captured';
+}
+
+/** (Phase 8) A single in-world Chronicle entry — a narrative record of a major
+ *  event ("Day 12: Aldric the Unbroken joined the kingdom."). Plain JSON. */
+export interface ChronicleEntry { day: number; text: string; }
+
 /** Carries continent context into BattleScene so we can return cleanly. */
 export interface PendingBattle {
   returnCol: number;
@@ -272,6 +323,45 @@ class GameWorldState {
    *  caravan-avoid expiry after a betrayal, intel-shared, the unique artifact,
    *  treaty-upheld accrual bookkeeping, and the deltas-applied guard. */
   diploFlags: Record<string, any> = {};
+
+  // --- Phase 8 (Late-game content — Stage 8 & Stage 9) --------------------
+  /** Max number of player armies/parties (continent parties). Raised +1 at
+   *  stage 8 (the "second/extra army slot"). The main party always exists; this
+   *  cap governs how many ADDITIONAL field armies can be formed. */
+  armyCap = 1;
+
+  /** (Phase 8) Grand Tournament live state (stage-8 home-castle action). */
+  tournament: TournamentState = { active: false, endDay: 0, col: 0, row: 0, held: 0 };
+
+  /** (Phase 8) Live emissary parties roaming the continent toward a faction.
+   *  ContinentScene renders + advances them; LateGame owns send/arrive/capture. */
+  emissaries: EmissaryParty[] = [];
+  /** Monotonic counter for unique emissary ids. */
+  emissaryCounter = 0;
+  /** Faction keys with a standing embassy (passive +2 relations/day). Record so
+   *  it serializes cleanly. Value = day the embassy was established. */
+  embassies: Record<string, number> = {};
+
+  /** (Phase 8) True once the Imperial Proclamation has been declared (stage 9).
+   *  Phase 10 reads this + `imperialEndingUnlocked` to grant a unique ending. */
+  imperialProclaimed = false;
+  /** (Phase 8) A flag Phase-10 consumes: a win AFTER the proclamation is the
+   *  unique "Imperial" ending. Set alongside imperialProclaimed. */
+  imperialEndingUnlocked = false;
+
+  /** (Phase 8) The Chronicle of the Kingdom — an ordered list of narrative
+   *  entries. Key systems append via GameWorld.recordChronicle(text). The
+   *  scribe-tower building (stage 9) surfaces a readable panel of these. */
+  chronicle: ChronicleEntry[] = [];
+
+  /** (Phase 8) Highest kingdom stage reached so far — drives the one-shot
+   *  transition events (stage-8 travellers, stage-9 leader messages) so each
+   *  fires exactly once even if the tier is re-read. */
+  highestStageSeen = 1;
+
+  /** (Phase 8) One-shot guards for transition events + late-game unlocks, so a
+   *  re-read of the tier never re-fires a beat. Plain JSON. */
+  lateGameFlags: Record<string, any> = {};
 
   gold = 500;
 
@@ -413,6 +503,361 @@ class GameWorldState {
     return this.player.army.reduce((s, g) => s + (g.count || 0), 0);
   }
 
+  // --------------------------------------------------------------------------
+  // Phase 8 — kingdom stage + home settlement helpers
+  // --------------------------------------------------------------------------
+
+  /** The player's HOME castle settlement (kind 'player_castle'), or null before a
+   *  world exists. The home castle's tier IS the kingdom stage. */
+  homeSettlement(): Settlement | null {
+    if (!this.world) return null;
+    return this.world.settlements.find(s => s.kind === 'player_castle') || null;
+  }
+
+  /** The stable id of the home castle settlement (its index string), or null. */
+  homeSettlementId(): string | null {
+    const s = this.homeSettlement();
+    return s ? this.settlementId(s) : null;
+  }
+
+  /** The persisted SettlementState for the home castle (lazily created). */
+  homeState(): SettlementState | null {
+    return this.settlementState(this.homeSettlementId());
+  }
+
+  /** THE KINGDOM STAGE (1..9) = the home castle settlement's `tier` + 1.
+   *  SettlementState.tier is 0-indexed (0 = Small Village … 8 = Large Castle), so
+   *  stage = tier + 1. Returns 1 when no home state exists yet. This is the single
+   *  gate every Phase-8 unlock checks (action availability, transition events). */
+  kingdomStage(): number {
+    const st = this.homeState();
+    const tier = st ? (st.tier || 0) : 0;
+    return Math.max(1, Math.min(9, tier + 1));
+  }
+
+  /** TEST HOOK: force the kingdom stage by setting the home castle tier directly.
+   *  Used by the headless audit to jump to stage 8/9 without grinding upgrades.
+   *  Clamps to 1..9 and returns the resulting stage. */
+  setKingdomStage(stage: number): number {
+    const st = this.homeState();
+    if (st) st.tier = Math.max(0, Math.min(8, Math.round(stage) - 1));
+    return this.kingdomStage();
+  }
+
+  // --------------------------------------------------------------------------
+  // Phase 8 — Chronicle of the Kingdom
+  // --------------------------------------------------------------------------
+  /** Append a narrative entry to the Chronicle ("Day 12: …"). Key systems call
+   *  this on major events (hero joins, war declared, settlement founded, stage
+   *  reached). `once` (a stable key) makes a beat fire only the first time. The
+   *  log works even if only a few sources are wired (it is purely additive). */
+  recordChronicle(text: string, once?: string): void {
+    if (once) {
+      this.lateGameFlags.chronicleOnce = this.lateGameFlags.chronicleOnce || {};
+      if (this.lateGameFlags.chronicleOnce[once]) return;
+      this.lateGameFlags.chronicleOnce[once] = true;
+    }
+    this.chronicle.push({ day: this.displayDay(), text });
+    // Keep the log bounded so a very long campaign never balloons the save.
+    if (this.chronicle.length > 200) this.chronicle.splice(0, this.chronicle.length - 200);
+  }
+
+  // --------------------------------------------------------------------------
+  // Phase 8 — small diplomacy helper (relations change without importing the
+  // WorldDiplomacy module here, to avoid a circular import). Operates on the
+  // re-homed Diplomacy instance + leader memory. faction = red/purple/yellow.
+  // --------------------------------------------------------------------------
+  changeRelation(faction: string, delta: number, reason = ''): void {
+    if (this.diplomacy) this.diplomacy.change(faction, delta, reason);
+  }
+  /** Faction keys for the three AI powers, derived from the world (red/purple/yellow). */
+  factionKeys(): string[] {
+    if (!this.world) return ['red', 'purple', 'yellow'];
+    return this.world.factions.filter(f => f.personality !== 'player').map(f => f.key);
+  }
+
+  // ==========================================================================
+  // Phase 8 — GRAND TOURNAMENT (stage-8 home-castle action)
+  // ==========================================================================
+  /** Can the Grand Tournament be started right now? Stage ≥ 8, not already
+   *  running, and the player can afford 300 gold + 50 food (food from the home
+   *  settlement stockpile). Returns {ok, reason}. */
+  canStartTournament(): { ok: boolean; reason?: string } {
+    if (this.kingdomStage() < 8) return { ok: false, reason: 'Requires a Medium Castle (stage 8).' };
+    if (this.tournament.active) return { ok: false, reason: 'A tournament is already underway.' };
+    if (this.gold < 300) return { ok: false, reason: 'Need 300 gold.' };
+    const home = this.homeState();
+    if (!home || (home.resources.food || 0) < 50) return { ok: false, reason: 'Need 50 food at your castle.' };
+    return { ok: true };
+  }
+
+  /** Start a ~3-day Grand Tournament at the home castle. Spends 300 gold + 50
+   *  food, marks it active (the daily tick resolves it). Returns ok + reason. */
+  startTournament(): { ok: boolean; reason?: string } {
+    const c = this.canStartTournament();
+    if (!c.ok) return c;
+    this.gold -= 300;
+    const home = this.homeState();
+    if (home) home.resources.food = Math.max(0, (home.resources.food || 0) - 50);
+    const hs = this.homeSettlement();
+    // Grounds sit just outside the castle (offset a couple tiles, clamped on-map).
+    const sz = this.world ? this.world.size : 1500;
+    const col = hs ? Math.max(1, Math.min(sz - 2, hs.col + 3)) : 0;
+    const row = hs ? Math.max(1, Math.min(sz - 2, hs.row + 3)) : 0;
+    this.tournament = { active: true, endDay: this.displayDay() + 3, col, row, held: this.tournament.held };
+    this.notify('A Grand Tournament begins! Champions gather at your castle.', 0xd6c04a);
+    this.recordChronicle(`The Grand Tournament is proclaimed at ${this.king.kingdom}. Champions ride from every corner of the continent.`);
+    return { ok: true };
+  }
+
+  /** Daily tick: finishes a running tournament once its end day is reached.
+   *  Rewards: a faction champion joins the army, all factions +10 relations,
+   *  home happiness +30 for 5 days, +10 Protector reputation. Returns true the
+   *  day it completes (so the scene can flash a banner). */
+  tickTournament(): boolean {
+    const t = this.tournament;
+    if (!t.active) return false;
+    if (this.displayDay() < t.endDay) return false;
+    t.active = false;
+    t.held += 1;
+    // 1) A faction champion temporarily joins the player army (an elite warrior
+    //    group). Kept simple: a strong warrior stack; the equip/hero system is P11.
+    const army = this.player.army;
+    const w = army.find(g => g.type === 'champion');
+    if (w) w.count += 8; else army.push({ type: 'champion', count: 8 });
+    // 2) All AI factions warm +10.
+    for (const k of this.factionKeys()) this.changeRelation(k, 10, 'honoured at your tournament');
+    // 3) Home happiness +30 for 5 days (temporary modifier stored on the state).
+    const home = this.homeState();
+    if (home) {
+      home.happiness = Math.min(100, (home.happiness || 70) + 30);
+      home.tempHappy = { value: 30, untilDay: this.displayDay() + 5 };
+    }
+    // 4) +10 Protector reputation (stored on lateGameFlags so it serializes and
+    //    later phases can read it without a Reputation instance at world level).
+    this.lateGameFlags.protectorRep = (this.lateGameFlags.protectorRep || 0) + 10;
+    this.notify('The Tournament ends in glory! A champion joins your host; all realms honour you.', 0xd6c04a);
+    this.recordChronicle('The Grand Tournament ends in triumph. A renowned champion pledges their blade to the kingdom.');
+    return true;
+  }
+
+  // ==========================================================================
+  // Phase 8 — LEGENDARY FORGE (upgrade Blacksmith → produces legendaryEquipment)
+  // The consuming/equip economy is Phase 11; here we only add the building
+  // upgrade + the stocked resource + a basic hero-weapon upgrade hook.
+  // ==========================================================================
+  /** True once the home Blacksmith has been upgraded to a Legendary Forge. The
+   *  forge produces "legendaryEquipment" into the home stockpile. */
+  hasLegendaryForge(): boolean { return !!this.lateGameFlags.legendaryForge; }
+
+  /** Can the Legendary Forge upgrade be bought? Stage ≥ 8, a Blacksmith exists at
+   *  home, not already upgraded, and 200 iron + 100 stone available at home. */
+  canBuildLegendaryForge(): { ok: boolean; reason?: string } {
+    if (this.kingdomStage() < 8) return { ok: false, reason: 'Requires a Medium Castle (stage 8).' };
+    if (this.hasLegendaryForge()) return { ok: false, reason: 'Already a Legendary Forge.' };
+    const home = this.homeState();
+    if (!home) return { ok: false, reason: 'No home castle.' };
+    const hasSmith = home.buildings.some(b => b.typeKey === 'blacksmith');
+    if (!hasSmith) return { ok: false, reason: 'Build a Blacksmith first.' };
+    if ((home.resources.iron || 0) < 200) return { ok: false, reason: 'Need 200 iron.' };
+    if ((home.resources.stone || 0) < 100) return { ok: false, reason: 'Need 100 stone.' };
+    return { ok: true };
+  }
+
+  /** Upgrade the home Blacksmith → Legendary Forge (200 iron + 100 stone). It
+   *  begins producing legendaryEquipment via the daily tick. Returns ok+reason. */
+  buildLegendaryForge(): { ok: boolean; reason?: string } {
+    const c = this.canBuildLegendaryForge();
+    if (!c.ok) return c;
+    const home = this.homeState()!;
+    home.resources.iron -= 200;
+    home.resources.stone -= 100;
+    this.lateGameFlags.legendaryForge = true;
+    // Mark the blacksmith building's level so the per-settlement view can show it.
+    const smith = home.buildings.find(b => b.typeKey === 'blacksmith');
+    if (smith) smith.level = Math.max(smith.level || 1, 2);
+    if (home.resources.legendaryEquipment == null) home.resources.legendaryEquipment = 0;
+    this.notify('The Blacksmith is reforged into a Legendary Forge!', 0xffe08a);
+    this.recordChronicle('Master smiths raise a Legendary Forge, its fires hot enough to shape weapons of legend.');
+    return { ok: true };
+  }
+
+  /** Daily tick: a standing Legendary Forge produces 1 legendaryEquipment/day
+   *  into the home stockpile (simple, non-overlapping with the P11 economy). */
+  tickLegendaryForge(): void {
+    if (!this.hasLegendaryForge()) return;
+    const home = this.homeState();
+    if (!home) return;
+    home.resources.legendaryEquipment = (home.resources.legendaryEquipment || 0) + 1;
+  }
+
+  /** Stocked Legendary Equipment at the home castle. */
+  legendaryEquipmentStock(): number {
+    const home = this.homeState();
+    return home ? (home.resources.legendaryEquipment || 0) : 0;
+  }
+
+  /** Upgrade a hero's weapon with 1 legendaryEquipment: that hero gains +40%
+   *  damage and a flag for a unique visual (consumed by Phase 11). Returns
+   *  {ok, reason}. The damage bonus is stored on heroFlags so it serializes and
+   *  BattleScene / later phases can read it without touching the Heroes class. */
+  upgradeHeroWeapon(heroId: string): { ok: boolean; reason?: string } {
+    if (!this.hasLegendaryForge()) return { ok: false, reason: 'Build a Legendary Forge first.' };
+    if (this.legendaryEquipmentStock() < 1) return { ok: false, reason: 'No Legendary Equipment in stock.' };
+    const h = this.heroes.byId(heroId);
+    if (!h) return { ok: false, reason: 'No such hero.' };
+    const home = this.homeState()!;
+    home.resources.legendaryEquipment -= 1;
+    this.heroFlags.legendaryWeapon = this.heroFlags.legendaryWeapon || {};
+    this.heroFlags.legendaryWeapon[heroId] = { damageMult: 1.4, uniqueVisual: true };
+    this.notify(`${h.name}'s weapon is reforged with legendary steel (+40% damage).`, 0xffe08a);
+    this.recordChronicle(`${h.name} is armed from the Legendary Forge — a weapon worthy of song.`);
+    return { ok: true };
+  }
+
+  // ==========================================================================
+  // Phase 8 — EMISSARY SYSTEM (send a named envoy → permanent embassy)
+  // ==========================================================================
+  /** Can an emissary be sent to a faction? Stage ≥ 8, the faction is real, no
+   *  embassy or emissary already in flight to it. */
+  canSendEmissary(faction: string): { ok: boolean; reason?: string } {
+    if (this.kingdomStage() < 8) return { ok: false, reason: 'Requires a Medium Castle (stage 8).' };
+    if (!this.factionKeys().includes(faction)) return { ok: false, reason: 'Unknown faction.' };
+    if (this.embassies[faction] != null) return { ok: false, reason: 'An embassy already stands there.' };
+    if (this.emissaries.some(e => e.faction === faction && e.status === 'travelling')) return { ok: false, reason: 'An emissary is already on the road.' };
+    return { ok: true };
+  }
+
+  /** Send a named emissary as a continent party toward a faction's castle. On
+   *  arrival (driven by ContinentScene movement → LateGame.tickEmissaries) it
+   *  founds a permanent embassy (passive +2 relations/day). Returns ok + the
+   *  spawned emissary (or reason). */
+  sendEmissary(faction: string): { ok: boolean; reason?: string; emissary?: EmissaryParty } {
+    const c = this.canSendEmissary(faction);
+    if (!c.ok) return c;
+    const f = this.world ? this.world.factions.find(x => x.key === faction) : null;
+    if (!f) return { ok: false, reason: 'Unknown faction.' };
+    const home = this.homeSettlement();
+    const startCol = home ? home.col : this.player.col;
+    const startRow = home ? home.row : this.player.row;
+    const NAMES = ['Envoy Lysa', 'Herald Bram', 'Ambassador Corin', 'Emissary Talia', 'Legate Orin', 'Envoy Sable'];
+    const em: EmissaryParty = {
+      id: `emissary_${this.emissaryCounter++}`,
+      name: NAMES[this.emissaryCounter % NAMES.length],
+      faction,
+      color: f.color,
+      col: startCol, row: startRow,
+      destCol: f.castleCol, destRow: f.castleRow,
+      status: 'travelling',
+    };
+    this.emissaries.push(em);
+    this.notify(`${em.name} sets out to open an embassy with ${f.name}.`, 0xc9a14a);
+    this.recordChronicle(`${em.name} departs the capital, bearing the kingdom's word to ${f.name}.`);
+    return { ok: true, emissary: em };
+  }
+
+  /** Establish a permanent embassy on arrival (called by LateGame when the
+   *  emissary reaches its destination). Passive +2 relations/day begins. */
+  establishEmbassy(em: EmissaryParty): void {
+    em.status = 'embassy';
+    this.embassies[em.faction] = this.displayDay();
+    const f = this.world ? this.world.factions.find(x => x.key === em.faction) : null;
+    const name = f ? f.name : em.faction;
+    this.notify(`An embassy opens with ${name}. Relations will warm steadily.`, 0x2a7a4f);
+    this.recordChronicle(`A permanent embassy is established with ${name}. Goodwill flows between the realms.`);
+  }
+
+  /** Mark an emissary captured (hostile faction). Ransom 200 gold to free. */
+  captureEmissary(em: EmissaryParty): void {
+    em.status = 'captured';
+    const f = this.world ? this.world.factions.find(x => x.key === em.faction) : null;
+    const name = f ? f.name : em.faction;
+    this.notify(`${em.name} has been seized by ${name}! Pay 200 gold to ransom them.`, 0x8c2b2b);
+    this.recordChronicle(`${em.name} is taken captive by ${name}. The court debates the ransom.`);
+  }
+
+  /** Pay 200 gold to free a captured emissary (they return home, no embassy). */
+  ransomEmissary(id: string): { ok: boolean; reason?: string } {
+    const em = this.emissaries.find(e => e.id === id);
+    if (!em || em.status !== 'captured') return { ok: false, reason: 'No captive to ransom.' };
+    if (this.gold < 200) return { ok: false, reason: 'Need 200 gold.' };
+    this.gold -= 200;
+    // Freed → removed from the map (returns home; no embassy founded).
+    this.emissaries = this.emissaries.filter(e => e.id !== id);
+    this.notify(`${em.name} is ransomed and returns home safely.`, 0xc9a14a);
+    return { ok: true };
+  }
+
+  /** Daily tick over standing embassies: +2 relations/day with each faction that
+   *  has an embassy (skips factions at open war if that would feel odd — we keep
+   *  it simple and always warm). */
+  tickEmbassies(): void {
+    for (const k of Object.keys(this.embassies)) this.changeRelation(k, 2, 'an embassy maintains goodwill');
+  }
+
+  // ==========================================================================
+  // Phase 8 — IMPERIAL PROCLAMATION (stage-9 momentous action)
+  // ==========================================================================
+  /** Can the Imperial Proclamation be declared? Stage 9, not already proclaimed,
+   *  and 1000 gold + 300 stone + 200 iron available (gold from the purse; stone/
+   *  iron from the home stockpile). */
+  canDeclareImperial(): { ok: boolean; reason?: string } {
+    if (this.kingdomStage() < 9) return { ok: false, reason: 'Requires a Large Castle (stage 9).' };
+    if (this.imperialProclaimed) return { ok: false, reason: 'The Empire is already proclaimed.' };
+    if (this.gold < 1000) return { ok: false, reason: 'Need 1000 gold.' };
+    const home = this.homeState();
+    if (!home) return { ok: false, reason: 'No home castle.' };
+    if ((home.resources.stone || 0) < 300) return { ok: false, reason: 'Need 300 stone.' };
+    if ((home.resources.iron || 0) < 200) return { ok: false, reason: 'Need 200 iron.' };
+    return { ok: true };
+  }
+
+  /** Declare the Imperial Proclamation (stage 9). Allied factions celebrate (a
+   *  gold gift + relations up), neutral factions −30 relations, hostile factions
+   *  declare war immediately. Sets imperialProclaimed + the Phase-10 ending flag.
+   *  Returns ok + a per-faction reaction summary for the scene. */
+  declareImperial(): { ok: boolean; reason?: string; reactions?: Record<string, string> } {
+    const c = this.canDeclareImperial();
+    if (!c.ok) return c;
+    this.gold -= 1000;
+    const home = this.homeState()!;
+    home.resources.stone -= 300;
+    home.resources.iron -= 200;
+    this.imperialProclaimed = true;
+    this.imperialEndingUnlocked = true; // Phase 10 grants a unique ending on a win
+    const reactions: Record<string, string> = {};
+    for (const k of this.factionKeys()) {
+      const allied = this.diplomacy ? this.diplomacy.isAllied(k) : false;
+      const rel = this.diplomacy ? this.diplomacy.get(k) : 0;
+      if (allied) {
+        // Allies celebrate: a gold gift + relations up.
+        this.gold += 150;
+        this.changeRelation(k, 20, 'your ally celebrates the new Empire');
+        reactions[k] = 'celebrates';
+      } else if (rel <= -50) {
+        // Already hostile → open war immediately.
+        if (this.diplomacy) {
+          this.diplomacy.rel[k] = -100; this.diplomacy.nap[k] = false; this.diplomacy.ally[k] = false;
+          const t = this.diplomacy.tr(k); t.alliance = false; t.trade = false;
+        }
+        reactions[k] = 'war';
+      } else {
+        // Neutral powers resent the upstart Empire.
+        this.changeRelation(k, -30, 'they resent your Imperial ambition');
+        // If that pushed them to hostile, they too declare war.
+        if (this.diplomacy && this.diplomacy.get(k) <= -50) {
+          this.diplomacy.rel[k] = -100; this.diplomacy.nap[k] = false;
+          reactions[k] = 'war';
+        } else {
+          reactions[k] = 'neutral';
+        }
+      }
+    }
+    this.notify(`${this.king.kingdom} is proclaimed an EMPIRE! The continent will never be the same.`, 0xffe08a);
+    this.recordChronicle(`${this.king.ruler} proclaims the founding of the Empire of ${this.king.kingdom}. Allies cheer; rivals tremble; enemies march.`);
+    return { ok: true, reactions };
+  }
+
   /** Integer day for display. */
   displayDay(): number { return Math.max(1, Math.floor(this.day)); }
 
@@ -519,6 +964,17 @@ class GameWorldState {
     this.honor = 0;
     this.diploFlags = {};
     this.initDiplomacy(); // wire fresh Diplomacy + FactionLeaders to the new world
+    // --- Phase 8 late-game reset (all JSON for Phase 12) ---
+    this.armyCap = 1;
+    this.tournament = { active: false, endDay: 0, col: 0, row: 0, held: 0 };
+    this.emissaries = [];
+    this.emissaryCounter = 0;
+    this.embassies = {};
+    this.imperialProclaimed = false;
+    this.imperialEndingUnlocked = false;
+    this.chronicle = [];
+    this.highestStageSeen = 1;
+    this.lateGameFlags = {};
     this.spawnAIParties();
     this.spawnMercenaryCamps();
     this.started = true;
@@ -664,6 +1120,17 @@ class GameWorldState {
       leaderMemory: this.leaderMemory,
       honor: this.honor,
       diploFlags: this.diploFlags,
+      // (Phase 8) Late-game campaign layer — all plain JSON for Phase 12.
+      armyCap: this.armyCap,
+      tournament: this.tournament,
+      emissaries: this.emissaries,
+      emissaryCounter: this.emissaryCounter,
+      embassies: this.embassies,
+      imperialProclaimed: this.imperialProclaimed,
+      imperialEndingUnlocked: this.imperialEndingUnlocked,
+      chronicle: this.chronicle,
+      highestStageSeen: this.highestStageSeen,
+      lateGameFlags: this.lateGameFlags,
       started: this.started,
     };
   }

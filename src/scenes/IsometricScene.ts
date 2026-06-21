@@ -97,6 +97,7 @@ import { Discovery } from '../systems/Discovery.js';
 import { KingdomStats } from '../systems/KingdomStats.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
 import { GameWorld } from '../systems/GameWorld.js';
+import { LateGame } from '../systems/LateGame.js';
 import { generateWorld } from '../systems/WorldGenerator.js';
 import { Biome } from '../data/Biomes.js';
 // (Phase 4 Pioneer) Aliased so the in-scene helpers read clearly as a reference
@@ -182,6 +183,11 @@ export class IsometricScene extends GameScene {
     this._settleBiome = this._settle ? this._settle.localMap.biome : Biome.PLAINS;
     this._settlePlayerOwned = this._settle ? this._settle.localMap.playerOwned : true;
     this._settleSeed = this._settle ? this._settle.localMap.seed : 12345;
+    // (Phase 8) Stage-9 population-cap raise (→500) for the home settlement. 0 =
+    // no override (Population.capacity falls back to the per-house value). Set on
+    // entry; LateGame.populationCap() returns 0 below stage 9 so it is inert until
+    // the home castle reaches a Large Castle.
+    this._popCapOverride = (this._settle && this._settle.faction === 'player') ? LateGame.populationCap() : 0;
   }
 
   // Deterministic per-settlement PRNG (mulberry32) seeded from the local map seed
@@ -2897,6 +2903,20 @@ export class IsometricScene extends GameScene {
   // ---- Settlement tiers (swap the castle to the matching iso fort) ---------
 
   currentStage() { return this.TIERS[this.tierIndex].stage; }
+
+  // (Phase 8) Building cap = the tier's maxBuildings, OVERRIDDEN to 50 at stage 9
+  // for the home settlement (LateGame.buildingCap()). For non-home / lower-stage
+  // settlements we use the per-tier value. This is the single place the build
+  // panel + canPlace() read the cap, so the stage-9 raise applies everywhere.
+  maxBuildings() {
+    const tierMax = (this.TIERS[this.tierIndex] && this.TIERS[this.tierIndex].maxBuildings) || 8;
+    // Only the player's home castle benefits from the stage-9 raise.
+    if (this._settle && this._settle.faction === 'player') {
+      const override = LateGame.buildingCap(); // 0 below stage 9
+      if (override > 0) return Math.max(tierMax, override);
+    }
+    return tierMax;
+  }
 
   upgradeTier() {
     if (this.tierIndex >= this.TIERS.length - 1) return;

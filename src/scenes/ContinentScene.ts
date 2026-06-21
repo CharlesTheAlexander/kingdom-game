@@ -14,6 +14,8 @@ import { ExpeditionSystem } from '../systems/ExpeditionSystem.js';
 import { HeroWorld } from '../systems/HeroWorld.js';
 import { WorldDiplomacy } from '../systems/WorldDiplomacy.js';
 import type { LeaderLine } from '../systems/WorldDiplomacy.js';
+import { LateGame } from '../systems/LateGame.js';
+import type { EmissaryParty } from '../systems/GameWorld.js';
 import { generateHeroPortraits, generatePortraits } from '../systems/AssetGenerator.js';
 
 // ============================================================================
@@ -405,6 +407,10 @@ export class ContinentScene extends Phaser.Scene {
     this.updateWorkers(delta);
     this.tickRuinDigs(dayDelta);
 
+    // --- Emissary parties (Phase 8): travel toward a faction → embassy/capture
+    const emBanners = LateGame.tickEmissaries(dayDelta);
+    for (const b of emBanners) this.flashBanner(b.text, b.color);
+
     // --- (Phase 6) Biome-entry hero dialogue -----------------------------
     // When the party crosses into a biome a hero reacts to (forest/mountain/
     // winter-by-season), fire a contextual line (throttled inside HeroWorld).
@@ -491,7 +497,10 @@ export class ContinentScene extends Phaser.Scene {
     const joined = HeroWorld.tickArrivals();
     for (const id of joined) {
       const h = GameWorld.heroes.byId(id);
-      if (h) this.flashBanner(`${h.name}, ${h.title}, has joined your host!`, 0xc9a14a);
+      if (h) {
+        this.flashBanner(`${h.name}, ${h.title}, has joined your host!`, 0xc9a14a);
+        LateGame.chronicleHeroJoined(h.name, h.title); // (Phase 8) record the event
+      }
     }
     // 2. Hero quests: auto-start eligible quests (notification + travelable marker)
     //    and auto-complete any whose marker the party reached.
@@ -513,6 +522,19 @@ export class ContinentScene extends Phaser.Scene {
     // open diplomacy panel.
     WorldDiplomacy.onNewDay();
     if (this._diploPanel) this.openDiplomacyPanel();
+
+    // --- (Phase 8) LATE-GAME daily tick ----------------------------------
+    // Resolve a finished tournament, run the Legendary Forge, warm embassies,
+    // fire any stage-transition events (8/9), and keep the army cap synced.
+    // Surface every resulting beat as a banner (+leader bubbles at stage 9).
+    const lgBanners = LateGame.onNewDay();
+    for (const b of lgBanners) this.flashBanner(b.text, b.color);
+    // At the stage-9 message beat, also pop the three leader speech bubbles.
+    if (GameWorld.lateGameFlags._stage9SpeechPending) {
+      GameWorld.lateGameFlags._stage9SpeechPending = false;
+      this.popStage9LeaderSpeech();
+    }
+    if (this._realmPanel) this.openRealmPanel(); // refresh an open Realm/Chronicle panel
   }
 
   // =========================================================================
@@ -1116,6 +1138,62 @@ export class ContinentScene extends Phaser.Scene {
       this.iconLayer.add(cg);
     }
 
+    // (Phase 8) GRAND TOURNAMENT grounds near the home castle while active —
+    // a cluster of striped tents + a tall pennant flag, in festive colours, so
+    // the player can see the festival from the continent.
+    const tour = GameWorld.tournament;
+    if (tour.active) {
+      const tp = this.tileToPx(tour.col, tour.row);
+      const g = this.add.graphics();
+      g.fillStyle(0x1a120a, 0.4); g.fillEllipse(0, 12, 44, 12);          // grounds shadow
+      // Three tents (left/centre/right).
+      const tent = (ox: number, col: number, h: number) => {
+        g.fillStyle(col, 1); g.fillTriangle(ox, -h, ox - 9, 6, ox + 9, 6);
+        g.lineStyle(1.2, 0x3a2810, 0.95); g.strokeTriangle(ox, -h, ox - 9, 6, ox + 9, 6);
+        g.fillStyle(0xf5ecd2, 1); g.fillTriangle(ox, -h, ox - 9, 6, ox - 1, 6); // stripe
+      };
+      tent(-16, 0xc23b3b, 14); tent(16, 0x3b6bc2, 14); tent(0, 0xd6b33b, 20);
+      // Central pennant flag (player colour) on a tall pole.
+      g.lineStyle(2, 0x4a3318, 1); g.lineBetween(0, 6, 0, -30);
+      g.fillStyle(GameWorld.playerColor, 1); g.fillTriangle(0, -30, 0, -20, 14, -25);
+      g.lineStyle(1.2, 0xf5ecd2, 0.9); g.strokeTriangle(0, -30, 0, -20, 14, -25);
+      g.setPosition(tp.x, tp.y); g.setScale(sc);
+      this.iconLayer.add(g);
+    }
+
+    // (Phase 8) EMISSARY parties — a scroll/envelope icon in the target faction
+    // colour, travelling toward that faction. Captured emissaries show a red bar.
+    for (const em of LateGame.liveEmissaries() as EmissaryParty[]) {
+      const ep = this.tileToPx(em.col, em.row);
+      const g = this.add.graphics();
+      g.fillStyle(0x1a120a, 0.5); g.fillEllipse(0, 7, 16, 5);            // shadow
+      // parchment scroll body
+      g.fillStyle(0xf2e8cf, 1); g.fillRoundedRect(-8, -8, 16, 12, 2);
+      g.lineStyle(1.2, 0x6b4a26, 0.95); g.strokeRoundedRect(-8, -8, 16, 12, 2);
+      // wax seal in the faction colour
+      g.fillStyle(em.color, 1); g.fillCircle(0, -2, 3.2);
+      g.lineStyle(1, 0x2a1c0c, 0.8); g.strokeCircle(0, -2, 3.2);
+      if (em.status === 'captured') { g.lineStyle(2, 0x8c2b2b, 0.95); g.lineBetween(-8, -8, 8, 4); } // struck-through = captive
+      g.setPosition(ep.x, ep.y); g.setScale(sc);
+      this.iconLayer.add(g);
+    }
+
+    // (Phase 8) Standing EMBASSY markers at faction castles (a small banner pair
+    // in player + faction colour) so the player can see where embassies stand.
+    for (const fk of Object.keys(GameWorld.embassies)) {
+      const f = this.world.factions.find(x => x.key === fk);
+      if (!f) continue;
+      if (!this.fogLifted(f.castleCol, f.castleRow)) continue;
+      const bp = this.tileToPx(f.castleCol, f.castleRow);
+      const g = this.add.graphics();
+      g.lineStyle(1.6, 0x4a3318, 1); g.lineBetween(-4, 4, -4, -12);
+      g.fillStyle(GameWorld.playerColor, 1); g.fillTriangle(-4, -12, -4, -5, 6, -8.5);
+      g.lineStyle(1.6, 0x4a3318, 1); g.lineBetween(4, 4, 4, -8);
+      g.fillStyle(f.color, 1); g.fillTriangle(4, -8, 4, -2, 12, -5);
+      g.setPosition(bp.x, bp.y); g.setScale(sc * 0.9);
+      this.iconLayer.add(g);
+    }
+
     // (Phase 6) Active hero-quest markers (gold stars) into the icon layer.
     this.layoutQuestMarkers(sc);
     // (Phase 6) Hero portrait overlays on the party icon + stationed settlements.
@@ -1309,6 +1387,16 @@ export class ContinentScene extends Phaser.Scene {
     db.on('pointerdown', () => { this._uiClick = true; });
     db.on('pointerup', () => { this._uiClick = true; this.toggleDiplomacyPanel(); });
     this.input.keyboard?.on('keydown-D', () => this.toggleDiplomacyPanel());
+
+    // (Phase 8) Realm panel toggle — late-game actions (Grand Tournament,
+    // Legendary Forge, Emissaries, Imperial Proclamation) + the Chronicle. R key.
+    const rb = fix(this.add.rectangle(GAME_W - 70, by + 136, 120, 26, 0x6b4a26).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
+    fix(this.add.text(GAME_W - 70, by + 136, 'Realm (R)', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5));
+    rb.on('pointerover', () => rb.setFillStyle(0x82602f));
+    rb.on('pointerout', () => rb.setFillStyle(0x6b4a26));
+    rb.on('pointerdown', () => { this._uiClick = true; });
+    rb.on('pointerup', () => { this._uiClick = true; this.toggleRealmPanel(); });
+    this.input.keyboard?.on('keydown-R', () => this.toggleRealmPanel());
   }
 
   // =========================================================================
@@ -2168,6 +2256,183 @@ export class ContinentScene extends Phaser.Scene {
   }
 
   // =========================================================================
+  // (Phase 8) REALM PANEL — late-game (stage 8/9) actions + the Chronicle.
+  // Built lazily, rebuilt each open so contents (stage, costs, stock) stay fresh.
+  // The single hub for: Grand Tournament, Legendary Forge + hero-weapon upgrade,
+  // Emissaries (per faction), Imperial Proclamation, and the Chronicle scroll.
+  // =========================================================================
+  toggleRealmPanel() { if (this._realmPanel) { this.closeRealmPanel(); return; } this.openRealmPanel(); }
+  closeRealmPanel() { if (this._realmPanel) { this._realmPanel.forEach((o: any) => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._realmPanel = null; } }
+
+  openRealmPanel() {
+    this.closeRealmPanel();
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 26);
+    const els: any[] = [];
+    const W = 460, H = 560, x = GAME_W / 2 - W / 2, y = 40;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x201608, 0.98).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.rectangle(x, y, W, 30, 0x3a2a10, 1).setOrigin(0, 0)));
+    const stage = GameWorld.kingdomStage();
+    els.push(fix(this.add.text(x + 12, y + 7, `Realm — ${LateGame.stageName(stage)} (stage ${stage}/9)`, { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+    const close = fix(this.add.text(x + W - 22, y + 6, '✕', { fontFamily: 'Georgia, serif', fontSize: '16px', color: '#e9d6a4' }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true }));
+    close.on('pointerdown', () => { this._uiClick = true; });
+    close.on('pointerup', () => { this._uiClick = true; this.closeRealmPanel(); });
+    els.push(close);
+
+    let cy = y + 38;
+    const head = (t: string) => { els.push(fix(this.add.text(x + 12, cy, t, { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#e0b84a', fontStyle: 'bold' }).setOrigin(0, 0))); cy += 18; };
+    const note = (t: string, col = '#cfc1a6') => { els.push(fix(this.add.text(x + 16, cy, t, { fontFamily: 'Georgia, serif', fontSize: '11px', color: col, wordWrap: { width: W - 32 } }).setOrigin(0, 0))); cy += 15; };
+    // A small action button helper. `enabled` greys it out; `tip` shown when disabled.
+    const actionBtn = (label: string, enabled: boolean, fn: () => void, tip?: string) => {
+      const bw = 150, bh = 24;
+      const b = fix(this.add.rectangle(x + W - bw - 14, cy, bw, bh, enabled ? 0x1f5b3a : 0x39393f).setOrigin(0, 0).setStrokeStyle(1, 0xf0e6c8, 0.7).setInteractive({ useHandCursor: enabled }));
+      els.push(b, fix(this.add.text(x + W - bw / 2 - 14, cy + bh / 2, label, { fontFamily: 'Georgia, serif', fontSize: '11px', color: enabled ? '#fff' : '#888', fontStyle: 'bold' }).setOrigin(0.5)));
+      b.on('pointerdown', () => { this._uiClick = true; });
+      b.on('pointerup', () => { this._uiClick = true; if (enabled) fn(); else if (tip) this.flashBanner(tip, 0x8c2b2b); });
+      cy += bh + 6;
+    };
+
+    els.push(fix(this.add.text(x + W - 14, y + 9, `Gold ${GameWorld.gold}`, { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#e0b84a' }).setOrigin(1, 0)));
+
+    if (stage < 8) {
+      head('Late-game unlocks');
+      note('Grow your home castle to a Medium Castle (stage 8) to unlock the Grand Tournament, the Legendary Forge, an extra army, and Emissaries.', '#9aa0a6');
+      cy += 4;
+    } else {
+      // --- GRAND TOURNAMENT ---
+      head('Grand Tournament');
+      const t = GameWorld.tournament;
+      if (t.active) { note(`Underway — ends day ${t.endDay}. Champions joust at your castle.`, '#ffe08a'); }
+      else {
+        note('300 gold + 50 food · ~3 days · champion joins, +10 relations, festival.');
+        const tc = GameWorld.canStartTournament();
+        actionBtn('Hold Tournament', tc.ok, () => { const r = GameWorld.startTournament(); if (r.ok) this.flashBanner('A Grand Tournament begins!', 0xd6c04a); this.openRealmPanel(); }, tc.reason);
+      }
+      cy += 2;
+      // --- LEGENDARY FORGE ---
+      head('Legendary Forge');
+      if (GameWorld.hasLegendaryForge()) {
+        note(`Legendary Equipment in stock: ${GameWorld.legendaryEquipmentStock()} (produces 1/day).`, '#ffe08a');
+        // Hero-weapon upgrade: pick the first living hero without a legendary weapon.
+        const living = GameWorld.heroes.living();
+        const lw = GameWorld.heroFlags.legendaryWeapon || {};
+        const target = living.find((h: any) => !lw[h.id]);
+        if (target) {
+          const can = GameWorld.legendaryEquipmentStock() >= 1;
+          actionBtn(`Arm ${target.name} (+40%)`, can, () => { const r = GameWorld.upgradeHeroWeapon(target.id); if (r.ok) this.flashBanner(`${target.name} armed with legendary steel!`, 0xffe08a); this.openRealmPanel(); }, 'No Legendary Equipment in stock.');
+        } else if (living.length) note('All heroes wield legendary weapons.', '#9aa0a6');
+        else note('No heroes yet to arm.', '#9aa0a6');
+      } else {
+        note('Upgrade your Blacksmith: 200 iron + 100 stone (at your castle).');
+        const fc = GameWorld.canBuildLegendaryForge();
+        actionBtn('Build Forge', fc.ok, () => { const r = GameWorld.buildLegendaryForge(); if (r.ok) this.flashBanner('The Legendary Forge is raised!', 0xffe08a); this.openRealmPanel(); }, fc.reason);
+      }
+      cy += 2;
+      // --- EMISSARIES (per faction) ---
+      head('Emissaries & Embassies');
+      note(`Armies cap: ${GameWorld.armyCap} (extra slot at stage 8).`, '#9aa0a6');
+      for (const fk of GameWorld.factionKeys()) {
+        const fName = LateGame.factionName(fk);
+        if (GameWorld.embassies[fk] != null) { note(`${fName}: embassy open (+2 relations/day).`, '#7cfc7c'); continue; }
+        const captive = GameWorld.emissaries.find(e => e.faction === fk && e.status === 'captured');
+        if (captive) {
+          actionBtn(`Ransom ${captive.name} (200g)`, GameWorld.gold >= 200, () => { const r = GameWorld.ransomEmissary(captive.id); if (r.ok) this.flashBanner('Emissary ransomed.', 0xc9a14a); this.openRealmPanel(); }, 'Need 200 gold.');
+          continue;
+        }
+        const ec = GameWorld.canSendEmissary(fk);
+        actionBtn(`Emissary → ${fName}`, ec.ok, () => { const r = GameWorld.sendEmissary(fk); if (r.ok) this.flashBanner(`Emissary sets out for ${fName}.`, 0xc9a14a); this.openRealmPanel(); }, ec.reason);
+      }
+      cy += 2;
+      // --- IMPERIAL PROCLAMATION (stage 9) ---
+      head('Imperial Proclamation');
+      if (GameWorld.imperialProclaimed) note('The Empire has been proclaimed. History remembers this day.', '#ffe08a');
+      else if (stage < 9) note('Requires a Large Castle (stage 9).', '#9aa0a6');
+      else {
+        note('1000 gold + 300 stone + 200 iron. Allies cheer; rivals turn; enemies march.');
+        const ic = GameWorld.canDeclareImperial();
+        actionBtn('Proclaim Empire', ic.ok, () => this.confirmImperial(), ic.reason);
+      }
+    }
+
+    // --- CHRONICLE (always shown; the scribe tower formalises it at stage 9) ---
+    cy += 6;
+    els.push(fix(this.add.text(x + 12, cy, 'Chronicle of the Kingdom', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#e0b84a', fontStyle: 'bold' }).setOrigin(0, 0)));
+    cy += 18;
+    const lines = LateGame.chronicleLines();
+    const boxY = cy, boxH = y + H - cy - 12;
+    els.push(fix(this.add.rectangle(x + 12, boxY, W - 24, boxH, 0x140d06, 0.85).setOrigin(0, 0).setStrokeStyle(1, 0x6b5a3a, 0.7)));
+    if (!lines.length) {
+      els.push(fix(this.add.text(x + 20, boxY + 8, 'The Chronicle is yet unwritten.', { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#8a7e62', fontStyle: 'italic' }).setOrigin(0, 0)));
+    } else {
+      // Show the most recent entries that fit, newest at the bottom (scroll-style).
+      const maxLines = Math.max(1, Math.floor((boxH - 12) / 26));
+      const shown = lines.slice(-maxLines);
+      let ly = boxY + 8;
+      for (const ln of shown) {
+        els.push(fix(this.add.text(x + 20, ly, ln, { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#d8c8a4', fontStyle: 'italic', wordWrap: { width: W - 40 } }).setOrigin(0, 0)));
+        ly += 26;
+      }
+    }
+
+    this._realmPanel = els;
+  }
+
+  // A confirmation modal for the irreversible Imperial Proclamation.
+  confirmImperial() {
+    if (this._modal) return;
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 50);
+    const els: any[] = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.6).setOrigin(0, 0).setInteractive()));
+    const W = 440, H = 180, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xffe08a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 20, 'Proclaim the Empire?', { fontFamily: 'Georgia, serif', fontSize: '18px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 50, 'This cannot be undone. Allies will celebrate, neutral\npowers will resent you, and your enemies will march to war.', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#cfc1a6', align: 'center' }).setOrigin(0.5, 0)));
+    const yes = fix(this.add.rectangle(x + W / 2 - 90, y + H - 36, 150, 34, 0x8a6a1a).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(yes, fix(this.add.text(x + W / 2 - 90, y + H - 36, 'Proclaim', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const no = fix(this.add.rectangle(x + W / 2 + 90, y + H - 36, 150, 34, 0x6b3a26).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(no, fix(this.add.text(x + W / 2 + 90, y + H - 36, 'Not yet', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const closeModal = () => { els.forEach(o => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._modal = null; };
+    this._modal = closeModal;
+    no.on('pointerdown', () => { this._uiClick = true; });
+    no.on('pointerup', () => { this._uiClick = true; closeModal(); });
+    yes.on('pointerdown', () => { this._uiClick = true; });
+    yes.on('pointerup', () => { this._uiClick = true; closeModal(); this.doDeclareImperial(); });
+  }
+
+  // Run the proclamation, surface reactions (leader bubbles + banner), refresh.
+  doDeclareImperial() {
+    const r = GameWorld.declareImperial();
+    if (!r.ok) { if (r.reason) this.flashBanner(r.reason, 0x8c2b2b); return; }
+    this.flashBanner(`${GameWorld.king.kingdom} is proclaimed an EMPIRE!`, 0xffe08a);
+    // Pop leader bubbles for the reactions (celebrate / war / neutral).
+    const reactions = r.reactions || {};
+    let delay = 0;
+    for (const fk of Object.keys(reactions)) {
+      const react = reactions[fk];
+      const sit = react === 'war' ? 'war' : react === 'celebrate' || react === 'celebrates' ? 'allied' : 'neutral';
+      this.time.delayedCall(delay, () => this.showLeaderSpeech(WorldDiplomacy.line(fk, sit)));
+      delay += 1200;
+    }
+    if (this._diploPanel) this.openDiplomacyPanel();
+    this.openRealmPanel();
+  }
+
+  // (Phase 8) Pop the three leader speech bubbles for the stage-9 transition.
+  popStage9LeaderSpeech() {
+    const lines: Record<string, string> = {
+      red: 'A fortress worthy of a true war. I will be watching your every move.',
+      purple: 'Such a seat of power. We must speak — there is much to gain, or lose.',
+      yellow: 'BIG castle! Krag wants to SMASH it... or feast in it. Krag undecided!',
+    };
+    let delay = 0;
+    for (const fk of GameWorld.factionKeys()) {
+      const text = lines[fk];
+      if (!text) continue;
+      this.time.delayedCall(delay, () => this.showLeaderSpeech({ faction: fk, name: WorldDiplomacy.leaderName(fk), portrait: 'portrait_' + fk, text }));
+      delay += 1400;
+    }
+  }
+
+  // =========================================================================
   // Banner / tutorial / menu
   // =========================================================================
   flashBanner(text: string, color: number) {
@@ -2226,6 +2491,8 @@ export class ContinentScene extends Phaser.Scene {
     // (Phase 7) Tear down diplomacy UI overlays + drop GameWorld hooks pointing here.
     if (this._diploPanel) { try { this.closeDiplomacyPanel(); } catch (e) { /* ignore */ } }
     if (this._leaderSpeech) { try { this._leaderSpeech.forEach((o: any) => o.destroy()); } catch (e) { /* ignore */ } this._leaderSpeech = null; }
+    // (Phase 8) Tear down the Realm/Chronicle panel.
+    if (this._realmPanel) { try { this.closeRealmPanel(); } catch (e) { /* ignore */ } }
     GameWorld._leaderSpeechHook = null;
     GameWorld._diploPanelHook = null;
   }

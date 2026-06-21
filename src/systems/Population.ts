@@ -31,7 +31,12 @@ export class Population {
 
   capacity(): number {
     const houses = this.scene.buildings ? this.scene.buildings.countOfType('house') : 0;
-    return 10 + houses * 4; // base 10, +4 per House
+    const base = 10 + houses * 4; // base 10, +4 per House
+    // (Phase 8) At stage 9 the home settlement's population cap is raised to 500.
+    // IsometricScene sets `_popCapOverride` (0 = no override) from LateGame so the
+    // cap has a single source of truth without coupling Population to LateGame.
+    const override = this.scene._popCapOverride || 0;
+    return override > 0 ? Math.max(base, override) : base;
   }
 
   // Called once per game-day from onNewDay().

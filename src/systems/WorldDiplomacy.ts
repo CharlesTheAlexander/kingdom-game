@@ -338,6 +338,8 @@ export class WorldDiplomacy {
     const m = this.memory(faction);
     m.warsDeclared += 1;
     m.allied = false; m.alliedSinceDay = -1;
+    // (Phase 8) Record the war in the Chronicle of the Kingdom.
+    GameWorld.recordChronicle(`War is declared upon ${this.factionName(faction)}.`);
     return { ok: true, line: this.line(faction, 'war') };
   }
 

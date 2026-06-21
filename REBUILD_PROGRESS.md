@@ -229,7 +229,53 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       build clean. P5 expedition + P6 hero audits still green (no regression). DEFERRED (per spec): late-game
       stages (P8 reads diploFlags), battle fog/rivers (P9), win endings (P10 — diploFlags.uniqueArtifact/intelShared
       written for them), save wiring (P12 reads diplomacy/leaders serialize() + leaderMemory/honor/diploFlags).
-- [ ] P8 — Late game content (stages 8–9, tournament, imperial)
+- [x] P8 — Late game content (stages 8–9, tournament, imperial)
+      DEFINED the "kingdom stage" = the player's HOME castle settlement `tier` + 1 (1..9). New helpers on GameWorld:
+      `kingdomStage()` (reads home `SettlementState.tier`), `setKingdomStage(n)` (test hook), `homeSettlement()/
+      homeState()`. New system `src/systems/LateGame.ts` (static, GameWorld-backed, JSON-friendly — same pattern as
+      WorldDiplomacy/HeroWorld) ORCHESTRATES the per-day ticks, emissary movement, stage-transition events, the
+      chronicle, and the stage-9 caps; the heavy ACTION methods live on GameWorld so the spec's `GameWorld.method()`
+      contract holds with no circular import. ALL new state is plain JSON on GameWorld (serializable() extended) for P12.
+      STAGE 8 (Medium Castle): (1) GRAND TOURNAMENT — `GameWorld.startTournament()` (300g + 50 food, ~3 days);
+      `tickTournament()` (daily, in LateGame.onNewDay) finishes it → a faction CHAMPION joins the army (8-strong
+      'champion' group), all factions +10 relations, home happiness +30/5d (tempHappy), +10 Protector rep
+      (lateGameFlags.protectorRep). Festival GROUNDS (striped tents + pennant flag) render near the home castle on the
+      continent (ContinentScene.layoutIcons) while active. (2) LEGENDARY FORGE — `buildLegendaryForge()` upgrades the
+      home Blacksmith (200 iron + 100 stone), `tickLegendaryForge()` PRODUCES 1 `legendaryEquipment`/day into the home
+      stockpile; `upgradeHeroWeapon(id)` consumes 1 → that hero +40% damage + uniqueVisual flag (heroFlags
+      .legendaryWeapon; the equip economy is P11). (3) EXTRA ARMY SLOT — `GameWorld.armyCap` raised 1→2 at stage 8
+      (LateGame.syncArmyCap). (4) EMISSARY SYSTEM — `sendEmissary(faction)` spawns a named scroll/envelope continent
+      party (EmissaryParty, rendered + advanced toward the faction castle via LateGame.tickEmissaries from
+      ContinentScene.update); on arrival → permanent EMBASSY (`establishEmbassy`, `embassies` map) → passive +2
+      relations/day (`tickEmbassies`). Hostile target → ~60% CAPTURE (`captureEmissary`); `ransomEmissary(id)` frees
+      for 200g. Embassy markers render at faction castles.
+      STAGE 9 (Large Castle): (5) IMPERIAL PROCLAMATION — `declareImperial()` (1000g + 300 stone + 200 iron): allies
+      celebrate (gold gift + relations up), neutrals −30, hostiles → war (rel −100). Sets `imperialProclaimed=true` +
+      `imperialEndingUnlocked` for P10's unique ending. Confirmation modal + leader-reaction speech bubbles in
+      ContinentScene. (6) CHRONICLE OF THE KINGDOM — `GameWorld.chronicle:[]` (+ `recordChronicle(text, once?)`),
+      narrative entries appended by wired event sources (hero joins → ContinentScene.onNewDay; war declared →
+      WorldDiplomacy.declareWar; settlement founded → PioneerSystem.tryFound; stage reached + all P8 actions). New
+      `scribetower` building (stage-9 unlock, reuses Library art). Readable narrative panel ("Day N: …") in the new
+      Realm panel. (7) CAPS — at stage 9 the HOME settlement population cap → 500 (Population.capacity reads scene
+      `_popCapOverride`) and building cap → 50 (IsometricScene.maxBuildings, which this phase also ADDS — it was
+      previously called but undefined). Single source of truth: LateGame.populationCap()/buildingCap() (0 below stage 9).
+      TRANSITION EVENTS (one-shot, gated on highestStageSeen): stage 8 → "travellers come to marvel at your great
+      castle" + neutral NPC flavour; stage 9 → each leader's message (Valdris/Elowen/Krag spec lines) + "the continent
+      watches you with awe and fear", with leader-speech bubbles. Both also append to the Chronicle.
+      UI: new "Realm (R)" continent HUD button + panel — the late-game hub (Grand Tournament, Legendary Forge +
+      hero-weapon upgrade, per-faction Emissaries/Embassies, Imperial Proclamation) + the Chronicle scroll, gated by
+      stage with costs/availability. main.ts exposes __LateGame for the audit.
+      Audit (/tmp/audit/p8_lategame.mjs, headless new-game): kingdomStage 1→8 via setKingdomStage; tournament available
+      → start → tick 3d → champion joined + all factions +10 + Protector rep +10; Legendary Forge built (200 iron + 100
+      stone) → produces legendaryEquipment 1/day → hero weapon +40% flag; army cap 2; sendEmissary('purple') →
+      continent party → arrival → embassy gives +2/day; hostile capture → ransom 200g; stage 9 → leader messages fire +
+      caps 500/50; declareImperial → red at war, purple −30, ally yellow celebrates, imperialProclaimed + ending flag;
+      chronicle entries appended; Realm/Chronicle panel renders (shot p8_chronicle); tournament grounds render (shot
+      p8_tournament). 30/30 asserts pass; FPS 54-56; ZERO console errors (multiple runs); tsc clean; build clean.
+      Boot + settlement-entry + stage-9 caps checks green (no regression; maxBuildings now defined). DEFERRED (per
+      spec): win-ending TEXT (P10 reads imperialProclaimed/imperialEndingUnlocked); equip/prestige/monument/research
+      economy (P11 reads legendaryEquipment + heroFlags.legendaryWeapon); save wiring (P12 — all P8 state in
+      serializable()).
 - [ ] P9 — Battle fog of war + river system
 - [ ] P10 — Win consequence system (reputation endings)
 - [ ] P11 — Economy mid-game reinvestment (equipment, prestige, monuments)

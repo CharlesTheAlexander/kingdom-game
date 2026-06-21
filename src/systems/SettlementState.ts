@@ -108,6 +108,9 @@ export interface SettlementState {
   population: number;
   /** 0..100 contentment of the local populace. */
   happiness: number;
+  /** (Phase 8) A timed happiness bonus (e.g. the +30 for 5 days after a Grand
+   *  Tournament). Plain JSON; the per-settlement view applies/expires it. */
+  tempHappy?: { value: number; untilDay: number };
   /** GameWorld.day when the player last left (for "while you were away"). */
   lastVisitedDay: number;
   /** true once the player has actually entered (so we only init defaults once). */

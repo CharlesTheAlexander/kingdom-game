@@ -79,4 +79,10 @@ if (import.meta.env.DEV) {
   import('./systems/WorldDiplomacy.js').then((wd) => {
     (window as any).__WorldDiplomacy = wd.WorldDiplomacy;
   });
+  // (Phase 8) Expose the LateGame system so the headless audit can drive the
+  // stage-8/9 unlocks (tournament tick, emissary movement, transition events,
+  // chronicle, caps). The action methods live on GameWorld (__gw).
+  import('./systems/LateGame.js').then((lg) => {
+    (window as any).__LateGame = lg.LateGame;
+  });
 }

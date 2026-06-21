@@ -153,12 +153,20 @@ export const BuildingTypes: Record<string, BuildingType> = {
     placeable: true, noCap: true, anywhere: true, stageUnlock: 4,
     desc: 'A stone embankment. Protects nearby farms from flood damage.',
   },
+  // (Phase 8) Scribe Tower — the Chronicle of the Kingdom. Buildable at stage 9;
+  // records major events as narrative entries (read in the Realm panel's
+  // Chronicle scroll). Pure flavour/record building (no workers).
+  scribetower: {
+    key: 'scribetower', name: 'Scribe Tower', cost: { gold: 300, stone: 150, cutStone: 40 }, maxWorkers: 1, hp: 160,
+    footprint: 2, placeable: true, stageUnlock: 9, tex: 'library', // reuse Library art (no dedicated sprite)
+    desc: 'Scribes keep the Chronicle of the Kingdom — a record of every great deed. (Read it in the Realm panel.)',
+  },
 };
 
 // Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now
 // grow automatically by settlement tier. The wall type def is kept above only so
 // old saves containing a placed Wall still load without error.
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'masonslodge', 'guildhall', 'library', 'sawmill', 'stonecutter', 'intelligence', 'manor', 'levee', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall'];
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'masonslodge', 'guildhall', 'library', 'sawmill', 'stonecutter', 'intelligence', 'manor', 'levee', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall', 'scribetower'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 // (Loop 3, Feature #3) Buildings upgrade through 5 levels. Output scales on a
