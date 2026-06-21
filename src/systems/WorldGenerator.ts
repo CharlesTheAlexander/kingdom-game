@@ -153,7 +153,11 @@ export interface RiverInfo {
   path: Array<{ col: number; row: number }>;
 }
 
-export interface BridgeInfo { col: number; row: number; }
+// (Phase 9) Bridges are DESTRUCTIBLE crossings. `id` is a stable key (so save +
+// destroy/rebuild can reference it), `riverIdx` is which river it spans (for the
+// river-control helper), and `destroyed` reverts a crossing to the slow ford cost.
+// Serialization-friendly: plain fields, no live objects.
+export interface BridgeInfo { id: string; col: number; row: number; riverIdx: number; destroyed?: boolean; }
 
 export interface WorldState {
   seed: number;
@@ -715,14 +719,16 @@ function placeBridges(
 ): BridgeInfo[] {
   const rnd = mulberry32((seed + 0xb2147) >>> 0);
   const bridges: BridgeInfo[] = [];
-  for (const river of rivers) {
+  for (let ri = 0; ri < rivers.length; ri++) {
+    const river = rivers[ri];
     // 2–3 bridges per river, spaced along its course.
     const count = 2 + (rnd() < 0.5 ? 1 : 0);
     for (let b = 0; b < count; b++) {
       const i = Math.floor(((b + 1) / (count + 1)) * river.path.length);
       const p = river.path[i];
       if (p && biome[idx(p.col, p.row)] === Biome.RIVER) {
-        bridges.push({ col: p.col, row: p.row });
+        // (Phase 9) stable id from river index + tile so destroy/rebuild + save can key it.
+        bridges.push({ id: `br_${ri}_${p.col}_${p.row}`, col: p.col, row: p.row, riverIdx: ri });
       }
     }
   }

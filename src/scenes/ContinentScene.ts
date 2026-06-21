@@ -122,6 +122,9 @@ export class ContinentScene extends Phaser.Scene {
     // --- Overlay graphics (route line, highlights) in world space ---------
     this.overlay = this.add.graphics().setDepth(20);
 
+    // (Phase 9) Bridge / broken-bridge / ferry-dock icons drawn on the river
+    // lines, below the moving-party icons. Re-laid each frame in layoutIcons().
+    this.bridgeLayer = this.add.container(0, 0).setDepth(28);
     // --- Party + AI icons in world space ----------------------------------
     this.iconLayer = this.add.container(0, 0).setDepth(30);
     this.partyIcon = this.add.container(0, 0).setDepth(40);
@@ -207,6 +210,9 @@ export class ContinentScene extends Phaser.Scene {
     this.revealAroundPlayer();
     this.rebuildFog();
     this.updateHud();
+    // (Phase 9) Apply bridge/ferry crossing costs to the pathfinder so routes
+    // prefer bridges over slow fords from the very first click.
+    this.syncRiverCrossings();
 
     this.cameras.main.fadeIn(300, 12, 18, 26);
 
@@ -529,6 +535,11 @@ export class ContinentScene extends Phaser.Scene {
     // Surface every resulting beat as a banner (+leader bubbles at stage 9).
     const lgBanners = LateGame.onNewDay();
     for (const b of lgBanners) this.flashBanner(b.text, b.color);
+
+    // --- (Phase 9) RIVER daily tick: complete any 5-day bridge rebuilds, then
+    // re-sync the pathfinder's per-tile crossing costs + bridge icons.
+    GameWorld.tickRivers();
+    this.syncRiverCrossings();
     // At the stage-9 message beat, also pop the three leader speech bubbles.
     if (GameWorld.lateGameFlags._stage9SpeechPending) {
       GameWorld.lateGameFlags._stage9SpeechPending = false;
@@ -806,6 +817,8 @@ export class ContinentScene extends Phaser.Scene {
       enemyArmy: res.goblinArmy,
       terrainType: this.battleTerrain(),
       enemyFaction: 'goblin',
+      intel: this.computeIntel('goblin'),           // (Phase 9) pre-battle fog level
+      riverBattle: this.battleOnRiver(),            // (Phase 9) river runs across the field
       onComplete: (br: any) => this.onCampRaidComplete(br, id, camp),
     });
   }
@@ -1198,6 +1211,78 @@ export class ContinentScene extends Phaser.Scene {
     this.layoutQuestMarkers(sc);
     // (Phase 6) Hero portrait overlays on the party icon + stationed settlements.
     this.layoutHeroIcons();
+    // (Phase 9) Bridge / broken-bridge / ferry-dock icons on the river lines.
+    this.layoutRiverIcons(sc);
+  }
+
+  // =========================================================================
+  // (Phase 9) RIVER SYSTEM rendering + pathfinder cost sync.
+  // =========================================================================
+  /** Push bridge/ferry crossing costs into the pathfinder as per-tile overrides:
+   *  an intact bridge crosses fast (~1.0×), a ferry dock's adjacent river tile is
+   *  medium (~1.5×), a destroyed bridge reverts to the slow ~2.5× ford (no override).
+   *  Called on create, on every new day, and whenever a bridge/ferry changes. */
+  syncRiverCrossings() {
+    if (!this.pathfinder) return;
+    this.pathfinder.clearTileOverrides();
+    // Intact bridges → cheap crossing.
+    for (const b of this.world.bridges) {
+      if (GameWorld.isBridgeDestroyed(b.id)) continue; // destroyed → keep ford cost
+      this.pathfinder.setTileOverride(b.col, b.row, 1.0);
+    }
+    // Ferry docks → reduce the adjacent river tile(s) to ~1.5×, but never override
+    // a bridge tile (a bridge is already faster).
+    for (const d of GameWorld.ferryDocks) {
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        if (!dc && !dr) continue;
+        const c = d.col + dc, r = d.row + dr;
+        if (this.world.tileBiome[r * this.world.size + c] !== 11) continue; // RIVER only
+        const onBridge = this.world.bridges.some(b => b.col === c && b.row === r && !GameWorld.isBridgeDestroyed(b.id));
+        if (!onBridge) this.pathfinder.setTileOverride(c, r, 1.5);
+      }
+    }
+  }
+
+  /** Draw bridge (intact / broken) + ferry-dock icons on the continent. Only on
+   *  river tiles whose fog is lifted; scaled to keep readable at any zoom. */
+  layoutRiverIcons(sc: number) {
+    if (!this.bridgeLayer) return;
+    this.bridgeLayer.removeAll(true);
+    // -- Bridges (plank deck) / broken bridges (gap) --
+    for (const b of this.world.bridges) {
+      if (!this.fogLifted(b.col, b.row)) continue;
+      const bp = this.tileToPx(b.col, b.row);
+      const g = this.add.graphics();
+      const destroyed = GameWorld.isBridgeDestroyed(b.id);
+      if (destroyed) {
+        // Broken bridge: two stubs with a gap + a faint X.
+        g.fillStyle(0x6b4a26, 1); g.fillRect(-9, -2, 6, 4); g.fillRect(3, -2, 6, 4);
+        g.lineStyle(1.4, 0x3a2810, 0.9); g.strokeRect(-9, -2, 6, 4); g.strokeRect(3, -2, 6, 4);
+        g.lineStyle(1.6, 0x8c2b2b, 0.95); g.lineBetween(-4, -5, 4, 5); // struck-through
+      } else {
+        // Intact bridge: a planked deck spanning the river + two rail posts.
+        g.fillStyle(0x9a6b3a, 1); g.fillRect(-10, -3, 20, 6);
+        g.lineStyle(1.2, 0x3a2810, 0.95); g.strokeRect(-10, -3, 20, 6);
+        for (let px = -8; px <= 8; px += 4) g.lineBetween(px, -3, px, 3); // planks
+        g.fillStyle(0x6b4a26, 1); g.fillRect(-11, -5, 2, 4); g.fillRect(9, -5, 2, 4); // rail posts
+      }
+      g.setPosition(bp.x, bp.y); g.setScale(sc);
+      this.bridgeLayer.add(g);
+    }
+    // -- Ferry docks (a pier + a small boat) --
+    for (const d of GameWorld.ferryDocks) {
+      if (!this.fogLifted(d.col, d.row)) continue;
+      const dp = this.tileToPx(d.col, d.row);
+      const g = this.add.graphics();
+      g.fillStyle(0x6b4a26, 1); g.fillRect(-2, -8, 4, 10);           // pier post
+      g.lineStyle(1, 0x3a2810, 0.9); g.strokeRect(-2, -8, 4, 10);
+      g.fillStyle(0x8a5a2a, 1);                                       // boat hull
+      g.beginPath(); g.moveTo(-9, 4); g.lineTo(9, 4); g.lineTo(6, 9); g.lineTo(-6, 9); g.closePath(); g.fillPath();
+      g.lineStyle(1, 0x3a2810, 0.9); g.strokePath();
+      g.fillStyle(GameWorld.playerColor, 1); g.fillTriangle(0, -6, 0, 2, 6, -2); // pennant
+      g.setPosition(dp.x, dp.y); g.setScale(sc);
+      this.bridgeLayer.add(g);
+    }
   }
 
   // =========================================================================
@@ -1397,6 +1482,22 @@ export class ContinentScene extends Phaser.Scene {
     rb.on('pointerdown', () => { this._uiClick = true; });
     rb.on('pointerup', () => { this._uiClick = true; this.toggleRealmPanel(); });
     this.input.keyboard?.on('keydown-R', () => this.toggleRealmPanel());
+
+    // (Phase 9) Build a Ferry Dock at the party's current tile if it sits on a
+    // river bank. Speeds that river's crossing to ~1.5×. B key.
+    this.input.keyboard?.on('keydown-B', () => this.promptBuildFerry());
+  }
+
+  // (Phase 9) Offer to build a ferry dock when the party stands on a river bank.
+  promptBuildFerry() {
+    if (this._modal) return;
+    const col = GameWorld.player.col, row = GameWorld.player.row;
+    if (GameWorld.adjacentRiverIndex(col, row) < 0) { this.flashBanner('March onto a river bank to build a ferry.', 0x8c2b2b); return; }
+    this.openChoiceModal('Build a Ferry Dock?', 'A ferry here speeds your hosts across this river (~1.5× cost). Costs 60 wood from your nearest settlement.', 'Build', () => {
+      const res = GameWorld.buildFerryDock(col, row);
+      if (res.ok) { this.syncRiverCrossings(); this.flashBanner('Ferry dock raised — the crossing is swifter.', 0x2a7a4f); }
+      else this.flashBanner(res.reason || 'Cannot build here.', 0x8c2b2b);
+    });
   }
 
   // =========================================================================
@@ -1662,6 +1763,19 @@ export class ContinentScene extends Phaser.Scene {
         return;
       }
     }
+    // (Phase 9) River tile? Show the crossing cost (ford / bridge / broken / ferry).
+    if (this.fogLifted(t.col, t.row) && t.col >= 0 && t.row >= 0 &&
+        this.world.tileBiome[t.row * this.world.size + t.col] === 11) {
+      const bridge = this.world.bridges.find(b => b.col === t.col && b.row === t.row);
+      const ferry = GameWorld.ferryDocks.some(d => Phaser.Math.Distance.Between(t.col, t.row, d.col, d.row) <= 1.5);
+      let kind: string, mult: string;
+      if (bridge && !GameWorld.isBridgeDestroyed(bridge.id)) { kind = 'Bridge crossing'; mult = '×1.0 (fast)'; }
+      else if (bridge) { kind = 'Broken bridge — fording'; mult = '×2.5 (slow)'; }
+      else if (ferry) { kind = 'Ferry crossing'; mult = '×1.5'; }
+      else { kind = 'River ford'; mult = '×2.5 (slow)'; }
+      this.showTip(p, `River\n${kind}\nMovement ${mult}`);
+      return;
+    }
     this.tip.setVisible(false);
   }
 
@@ -1881,8 +1995,30 @@ export class ContinentScene extends Phaser.Scene {
       enemyArmy,
       terrainType: this.battleTerrain(),
       enemyFaction: ai.factionKey,
+      intel: this.computeIntel(ai.factionKey),      // (Phase 9) pre-battle fog level
+      riverBattle: this.battleOnRiver(),            // (Phase 9) river runs across the field
       onComplete: (res: any) => this.onBattleComplete(res, ai),
     });
+  }
+
+  // (Phase 9) Decide how much of the enemy formation BattleScene reveals before
+  // the fight, based on what scouts/spies the player has on this faction:
+  //   'mira'  — Mira Swiftarrow (ranger) marches with the host → she scouts ahead,
+  //             no fog ever, and the enemy morale bar + ability are visible.
+  //   'full'  — fresh intel report (Gather-Intel within ~5 days): full formation +
+  //             enemy commander visible (but not their morale bar).
+  //   'basic' — a weaker/older report: enemy unit TYPES visible, no arrangement.
+  //   'none'  — no information: a fog overlay + a count-only estimate.
+  computeIntel(faction: string): 'none' | 'basic' | 'full' | 'mira' {
+    const miraHere = HeroWorld.partyHeroes().some((h: any) => h.id === 'mira' || h.type === 'ranger');
+    if (miraHere) return 'mira';
+    return GameWorld.intelOnFaction(faction); // 'none' | 'basic' | 'full'
+  }
+
+  // (Phase 9) Is the battle being fought ON a river crossing? Used to draw the
+  // river across the battlefield + apply its crossing penalty.
+  battleOnRiver(): boolean {
+    return this.world.tileBiome[GameWorld.player.row * this.world.size + GameWorld.player.col] === 11; // Biome.RIVER
   }
 
   battleTerrain(): string {

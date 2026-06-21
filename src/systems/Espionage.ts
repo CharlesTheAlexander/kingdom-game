@@ -1,4 +1,5 @@
 import { sfx } from '../audio/SoundEngine.js';
+import { GameWorld } from './GameWorld.js'; // (Phase 9) bank world-level intel from Gather-Intel
 // (V2 Phase 9) Espionage Network.
 //
 // Requires a Spy Guild (Intelligence building). Spies are trained for 80 gold
@@ -70,6 +71,9 @@ export class Espionage {
     switch (type) {
       case 'intel':
         if (k) k._spyUntil = day + 5;
+        // (Phase 9) Also bank world-level intel so the next BattleScene against this
+        // faction reveals their full formation + commander (fog lifts pre-battle).
+        try { GameWorld.setIntelOnFaction(key, 'full'); } catch (e) { /* world not ready */ }
         msg = `Intel gathered on the ${name} — their strength is revealed for 5 days`;
         break;
       case 'sabotage':

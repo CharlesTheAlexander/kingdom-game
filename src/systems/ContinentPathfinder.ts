@@ -83,6 +83,12 @@ export class ContinentPathfinder {
   private size: number;
   // Per-biome movement cost cache (Infinity for impassable).
   private cost: Float64Array;
+  // (Phase 9) PER-TILE cost overrides keyed by packed tile index. Used for river
+  // CROSSINGS: a bridge tile is cheap (~1.0), a ferry-dock tile is medium (~1.5),
+  // while a plain/destroyed-bridge river tile keeps its ~2.5 ford cost. Populated
+  // by ContinentScene from WorldState.bridges + GameWorld.ferryDocks and refreshed
+  // when a bridge is destroyed/rebuilt or a ferry is built.
+  private overrides: Map<number, number> = new Map();
 
   constructor(world: WorldState) {
     this.world = world;
@@ -94,16 +100,30 @@ export class ContinentPathfinder {
     }
   }
 
+  /** (Phase 9) Set/clear a per-tile movement-cost override. cost<=0 clears it. */
+  setTileOverride(col: number, row: number, cost: number): void {
+    if (col < 0 || row < 0 || col >= this.size || row >= this.size) return;
+    const i = row * this.size + col;
+    if (cost > 0) this.overrides.set(i, cost); else this.overrides.delete(i);
+  }
+  /** (Phase 9) Drop all per-tile overrides (e.g. before a full re-sync). */
+  clearTileOverrides(): void { this.overrides.clear(); }
+
   passable(col: number, row: number): boolean {
     if (col < 0 || row < 0 || col >= this.size || row >= this.size) return false;
     const b = this.world.tileBiome[row * this.size + col];
     return this.cost[b] !== Infinity;
   }
 
-  /** Movement cost to ENTER (col,row); Infinity if impassable/out of bounds. */
+  /** Movement cost to ENTER (col,row); Infinity if impassable/out of bounds.
+   *  A per-tile override (bridge/ferry) wins over the biome cost — but only on
+   *  passable tiles, so an override can never make an ocean/peak traversable. */
   tileCost(col: number, row: number): number {
     if (col < 0 || row < 0 || col >= this.size || row >= this.size) return Infinity;
-    return this.cost[this.world.tileBiome[row * this.size + col]];
+    const base = this.cost[this.world.tileBiome[row * this.size + col]];
+    if (base === Infinity) return Infinity;
+    const ov = this.overrides.get(row * this.size + col);
+    return ov !== undefined ? ov : base;
   }
 
   /** A* from (sc,sr) to (tc,tr). Returns a (possibly partial) path. */

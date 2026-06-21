@@ -153,6 +153,15 @@ export const BuildingTypes: Record<string, BuildingType> = {
     placeable: true, noCap: true, anywhere: true, stageUnlock: 4,
     desc: 'A stone embankment. Protects nearby farms from flood damage.',
   },
+  // (Phase 9) Ferry Dock — riverside crossing infrastructure (1×1, 60 wood). On
+  // the continent it reduces its river's crossing cost to ~1.5× (between a slow
+  // ford and a fast bridge); see GameWorld.buildFerryDock. Optional revenue hook:
+  // 5 gold/crossing when relations are positive (stored, wired in a later phase).
+  ferrydock: {
+    key: 'ferrydock', name: 'Ferry Dock', cost: { wood: 60 }, maxWorkers: 0, hp: 90,
+    footprint: 1, placeable: true, noCap: true, anywhere: true, tex: 'levee', // reuse riverside art
+    desc: 'A river crossing. Speeds your hosts over the river (~1.5× cost) and can earn tolls.',
+  },
   // (Phase 8) Scribe Tower — the Chronicle of the Kingdom. Buildable at stage 9;
   // records major events as narrative entries (read in the Realm panel's
   // Chronicle scroll). Pure flavour/record building (no workers).
@@ -166,7 +175,7 @@ export const BuildingTypes: Record<string, BuildingType> = {
 // Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now
 // grow automatically by settlement tier. The wall type def is kept above only so
 // old saves containing a placed Wall still load without error.
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'masonslodge', 'guildhall', 'library', 'sawmill', 'stonecutter', 'intelligence', 'manor', 'levee', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall', 'scribetower'];
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'masonslodge', 'guildhall', 'library', 'sawmill', 'stonecutter', 'intelligence', 'manor', 'levee', 'ferrydock', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall', 'scribetower'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 // (Loop 3, Feature #3) Buildings upgrade through 5 levels. Output scales on a

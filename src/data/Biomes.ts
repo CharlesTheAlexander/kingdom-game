@@ -61,7 +61,9 @@ export const BIOMES: Record<Biome, BiomeData> = {
   [Biome.HIGHLAND]:      { id: Biome.HIGHLAND,      displayName: 'Highland',      color: 0x8a7d62, movementCost: 2.2,      passable: true  },
   [Biome.ALPINE_FOREST]: { id: Biome.ALPINE_FOREST, displayName: 'Alpine Forest', color: 0x5a6e54, movementCost: 2.4,      passable: true  },
   [Biome.MOUNTAIN_PEAK]: { id: Biome.MOUNTAIN_PEAK, displayName: 'Mountain Peak', color: 0xe8e8ec, movementCost: Infinity, passable: false },
-  [Biome.RIVER]:         { id: Biome.RIVER,         displayName: 'River',         color: 0x4a86b0, movementCost: 2.6,      passable: true  },
+  // (Phase 9) River fording costs ~2.5× base movement. Bridges (cheap, ~1.0×) and
+  // ferry docks (~1.5×) are applied as PER-TILE overrides by the pathfinder, not here.
+  [Biome.RIVER]:         { id: Biome.RIVER,         displayName: 'River',         color: 0x4a86b0, movementCost: 2.5,      passable: true  },
 };
 
 /** Convenience: lookup the data for a biome id (with an OCEAN fallback). */

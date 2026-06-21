@@ -276,7 +276,25 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       spec): win-ending TEXT (P10 reads imperialProclaimed/imperialEndingUnlocked); equip/prestige/monument/research
       economy (P11 reads legendaryEquipment + heroFlags.legendaryWeapon); save wiring (P12 — all P8 state in
       serializable()).
-- [ ] P9 — Battle fog of war + river system
+- [x] P9 — Battle fog of war + river system
+      A — BATTLE FOG OF WAR: a pre-battle info gate (overlay only, never touches combat/result/onComplete). `intel` cfg
+      level computed at BOTH launch sites (ContinentScene.startBattle + startCampRaid → computeIntel): 'mira' if Mira
+      Swiftarrow/ranger marches with the party; else 'full'/'basic' if fresh intel on the faction (GameWorld.intelOnFaction,
+      ~5-day TTL — Espionage Gather-Intel now banks GameWorld.setIntelOnFaction); else 'none'. BattleScene.applyPreBattleIntel
+      renders: none = dark blue-gray fog over the enemy half + count-only label ("Enemy force: ~N units"), enemy hidden,
+      enemy morale bar hidden; basic = types visible but scrambled huddle (formation/markers/label hidden); full = full
+      formation + scout note; mira = full + enemy morale bar + ability revealed, no fog. liftBattleFog() on startBattle()
+      sweeps the fog off with a wipe + flash and fades the enemy in. New state serialization-friendly (intelFlags).
+      B — RIVER SYSTEM: RIVER biome cost 2.6→2.5 (ford). ContinentPathfinder gained per-tile cost overrides; ContinentScene
+      .syncRiverCrossings sets intact bridges ~1.0, ferry-dock river tiles ~1.5, destroyed bridges revert to ~2.5. Bridges
+      got stable ids + riverIdx + destroyed flag; GameWorld.destroyBridge/rebuildBridge (5 days, 40 wood)/tickRivers + a
+      bridge/broken-bridge/ferry icon layer + a river-tile tooltip (crossing cost). GameWorld.buildFerryDock (60 wood,
+      river-bank, ~1.5×) + 'B'-key continent prompt + a Ferry Dock building type. GameWorld.riverControlledBy() exposes
+      light river control. BattleScene draws a river ACROSS the field on river-tile battles (riverBattle cfg) reusing the
+      −20% crossing-zone mul. All new state JSON for P12 (intelFlags/bridgeState/ferryDocks added to serializable()).
+      VERIFY: tsc clean, build clean, headless 36/36 asserts pass, 0 console errors/warnings, FPS ~43. Shots: p9_fog_none/
+      _lifted/_full/_basic/_mira, p9_river_battle, p9_continent_river. Deferred (per spec): full enemy-blocking river-control
+      AI (flag only), ferry toll gold tick (stored hook), P10 endings / P11 economy / P12 save rewrite.
 - [ ] P10 — Win consequence system (reputation endings)
 - [ ] P11 — Economy mid-game reinvestment (equipment, prestige, monuments)
 - [ ] P12 — Full integration + save system update

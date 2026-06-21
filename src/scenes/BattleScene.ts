@@ -182,10 +182,123 @@ export class BattleScene extends Phaser.Scene {
     return `Attacking the ${label}`;
   }
 
+  // =========================================================================
+  // (Phase 9) BATTLE FOG OF WAR — a PRE-BATTLE information gate driven by the
+  // intel level computed at the launch site. This is an OVERLAY + a gated info
+  // display only; it never touches combat resolution, the result, or onComplete.
+  //   none  — enemy half covered by a dark blue-gray fog; only a count estimate
+  //           ("Enemy force: ~12 units"), no types/formation; enemy bar hidden.
+  //   basic — enemy unit types visible, but the formation arrangement is hidden
+  //           (no enemy formation label/markers, ranks scrambled into a huddle).
+  //   full  — complete enemy formation + commander note + enemy morale (revealed
+  //           only when the fight starts, like normal); enemy bar shown on lift.
+  //   mira  — full, PLUS the enemy morale bar + active ability are visible NOW
+  //           (Mira scouts ahead) and fog never appears.
+  // =========================================================================
+  applyPreBattleIntel() {
+    const intel = this.intel || 'none';
+    this._fogLifted = false;
+    // The enemy morale bar is hidden pre-battle unless Mira has scouted the foe.
+    this.setMoraleBarVisible(this.enemyBar, intel === 'mira');
+
+    const enemy = this.units.filter((u: any) => u.side === 'enemy');
+
+    if (intel === 'mira' || intel === 'full') {
+      // Full picture — nothing hidden. Mira additionally reveals the foe's active
+      // ability + morale; a short scouting note tells the player why.
+      if (intel === 'mira') {
+        this.intelNote = this.add.text(GAME_W * 0.20, 92, "Mira scouts ahead — enemy fully revealed", { fontFamily: 'monospace', fontSize: '12px', color: '#bdf0c8', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(45);
+        const ability = this.faction === 'goblin' ? 'Frenzy' : 'War Banner';
+        this.add.text(GAME_W * 0.20, 110, `Enemy ability: ${ability}`, { fontFamily: 'monospace', fontSize: '11px', color: '#ffe0a0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(45);
+      } else {
+        this.intelNote = this.add.text(GAME_W * 0.20, 92, 'Scout report — enemy formation revealed', { fontFamily: 'monospace', fontSize: '12px', color: '#cfe0ff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(45);
+      }
+      return;
+    }
+
+    if (intel === 'basic') {
+      // Unit TYPES are visible but NOT the arrangement: scramble the enemy into a
+      // loose huddle (no readable ranks) and suppress the enemy formation label.
+      this._hideEnemyFormation = true;
+      this.scrambleEnemyHuddle();
+      this.intelNote = this.add.text(GAME_W * 0.20, 92, 'Limited intel — enemy types known, formation unclear', { fontFamily: 'monospace', fontSize: '12px', color: '#e7d6b0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(45);
+      return;
+    }
+
+    // intel === 'none' — FOG. Cover the enemy (left) half of the field with a dark
+    // blue-gray overlay, hide every enemy visual under it, and show only a fuzzy
+    // count estimate. The player sees neither types nor formation.
+    this._hideEnemyFormation = true;
+    for (const u of enemy) this.setUnitObjVisible(u, false);
+    const fogX = 0, fogW = GAME_W * 0.5;
+    this.fogRect = this.add.rectangle(fogX, 0, fogW, GAME_H, 0x1c2733, 0.92).setOrigin(0, 0).setDepth(46);
+    // A few drifting fog wisps for texture (cheap; cleaned up on lift).
+    this.fogWisps = this.add.graphics().setDepth(46.5);
+    for (let i = 0; i < 14; i++) { this.fogWisps.fillStyle(0x2a3a48, 0.5); this.fogWisps.fillEllipse(Phaser.Math.Between(20, fogW - 20), Phaser.Math.Between(HORIZON, GAME_H - 40), Phaser.Math.Between(60, 160), Phaser.Math.Between(28, 70)); }
+    // Fuzzy count estimate (rounded to the nearest ~5 so it reads as an estimate).
+    const total = (this.cfg.enemyArmy || []).reduce((s: number, g: any) => s + (g.count || 0), 0);
+    const est = Math.max(1, Math.round(total / 5) * 5);
+    this.fogLabel = this.add.text(fogW / 2, GAME_H * 0.5, `?\nEnemy force: ~${est} units\n(no scouts — formation unknown)`, { fontFamily: 'monospace', fontSize: '20px', color: '#cfdae6', align: 'center', fontStyle: 'bold', stroke: '#000', strokeThickness: 4, lineSpacing: 8 }).setOrigin(0.5).setDepth(47);
+  }
+
+  // (Phase 9) Toggle all of a BUnit's display objects (used to hide enemies under
+  // the fog and bring them back on the dramatic reveal).
+  setUnitObjVisible(u: any, vis: boolean) {
+    for (const o of [u.spr, u.shadow, u.hpBg, u.hpFill, u.blockRect, u.label, u.vetStar, u.crown]) { if (o && o.setVisible) o.setVisible(vis); }
+  }
+
+  // (Phase 9) Basic-intel "formation unclear": pull the enemy into a loose blob in
+  // their back third so types read but no ranks/arrangement are legible. Purely a
+  // display arrangement — startBattle() re-applies a real formation on the reveal.
+  scrambleEnemyHuddle() {
+    const us = this.sideUnits('enemy');
+    const cx = GAME_W * 0.16, cy = GAME_H * 0.54;
+    for (const u of us) {
+      if (u.isCommander) continue;
+      this.tweens.killTweensOf(u); // stop the in-flight formation tween from applyFormation
+      u.x = cx + Phaser.Math.Between(-46, 46);
+      u.y = cy + Phaser.Math.Between(-70, 70);
+      u.sync();
+    }
+  }
+
+  // (Phase 9) THE REVEAL — when the battle is joined the fog LIFTS with a dramatic
+  // sweep: the overlay slides off the enemy half and fades, enemy units fade back
+  // in, and the enemy morale bar appears. After this everything is normal.
+  liftBattleFog() {
+    if (this._fogLifted) return;
+    this._fogLifted = true;
+    // Reveal the enemy morale bar now (for all intel levels except where already shown).
+    this.setMoraleBarVisible(this.enemyBar, true);
+    if (this.intelNote) { this.tweens.add({ targets: this.intelNote, alpha: 0, duration: 500, onComplete: () => this.intelNote && this.intelNote.destroy() }); }
+    // Bring hidden enemy units back (they were hidden under fog).
+    for (const u of this.units) { if (u.side === 'enemy' && u.alive) { this.setUnitObjVisible(u, true); if (u.spr) u.spr.setAlpha(0); } }
+    if (this.fogLabel) this.tweens.add({ targets: this.fogLabel, alpha: 0, scale: 1.4, duration: 400, onComplete: () => this.fogLabel && this.fogLabel.destroy() });
+    if (this.fogWisps) this.tweens.add({ targets: this.fogWisps, alpha: 0, duration: 500, onComplete: () => this.fogWisps && this.fogWisps.destroy() });
+    if (this.fogRect) {
+      // A bright sweep wipe across the fog as it slides off + fades.
+      const sweep = this.add.rectangle(0, 0, 8, GAME_H, 0xbfe0ff, 0).setOrigin(0, 0).setDepth(48).setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({ targets: sweep, x: GAME_W * 0.5, fillAlpha: 0.4, duration: 420, ease: 'Cubic.out', yoyo: true, onComplete: () => sweep.destroy() });
+      this.tweens.add({ targets: this.fogRect, alpha: 0, x: -GAME_W * 0.5, duration: 520, ease: 'Cubic.in', onComplete: () => { this.fogRect && this.fogRect.destroy(); this.fogRect = null; } });
+      // Fade the enemy units in as the fog peels away.
+      this.time.delayedCall(120, () => { for (const u of this.units) { if (u.side === 'enemy' && u.alive && u.spr) this.tweens.add({ targets: u.spr, alpha: 1, duration: 400 }); } });
+    } else {
+      for (const u of this.units) { if (u.side === 'enemy' && u.alive && u.spr) u.spr.setAlpha(1); }
+    }
+    this.cameras.main.flash(180, 180, 210, 240);
+  }
+
   create() {
     const terrain = this.cfg.terrainType || 'plains';
     this.pal = TERRAIN[terrain] || TERRAIN.plains;
     this.faction = this.cfg.enemyFaction || 'red';
+    // (Phase 9) Fog-of-war intel level for the PRE-BATTLE display. Computed at the
+    // launch site (ContinentScene/expeditions): 'mira' (ranger scouts ahead) >
+    // 'full' (fresh spy report) > 'basic' (unit types only) > 'none' (fog + count).
+    this.intel = this.cfg.intel || 'none';
+    // (Phase 9) Is this battle fought on a river crossing? Draw a river across the
+    // field + apply the existing river crossing-zone penalty (−20%).
+    this.riverBattle = !!this.cfg.riverBattle;
 
     registerUnitAnimations(this); // (Polish Phase 1) ensure walk/attack/shoot anims exist
     this.ensureFxTextures(); // (Visual P7) generate-once particle pixels
@@ -219,6 +332,7 @@ export class BattleScene extends Phaser.Scene {
     }
 
     this.buildHud();
+    this.applyPreBattleIntel(); // (Phase 9) fog / gated enemy info by intel level
     this.createStartButton(); // (Phase 5) skip the pre-battle timer
     this.createAbilityButton(); // (V2 P5) commander special ability
     this.setupBattleInput();  // (Loop 1) in-battle box-select
@@ -457,6 +571,30 @@ export class BattleScene extends Phaser.Scene {
     // River crossing: a reflective blue band along the bottom edge.
     this.drawRiver(this._riverY);
     this.add.text(GAME_W / 2, this._riverY + 4, 'River Crossing  ·  −20% damage', { fontFamily: 'monospace', fontSize: '11px', color: '#dcefff', stroke: '#0a2030', strokeThickness: 2 }).setOrigin(0.5, 0).setAlpha(0.6).setDepth(-14);
+
+    // (Phase 9) If this battle is fought ON a river tile, a river runs ACROSS the
+    // contested centre that both hosts must ford — units inside the band take the
+    // same −20% crossing penalty (reusing terrainAtkMul). A vertical strip down the
+    // middle so player (right) and enemy (left) must wade through it to engage.
+    if (this.riverBattle) {
+      const bandW = Math.round(GAME_W * 0.14);
+      this._riverBandX0 = GAME_W * 0.5 - bandW / 2;
+      this._riverBandX1 = GAME_W * 0.5 + bandW / 2;
+      this.drawCrossingRiver(this._riverBandX0, this._riverBandX1);
+      this.add.text(GAME_W / 2, HORIZON + 70, 'River Crossing  ·  −20% damage', { fontFamily: 'monospace', fontSize: '11px', color: '#dcefff', stroke: '#0a2030', strokeThickness: 2 }).setOrigin(0.5, 0).setAlpha(0.7).setDepth(-13);
+    }
+  }
+
+  // (Phase 9) A reflective river running vertically across the battlefield centre
+  // (for battles fought on a river tile). Drawn over the ground, under units.
+  drawCrossingRiver(x0: number, x1: number) {
+    const g = this.add.graphics().setDepth(5);
+    const w = x1 - x0;
+    for (let i = 0; i < w; i += 3) { g.fillStyle(this._lerp(0x2a5a8a, 0x14406a, i / w), 0.55); g.fillRect(x0 + i, HORIZON + 40, 3, GAME_H - HORIZON - 40); }
+    // Shimmer streaks + foaming banks.
+    const sh = this.add.graphics().setDepth(5.2).setBlendMode(Phaser.BlendModes.ADD);
+    for (let i = 0; i < 26; i++) { sh.fillStyle(0xbfe0ff, Phaser.Math.FloatBetween(0.04, 0.12)); const sy = HORIZON + 50 + Phaser.Math.Between(0, GAME_H - HORIZON - 90); sh.fillRect(x0 + Phaser.Math.Between(4, w - 40), sy, Phaser.Math.Between(20, w - 8), 1.5); }
+    g.fillStyle(0xbfe0ff, 0.12); g.fillRect(x0, HORIZON + 40, 2, GAME_H - HORIZON - 40); g.fillRect(x1 - 2, HORIZON + 40, 2, GAME_H - HORIZON - 40);
   }
 
   // (Visual P9) Soft layered painterly cloud masses drifting across the sky.
@@ -625,6 +763,9 @@ export class BattleScene extends Phaser.Scene {
     this._fmLabels = [];
     const g = this._fmG;
     const markSide = (side: string) => {
+      // (Phase 9) Don't draw the ENEMY formation footprint/ranks/label while it is
+      // hidden by fog (intel none) or unclear (intel basic) during pre-battle.
+      if (side === 'enemy' && this._hideEnemyFormation && this.phase === 'pre') return;
       const us = this.sideUnits(side).filter((u) => !u.isCommander);
       if (!us.length) return;
       const col = side === 'player' ? 0x4a7bd5 : (FACTION_COLOR[this.faction] || 0xd64a4a);
@@ -680,7 +821,9 @@ export class BattleScene extends Phaser.Scene {
   // (Feature #2) Attacker damage multiplier by terrain position.
   terrainAtkMul(u) {
     if (this._hiY && u.y < this._hiY) return 1.2;       // high ground
-    if (this._riverY && u.y > this._riverY) return 0.8; // crossing the river
+    if (this._riverY && u.y > this._riverY) return 0.8; // crossing the bottom-edge river
+    // (Phase 9) Crossing the central river band on a river-tile battlefield.
+    if (this.riverBattle && this._riverBandX0 !== undefined && u.x >= this._riverBandX0 && u.x <= this._riverBandX1) return 0.8;
     return 1;
   }
   // (Feature #2) Defender takes less when standing in forest (an obstacle cluster).
@@ -780,7 +923,7 @@ export class BattleScene extends Phaser.Scene {
     this.enemyBar = this.makeMoraleBar(20, 18, false, FACTION_COLOR[this.faction] || 0xd64a4a, `Enemy · ${FACTION_LABEL[this.faction] || this.faction}`, 'skull');
     // (V2 Phase 1) Enemy leader portrait beside their morale bar.
     const pk = 'portrait_' + this.faction;
-    if (this.textures.exists(pk)) this.add.image(248, 14, pk).setOrigin(0, 0).setDisplaySize(40, 40).setDepth(42);
+    if (this.textures.exists(pk)) this.enemyBar._portrait = this.add.image(248, 14, pk).setOrigin(0, 0).setDisplaySize(40, 40).setDepth(42);
     this.playerBar = this.makeMoraleBar(GAME_W - 20, 18, true, 0x4ad66b, 'Your Army', 'shield');
 
     // --- Pre-battle headline -------------------------------------------------
@@ -856,9 +999,17 @@ export class BattleScene extends Phaser.Scene {
 
     // --- Numeric value + label ----------------------------------------------
     const val = this.add.text(ox + W / 2, y + H + 2, '70', { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(43);
-    this.add.text(anchorRight ? ox + W - 4 : ox + 4, y + H + 2, label, { fontFamily: 'monospace', fontSize: '11px', color: '#dcd2bf', stroke: '#000', strokeThickness: 2 }).setOrigin(anchorRight ? 1 : 0, 0).setDepth(41);
+    const labelTxt = this.add.text(anchorRight ? ox + W - 4 : ox + 4, y + H + 2, label, { fontFamily: 'monospace', fontSize: '11px', color: '#dcd2bf', stroke: '#000', strokeThickness: 2 }).setOrigin(anchorRight ? 1 : 0, 0).setDepth(41);
 
-    return { val, W, H, ox, y, pips, pg, icon, accent, banner, drawBanner, frameOuter, frameInner, _shakeX: ox, _low: false };
+    return { val, W, H, ox, y, pips, pg, icon, accent, banner, drawBanner, frameOuter, frameInner, labelTxt, _shakeX: ox, _low: false };
+  }
+
+  // (Phase 9) Show/hide an entire morale gauge (used to gate the ENEMY bar: it is
+  // hidden pre-battle unless Mira scouts it, and revealed when the fog lifts).
+  setMoraleBarVisible(bar: any, vis: boolean) {
+    if (!bar) return;
+    for (const o of [bar.val, bar.banner, bar.pg, bar.frameOuter, bar.frameInner, bar.labelTxt]) { if (o && o.setVisible) o.setVisible(vis); }
+    if (bar._portrait && bar._portrait.setVisible) bar._portrait.setVisible(vis);
   }
 
   // (Visual P9) Render the pip row for a morale bar at fraction f (0..1).
@@ -1172,6 +1323,7 @@ export class BattleScene extends Phaser.Scene {
 
   startBattle() {
     this.phase = 'battle';
+    this.liftBattleFog(); // (Phase 9) the reveal moment — fog sweeps away as lines advance
     if (this.startBtn) this.startBtn.setVisible(false); // (Phase 5) hide skip button
     if (this.startBtnTxt) this.startBtnTxt.setVisible(false);
     // (Visual P9) Clear the pre-battle ordered ground markers + labels.

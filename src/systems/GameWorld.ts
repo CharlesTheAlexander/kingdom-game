@@ -363,6 +363,27 @@ class GameWorldState {
    *  re-read of the tier never re-fires a beat. Plain JSON. */
   lateGameFlags: Record<string, any> = {};
 
+  // --- Phase 9 (Battle fog of war) ----------------------------------------
+  /** (Phase 9) Fresh intelligence on enemy FACTIONS, keyed by faction key. A spy
+   *  mission / Gather-Intel sets {level, day}; BattleScene reads it (within ~5 days)
+   *  to decide how much of the enemy formation to reveal before the fight. Plain
+   *  JSON so it serializes. 'basic' = unit types; 'full' = formation + commander. */
+  intelFlags: Record<string, { level: 'basic' | 'full'; day: number }> = {};
+
+  // --- Phase 9 (River strategic system) -----------------------------------
+  /** (Phase 9) Per-bridge runtime state keyed by BridgeInfo.id. `destroyed` reverts
+   *  a crossing to the slow ford; `rebuildEndDay` (when set) is the game-day the
+   *  5-day/40-wood rebuild completes. Serialization-friendly. */
+  bridgeState: Record<string, { destroyed: boolean; rebuildEndDay?: number }> = {};
+
+  /** (Phase 9) Ferry docks the player has built at river-adjacent tiles. Each
+   *  reduces its river's crossing cost to ~1.5× (between ford and bridge). `relations`
+   *  is the optional revenue hook (5 gold/crossing when relations positive — stored,
+   *  not yet wired to a gold tick). Keyed/stable for save. */
+  ferryDocks: Array<{ id: string; col: number; row: number; riverIdx: number; revenue: boolean }> = [];
+  /** Monotonic counter for unique ferry-dock ids. */
+  ferryCounter = 0;
+
   gold = 500;
 
   /** Continuous day counter (fractional during a day; floor() for display). */
@@ -574,6 +595,146 @@ class GameWorldState {
   factionKeys(): string[] {
     if (!this.world) return ['red', 'purple', 'yellow'];
     return this.world.factions.filter(f => f.personality !== 'player').map(f => f.key);
+  }
+
+  // ==========================================================================
+  // Phase 9 — BATTLE INTEL (spy / Gather-Intel → pre-battle fog level)
+  // ==========================================================================
+  /** Number of days fresh intel on a faction stays valid before fog returns. */
+  static readonly INTEL_TTL_DAYS = 5;
+
+  /** Record fresh intelligence on a faction (espionage / expeditions call this).
+   *  Defaults to 'full'; pass 'basic' for a weaker source. Serialization-friendly. */
+  setIntelOnFaction(faction: string, level: 'basic' | 'full' = 'full'): void {
+    if (!faction) return;
+    this.intelFlags[faction] = { level, day: this.displayDay() };
+  }
+
+  /** Current intel level the player holds on a faction's armies. Returns 'none'
+   *  once the report is older than INTEL_TTL_DAYS (~5 days). BattleScene + the
+   *  launch sites read this to gate how much enemy detail is shown pre-battle. */
+  intelOnFaction(faction: string): 'none' | 'basic' | 'full' {
+    const f = this.intelFlags[faction];
+    if (!f) return 'none';
+    if (this.displayDay() - f.day > GameWorldState.INTEL_TTL_DAYS) return 'none';
+    return f.level;
+  }
+
+  // ==========================================================================
+  // Phase 9 — RIVER SYSTEM (bridges, ferry docks, river control)
+  // ==========================================================================
+  /** Is a bridge currently destroyed (or mid-rebuild)? A destroyed bridge reverts
+   *  its tile to the slow ~2.5× ford cost and shows a broken-bridge icon. */
+  isBridgeDestroyed(id: string): boolean { return !!(this.bridgeState[id] && this.bridgeState[id].destroyed); }
+
+  /** Destroy a bridge (enemy sabotage, scorched-earth retreat, etc). The tile
+   *  reverts to ford cost; the continent re-syncs the pathfinder + icons. */
+  destroyBridge(id: string): boolean {
+    const b = this.world && this.world.bridges.find(x => x.id === id);
+    if (!b) return false;
+    this.bridgeState[id] = { destroyed: true };
+    b.destroyed = true; // mirror onto the live BridgeInfo for renderers/queries
+    return true;
+  }
+
+  /** Begin (and, here, immediately complete for simplicity) a bridge rebuild:
+   *  5 days + 40 wood from the nearest player settlement. Returns {ok, reason}.
+   *  The 5-day timer is recorded on bridgeState.rebuildEndDay so a later phase can
+   *  gate completion on time; the bridge becomes usable when the timer elapses. */
+  rebuildBridge(id: string): { ok: boolean; reason?: string } {
+    const b = this.world && this.world.bridges.find(x => x.id === id);
+    if (!b) return { ok: false, reason: 'No such bridge.' };
+    if (!this.isBridgeDestroyed(id)) return { ok: false, reason: 'Bridge is intact.' };
+    // Spend 40 wood from the nearest player settlement's stockpile.
+    const town = this.nearestPlayerSettlementTo(b.col, b.row);
+    const st = town ? this.settlementStates[town] : null;
+    const wood = st ? (st.resources.wood || 0) : 0;
+    if (!st || wood < 40) return { ok: false, reason: 'Need 40 wood at a nearby settlement.' };
+    st.resources.wood = wood - 40;
+    // 5-day rebuild; record the completion day. tickRivers() flips destroyed off.
+    this.bridgeState[id] = { destroyed: true, rebuildEndDay: this.displayDay() + 5 };
+    return { ok: true };
+  }
+
+  /** Advance any in-progress bridge rebuilds (call from onNewDay). When the 5-day
+   *  timer elapses the bridge is restored (fast crossing again). */
+  tickRivers(): void {
+    const today = this.displayDay();
+    for (const id of Object.keys(this.bridgeState)) {
+      const s = this.bridgeState[id];
+      if (s.destroyed && s.rebuildEndDay !== undefined && today >= s.rebuildEndDay) {
+        s.destroyed = false; s.rebuildEndDay = undefined;
+        const b = this.world && this.world.bridges.find(x => x.id === id);
+        if (b) b.destroyed = false;
+      }
+    }
+  }
+
+  /** Build a ferry dock at a river-adjacent tile: ~60 wood, reduces that river's
+   *  crossing cost to ~1.5×. The tile must be passable land orthogonally adjacent
+   *  to a RIVER tile (so it sits on the bank). Returns {ok, reason, id}. */
+  buildFerryDock(col: number, row: number): { ok: boolean; reason?: string; id?: string } {
+    const w = this.world;
+    if (!w) return { ok: false, reason: 'No world.' };
+    const riverIdx = this.adjacentRiverIndex(col, row);
+    if (riverIdx < 0) return { ok: false, reason: 'Must be built on a river bank.' };
+    if (this.ferryDocks.some(d => d.col === col && d.row === row)) return { ok: false, reason: 'A ferry already stands here.' };
+    // Spend 60 wood from the nearest player settlement.
+    const town = this.nearestPlayerSettlementTo(col, row);
+    const st = town ? this.settlementStates[town] : null;
+    const wood = st ? (st.resources.wood || 0) : 0;
+    if (!st || wood < 60) return { ok: false, reason: 'Need 60 wood at a nearby settlement.' };
+    st.resources.wood = wood - 60;
+    const id = `ferry_${++this.ferryCounter}`;
+    this.ferryDocks.push({ id, col, row, riverIdx, revenue: false });
+    return { ok: true, id };
+  }
+
+  /** The index of a RIVER river adjacent to (col,row), or -1. The ferry's effect
+   *  is applied to the river tile(s) it touches. Used by buildFerryDock + cost sync. */
+  adjacentRiverIndex(col: number, row: number): number {
+    const w = this.world; if (!w) return -1;
+    const RIVER = 11; // Biome.RIVER
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      if (!dc && !dr) continue;
+      const c = col + dc, r = row + dr;
+      if (c < 0 || r < 0 || c >= w.size || r >= w.size) continue;
+      if (w.tileBiome[r * w.size + c] === RIVER) {
+        // Which named river does this tile belong to?
+        for (let ri = 0; ri < w.rivers.length; ri++) {
+          if (w.rivers[ri].path.some(p => p.col === c && p.row === r)) return ri;
+        }
+        return 0; // a river tile not on a named path still counts
+      }
+    }
+    return -1;
+  }
+
+  /** (Phase 9, light river control) Who controls a major river? A river is
+   *  "controlled" by a side that holds ALL of its intact bridges. Returns
+   *  'player' | a faction key | 'contested' | 'none'. Currently the player only
+   *  gains control via ferry docks / cleared crossings; enemy-blocking AI is left
+   *  as a flag for a later phase. */
+  riverControlledBy(riverIdx: number): 'player' | 'contested' | 'none' {
+    const w = this.world; if (!w) return 'none';
+    const bridges = w.bridges.filter(b => b.riverIdx === riverIdx && !this.isBridgeDestroyed(b.id));
+    if (!bridges.length) return 'none';
+    // The player "controls" a river when they hold a ferry dock on it AND no
+    // crossing is destroyed/contested — a readable, queryable state for now.
+    const hasFerry = this.ferryDocks.some(d => d.riverIdx === riverIdx);
+    return hasFerry ? 'player' : 'none';
+  }
+
+  /** Nearest player-owned settlement id to a continent tile, or null. */
+  private nearestPlayerSettlementTo(col: number, row: number): string | null {
+    const w = this.world; if (!w) return null;
+    let best: string | null = null, bd = Infinity;
+    for (const s of w.settlements) {
+      if (s.kind !== 'player_castle' && !(s as any).founded) continue;
+      const d = Math.hypot(s.col - col, s.row - row);
+      if (d < bd) { bd = d; best = this.settlementId(s); }
+    }
+    return best;
   }
 
   // ==========================================================================
@@ -975,6 +1136,11 @@ class GameWorldState {
     this.chronicle = [];
     this.highestStageSeen = 1;
     this.lateGameFlags = {};
+    // --- Phase 9 reset (battle intel + river system; all JSON for Phase 12) ---
+    this.intelFlags = {};
+    this.bridgeState = {};
+    this.ferryDocks = [];
+    this.ferryCounter = 0;
     this.spawnAIParties();
     this.spawnMercenaryCamps();
     this.started = true;
@@ -1131,6 +1297,13 @@ class GameWorldState {
       chronicle: this.chronicle,
       highestStageSeen: this.highestStageSeen,
       lateGameFlags: this.lateGameFlags,
+      // (Phase 9) Battle intel + river system — all plain JSON. Bridge runtime
+      // state (destroyed / rebuild timer) is keyed by stable id; ferry docks carry
+      // their tile + river index so both survive a seed-rebuilt world.
+      intelFlags: this.intelFlags,
+      bridgeState: this.bridgeState,
+      ferryDocks: this.ferryDocks,
+      ferryCounter: this.ferryCounter,
       started: this.started,
     };
   }
