@@ -39,6 +39,7 @@ const STATS: Record<string, any> = {
   siege: { hp: 80, dmg: 8, speed: 18, range: 0, tex: 'siege_unit', heal: 0, siege: true }, // smashes walls (50/s), weak vs units
   spearmen: { hp: 45, dmg: 12, speed: 34, range: 0, tex: 'blue_warrior_idle', heal: 0, spear: true }, // (V2 P4) anti-cavalry, slow
   cavalry: { hp: 40, dmg: 20, speed: 100, range: 0, tex: 'blue_warrior_idle', heal: 0, charge: true }, // (V2 P4) fast, charges, anti-archer
+  commander: { hp: 340, dmg: 38, speed: 46, range: 0, tex: 'blue_lancer', heal: 0, area: true, tank: true }, // (V2 P5) the King/Queen in person
 };
 // (V2 Phase 4) Rock-paper-scissors: key beats value.
 const COUNTER: Record<string, string> = { warrior: 'spearmen', spearmen: 'cavalry', cavalry: 'archer', archer: 'warrior' };
@@ -133,6 +134,7 @@ class BUnit {
     if (this.blockRect) this.blockRect.destroy();
     if (this.label) this.label.destroy();
     if (this.vetStar) this.vetStar.destroy();
+    if (this.crown) this.crown.destroy(); // (V2 P5)
     if (this._selRing) { this._selRing.destroy(); this._selRing = null; } // (Loop 1)
     this.scene.tweens.add({ targets: this.shadow, alpha: 0, duration: 500, onComplete: () => this.shadow.destroy() });
     this.spr.setTintFill(0xff3333);
@@ -145,6 +147,7 @@ class BUnit {
     if (this.label) { this.label.x = this.x; this.label.y = this.y + 16; }
     if (this._selRing) { this._selRing.x = this.x; this._selRing.y = this.y; } // (Loop 1) follow selection
     if (this.vetStar) { this.vetStar.x = this.x + (this.block ? this.hpW / 2 : 9); this.vetStar.y = this.y - 36; } // (V2 P4)
+    if (this.crown) { this.crown.x = this.x; this.crown.y = this.y - 46; } // (V2 P5) commander crown
     this.hpBg.x = this.x; this.hpBg.y = this.y - 30;
     this.hpFill.x = this.x - this.hpW / 2; this.hpFill.y = this.y - 30;
   }
@@ -194,6 +197,7 @@ export class BattleScene extends Phaser.Scene {
     this.scatterObstacles(terrain);
     this.spawnArmy('player', this.cfg.playerArmy || [], 0xffffff);
     this.spawnArmy('enemy', this.cfg.enemyArmy || [], null);
+    this.spawnCommander(); // (V2 P5) the King/Queen leads the host
     this.applyFormation('player', 'LINE');
     this.applyFormation('enemy', 'LINE');
 
@@ -207,9 +211,73 @@ export class BattleScene extends Phaser.Scene {
 
     this.buildHud();
     this.createStartButton(); // (Phase 5) skip the pre-battle timer
+    this.createAbilityButton(); // (V2 P5) commander special ability
     this.setupBattleInput();  // (Loop 1) in-battle box-select
     this.cameras.main.fadeIn(400, 0, 0, 0);
   }
+
+  // (V2 Phase 5) Spawn the player's King/Queen as a powerful Commander unit.
+  // High HP and damage, a crown marker, and a presence that buffs the host —
+  // but if the Commander falls the army's morale collapses.
+  spawnCommander() {
+    const c = this.cfg.commander;
+    if (!c) return;
+    const u = new BUnit(this, 'player', 'commander', GAME_W * 0.84, GAME_H * 0.54, 'blue_lancer', {});
+    u.isCommander = true;
+    u.spr.setScale((u.spr.scaleX) * 1.25).setTint(0xffd24a); // larger, royal gold
+    u.crown = this.add.text(u.x, u.y - 46, '♔', { fontFamily: 'monospace', fontSize: '20px', color: '#ffd24a', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5).setDepth(14);
+    this.commander = u;
+    this.units.push(u);
+  }
+
+  // (V2 Phase 5) One-shot commander ability, flavored by the King's trait.
+  createAbilityButton() {
+    if (!this.cfg.commander) return;
+    const trait = this.cfg.commander.trait;
+    const lbl = trait === 'warlord' ? '⚔ BATTLE CRY' : trait === 'diplomat' ? '🗡 HONORABLE DUEL' : '♔ RALLY';
+    const x = GAME_W - 150, y = 64, w = 270, h = 40;
+    const g = this.add.rectangle(x, y, w, h, 0x3a2e5a, 0.92).setStrokeStyle(2, 0xffd24a, 0.9).setDepth(48).setInteractive({ useHandCursor: true });
+    const t = this.add.text(x, y, lbl, { fontFamily: 'monospace', fontSize: '15px', color: '#ffd24a', fontStyle: 'bold' }).setOrigin(0.5).setDepth(49);
+    this.abilityBtn = g; this.abilityTxt = t;
+    g.on('pointerover', () => { if (!this._abilityUsed) g.setFillStyle(0x4a3e6a, 0.95); });
+    g.on('pointerout', () => { if (!this._abilityUsed) g.setFillStyle(0x3a2e5a, 0.92); });
+    g.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); this.useCommanderAbility(); });
+  }
+
+  useCommanderAbility() {
+    if (this._abilityUsed) return;
+    if (this.phase !== 'battle') { this.banner.setText('The Commander acts once battle is joined'); return; }
+    if (this.commander && !this.commander.alive) { this.banner.setText('Your Commander has fallen'); return; }
+    const trait = this.cfg.commander.trait;
+    if (trait === 'warlord') {
+      this._cryUntil = this.battleTime + 20; this.morale.player = Math.min(100, this.morale.player + 10);
+      this.battleToast('BATTLE CRY!  +30% attack for 20s', 0xffd24a);
+    } else if (trait === 'diplomat') {
+      this._hexUntil = this.battleTime + 20; this.morale.enemy = Math.max(0, this.morale.enemy - 22);
+      this.battleToast('HONORABLE DUEL!  enemy weakened', 0x66ddff);
+    } else {
+      this._cryUntil = this.battleTime + 15; this.morale.player = Math.min(100, this.morale.player + 20);
+      this.battleToast('RALLY!  the host takes heart', 0x4ad66b);
+    }
+    this._abilityUsed = true;
+    if (this.abilityBtn) { this.abilityBtn.setFillStyle(0x2a2a2a, 0.7).setStrokeStyle(2, 0x666666, 0.6); this.abilityBtn.disableInteractive(); }
+    if (this.abilityTxt) this.abilityTxt.setColor('#888888');
+  }
+
+  battleToast(text, color) {
+    const t = this.add.text(GAME_W / 2, GAME_H * 0.34, text, { fontFamily: 'monospace', fontSize: '28px', color: '#' + color.toString(16).padStart(6, '0'), fontStyle: 'bold', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5).setDepth(75).setScale(0.6);
+    this.tweens.add({ targets: t, scale: 1.1, duration: 260, ease: 'Back.out', yoyo: false });
+    this.tweens.add({ targets: t, alpha: 0, y: t.y - 40, delay: 1100, duration: 700, onComplete: () => t.destroy() });
+  }
+
+  // (V2 Phase 5) Player attack multiplier from the Commander's presence:
+  // +10% while alive, ×1.3 during Battle Cry, but a 30% collapse once fallen.
+  playerCmdMul() {
+    let m = this._cmdDead ? 0.7 : (this.commander && this.commander.alive ? 1.1 : 1);
+    if (this._cryUntil && this.battleTime < this._cryUntil) m *= 1.3;
+    return m;
+  }
+  enemyCmdMul() { return (this._hexUntil && this.battleTime < this._hexUntil) ? 0.75 : 1; }
 
   // (Loop 1, Feature #1) Drag a rectangle to select specific player units;
   // command-bar orders then apply ONLY to the selection (empty selection =
@@ -573,6 +641,13 @@ export class BattleScene extends Phaser.Scene {
     const me = u.side, foe = u.side === 'player' ? 'enemy' : 'player';
     this.morale[me] = Math.max(0, this.morale[me] - 3);
     this.morale[foe] = Math.min(100, this.morale[foe] + 2);
+    // (V2 Phase 5) The Commander's death collapses the army's will to fight.
+    if (u.isCommander) {
+      this._cmdDead = true;
+      this.morale.player = Math.max(0, this.morale.player - 35);
+      this.battleToast('THE COMMANDER HAS FALLEN', 0xe74c3c);
+      this.cameras.main.shake(260, 0.012);
+    }
   }
 
   nearestEnemyOf(u) {
@@ -723,6 +798,7 @@ export class BattleScene extends Phaser.Scene {
           // (BUG 12) block dmg scales w/ count; (Feature #2) terrain; (V2 P4) veterancy + counters + charge.
           const cm = this.counterMul(u.type, foe.type);
           let power = u.dmg * 0.5 * (u.count || 1) * this.terrainAtkMul(u) * (u.vetMul || 1) * cm;
+          power *= u.side === 'player' ? this.playerCmdMul() : this.enemyCmdMul(); // (V2 P5) commander buffs/collapse
           if (u.type === 'cavalry' && !u._charged) { power *= 3; u._charged = true; } // CHARGE first strike
           this.counterArrow(u, cm); // teach the matchup
           if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(power * this.terrainDefMul(o)); } }
@@ -785,7 +861,7 @@ export class BattleScene extends Phaser.Scene {
     // Survivors by type.
     const survivors: Record<string, number> = {};
     let keepFrac = victory ? 1 : retreated ? 0.6 : 0.4;
-    for (const u of this.sideUnits('player')) survivors[u.type] = (survivors[u.type] || 0) + (u.count || 1); // (BUG 12) blocks carry a count
+    for (const u of this.sideUnits('player')) { if (u.isCommander) continue; survivors[u.type] = (survivors[u.type] || 0) + (u.count || 1); } // (BUG 12) blocks carry a count; (V2 P5) commander isn't a troop type
     const army = Object.entries(survivors).map(([type, count]) => ({ type, count: Math.max(0, Math.round(count * keepFrac)) }));
     // Loot from defeated enemies (victory only).
     const enemyDead = (this.cfg.enemyArmy || []).reduce((s, g) => s + g.count, 0);
@@ -818,7 +894,7 @@ export class BattleScene extends Phaser.Scene {
       this.time.delayedCall(420, () => {
         const cb = this.cfg.onComplete;
         this.scene.stop();
-        if (cb) cb({ victory, retreated, army, loot, context: this.cfg.context });
+        if (cb) cb({ victory, retreated, army, loot, context: this.cfg.context, commanderDied: !!this._cmdDead });
       });
     });
   }

@@ -3139,6 +3139,7 @@ export class IsometricScene extends GameScene {
       playerArmy: playerArmy.units.map((u) => ({ type: u.type, count: u.count, battles: u.battles || 0 })),
       enemyArmy: enemyUnits.map((u) => ({ type: u.type, count: u.count })),
       terrainType: this.battleTerrain(), enemyFaction: ctx.faction || 'red',
+      commander: { name: this.rulerName, trait: this.kingTrait }, // (V2 P5) King/Queen leads in person
       context: ctx, playerDefending: !!ctx.defending,
       defenderWalls: !!(ctx && !ctx.defending && (ctx.kind === 'settlement' || ctx.kind === 'castle')), // (Phase 7)
       onComplete: (res) => this.onArmyBattleComplete(playerArmy, res, ctx),
@@ -3171,7 +3172,16 @@ export class IsometricScene extends GameScene {
       this.threatWarning('Your army was defeated.', 0xff6b6b, true);
     }
     if (this.armyMgr.totalUnits(army) === 0) this.armyMgr.disband(army);
+    if (res && res.commanderDied) this.onCommanderFell(ctx); // (V2 P5)
     this.refreshPanel();
+  }
+
+  // (V2 Phase 5) The King/Queen was slain leading the host. Dramatic fallout
+  // here; the succession crisis itself is handled by Phase 8 if present.
+  onCommanderFell(_ctx) {
+    this.logEvent(`${this.rulerName} has fallen in battle!`, 'red');
+    this.threatWarning(`${this.rulerName} has fallen in battle!`, 0xe74c3c, true);
+    if (this.succession && this.succession.onRulerDeath) this.succession.onRulerDeath('battle');
   }
 
   resolveSettlementAttack(army, st) {
