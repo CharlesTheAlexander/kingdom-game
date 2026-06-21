@@ -27,7 +27,22 @@ const GOBLIN_MIN_DIST = 8;     // min tiles from the player castle for a goblin 
 
 // ---- Shared base ----------------------------------------------------------
 class Beast {
-  constructor(scene, x, y, cfg) {
+  scene: any;
+  x: number;
+  y: number;
+  cfg: any;
+  maxHp: number;
+  hp: number;
+  alive: boolean;
+  kind: string;
+  noWarriorMelee: boolean;
+  spr: any;
+  _barW: number;
+  hpBarBg: any;
+  hpBarFill: any;
+  [key: string]: any;
+
+  constructor(scene: any, x: number, y: number, cfg: any) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -267,7 +282,15 @@ class Boar extends Beast {
 
 // ---- Manager --------------------------------------------------------------
 export class WildlifeManager {
-  constructor(scene) {
+  scene: any;
+  units: any[];
+  goblinParties: any[];
+  _lastWolfDay: number;
+  _lastBoarDay: number;
+  _lastGobDay: number;
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.units = [];
     this.goblinParties = [];
@@ -288,7 +311,7 @@ export class WildlifeManager {
   // Pick a scatter point inside one of the given regions (returns world coords).
   // opts.rowMax caps the tile row; opts.minTiles enforces a minimum distance
   // from the player castle (so threats never spawn on top of the settlement).
-  regionPoint(regions, opts = {}) {
+  regionPoint(regions: any, opts: any = {}) {
     const s = this.scene;
     const castle = s.buildings.castle;
     for (let a = 0; a < 90; a++) {

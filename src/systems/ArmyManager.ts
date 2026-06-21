@@ -7,13 +7,20 @@ import Phaser from 'phaser';
 // march from their castle toward the player. Armies march across terrain (speed
 // varies by biome), carry food supply, and have morale that feeds the BattleScene.
 
-const UNIT_HP = { warrior: 50, archer: 40, monk: 30, knight: 120, mercenary: 50 };
-const FACTION_COLOR = { player: 0x3a7bd5, red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a };
-const MARCH_SPEED = { plains: 3, start: 3, middle: 3, delta: 3, forest: 1.5, mountains: 1, wildlands: 2 }; // tiles per game-hour
+const UNIT_HP: Record<string, number> = { warrior: 50, archer: 40, monk: 30, knight: 120, mercenary: 50 };
+const FACTION_COLOR: Record<string, number> = { player: 0x3a7bd5, red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a };
+const MARCH_SPEED: Record<string, number> = { plains: 3, start: 3, middle: 3, delta: 3, forest: 1.5, mountains: 1, wildlands: 2 }; // tiles per game-hour
 const DAY_MS = 300000;
 
 export class ArmyManager {
-  constructor(scene) {
+  scene: any;
+  armies: any[];
+  _idc: number;
+  selected: any;
+  maxPlayerArmies: number;
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.armies = [];
     this._idc = 0;
@@ -65,9 +72,9 @@ export class ArmyManager {
   }
 
   // --- formation -----------------------------------------------------------
-  formArmy(spec, name) {
+  formArmy(spec: any, name?: string) {
     if (this.playerArmies().length >= this.maxPlayerArmies) { this.scene.showToast(`Army limit reached (${this.maxPlayerArmies})`); return null; }
-    const units = [];
+    const units: any[] = [];
     let total = 0;
     for (const [type, want] of Object.entries(spec)) {
       if (!want) continue;
@@ -97,8 +104,8 @@ export class ArmyManager {
   spawnAIArmy(faction, col, row, unitCounts, name) {
     // (BUG 4) Cap each AI army at 15 units total.
     let budget = 15;
-    const units = [];
-    for (const [type, n] of Object.entries(unitCounts)) {
+    const units: any[] = [];
+    for (const [type, n] of Object.entries(unitCounts) as [string, number][]) {
       if (n <= 0 || budget <= 0) continue;
       const count = Math.min(n, budget); budget -= count;
       units.push({ type, count, hp: UNIT_HP[type] || 50, maxHp: UNIT_HP[type] || 50 });
@@ -134,7 +141,7 @@ export class ArmyManager {
   }
 
   // --- movement ------------------------------------------------------------
-  marchTo(army, col, row, opts = {}) {
+  marchTo(army: any, col: number, row: number, opts: any = {}) {
     army.marchTargetCol = col; army.marchTargetRow = row;
     army.state = opts.garrison ? 'garrisoning' : opts.returning ? 'returning' : 'marching';
     army.attackTarget = opts.attackTarget || null;
@@ -289,7 +296,7 @@ export class ArmyManager {
     return this.armies.map((a) => ({ id: a.id, name: a.name, faction: a.faction, units: a.units.map((u) => ({ ...u })), col: a.col, row: a.row, state: a.state, marchTargetCol: a.marchTargetCol, marchTargetRow: a.marchTargetRow, garrisonSettlementId: a.garrisonSettlementId, morale: a.morale, supplyDays: a.supplyDays }));
   }
 
-  restore(list) {
+  restore(list: any) {
     for (const a of [...this.armies]) this.removeArmy(a);
     this.armies = []; this._idc = 0;
     for (const d of list || []) {

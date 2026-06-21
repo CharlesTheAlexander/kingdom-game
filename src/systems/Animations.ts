@@ -11,7 +11,7 @@ import Phaser from 'phaser';
 // logic lives in one place.
 
 // [textureKey, lastFrameIndex, framesPerSecond]
-const LOOPS = [
+const LOOPS: any[] = [
   ['blue_warrior_idle', 7, 8], ['warrior_idle', 7, 8], ['yellow_warrior_idle', 7, 8], ['purple_warrior_idle', 7, 8], ['goblin_idle', 7, 8],
   ['blue_warrior_run', 5, 12], ['red_warrior_run', 5, 12], ['yellow_warrior_run', 5, 12], ['purple_warrior_run', 5, 12], ['goblin_run', 5, 12],
   ['blue_archer_idle', 5, 8], ['red_archer_idle', 5, 8], ['blue_archer_run', 3, 12],
@@ -19,12 +19,12 @@ const LOOPS = [
   ['pawn_idle', 7, 8], ['pawn_run', 5, 12], ['pawn_run_wood', 5, 12], ['pawn_run_gold', 5, 12], ['pawn_run_meat', 5, 12],
   ['pawn_run_axe', 5, 12], ['pawn_run_pickaxe', 5, 12], ['pawn_interact_axe', 5, 9], ['pawn_interact_pickaxe', 5, 9],
 ];
-const ONCE = [
+const ONCE: any[] = [
   ['blue_archer_shoot', 7, 16], ['red_archer_shoot', 7, 16], ['monk_heal', 10, 16],
 ];
 // Combined melee swing: Attack1 frames then Attack2 frames, played as one
 // one-shot (the spec's Attack1 → Attack2 → Idle). [animKey, sheet1, sheet2].
-const COMBO_ATTACKS = [
+const COMBO_ATTACKS: any[] = [
   ['blue_warrior_attack', 'blue_warrior_attack', 'blue_warrior_attack2'],
   ['red_warrior_attack', 'red_warrior_attack', 'red_warrior_attack2'],
   ['yellow_warrior_attack', 'yellow_warrior_attack', 'yellow_warrior_attack2'],
@@ -33,7 +33,7 @@ const COMBO_ATTACKS = [
 ];
 
 // Create every unit animation once per scene (idempotent; skips missing textures).
-export function registerUnitAnimations(scene) {
+export function registerUnitAnimations(scene: any) {
   for (const [key, end, fps] of LOOPS) {
     if (scene.textures.exists(key) && !scene.anims.exists(key)) scene.anims.create({ key, frames: scene.anims.generateFrameNumbers(key, { start: 0, end }), frameRate: fps, repeat: -1 });
   }
@@ -50,7 +50,7 @@ export function registerUnitAnimations(scene) {
 
 // Play a looping state animation. No-op if it is already the current anim, and
 // never interrupts an in-progress one-shot (a sword swing / arrow loose / heal).
-export function playLoop(spr, key) {
+export function playLoop(spr: any, key: string) {
   if (!spr || !spr.scene || spr._oneShot || !key || !spr.scene.anims.exists(key)) return;
   const cur = spr.anims && spr.anims.currentAnim;
   if (cur && cur.key === key && spr.anims.isPlaying) return;
@@ -59,7 +59,7 @@ export function playLoop(spr, key) {
 
 // Play a one-shot animation once, then fall back to backKey. Ignored while a
 // previous one-shot is still mid-play so repeated triggers don't stutter.
-export function playOnce(spr, key, backKey) {
+export function playOnce(spr: any, key: string, backKey?: string) {
   if (!spr || !spr.scene || spr._oneShot || !key || !spr.scene.anims.exists(key)) return;
   spr._oneShot = key;
   spr.play(key);

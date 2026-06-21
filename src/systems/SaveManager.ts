@@ -5,13 +5,13 @@
 // scene rebuilds from a clean slate (deterministic terrain) and then applySave()
 // overwrites the dynamic state. Three slots in localStorage: slot 0 = auto-save.
 
-const KEY = (slot) => `kingdom_save_slot_${slot}`;
+const KEY = (slot: number) => `kingdom_save_slot_${slot}`;
 const VERSION = 1;
-let PENDING = null; // snapshot waiting to be applied after a scene.restart()
+let PENDING: any = null; // snapshot waiting to be applied after a scene.restart()
 
 // ---------------------------------------------------------------- capture ----
 
-export function capture(scene) {
+export function capture(scene: any) {
   const r = scene.resources;
   const data = {
     version: VERSION,
@@ -52,16 +52,16 @@ export function capture(scene) {
   return data;
 }
 
-function safeParse(s) { try { return JSON.parse(s); } catch (e) { return null; } }
+function safeParse(s: any) { try { return JSON.parse(s); } catch (e) { return null; } }
 
-export function metadataFor(scene) {
+export function metadataFor(scene: any) {
   const tier = scene.TIERS && scene.TIERS[scene.tierIndex] ? scene.TIERS[scene.tierIndex].name : '—';
   return { day: scene.gameDay, tier, timestamp: Date.now(), playMin: Math.round((scene.gamePlayMs || 0) / 60000) };
 }
 
 // ----------------------------------------------------------------- storage ---
 
-export function save(scene, slot) {
+export function save(scene: any, slot: number): { ok: boolean; error?: string } {
   try {
     const payload = { meta: metadataFor(scene), data: capture(scene) };
     let str = JSON.stringify(payload);
@@ -76,7 +76,7 @@ export function save(scene, slot) {
   }
 }
 
-export function readRaw(slot) {
+export function readRaw(slot: number): any {
   const str = localStorage.getItem(KEY(slot));
   if (!str) return null;
   try {
@@ -89,7 +89,7 @@ export function readRaw(slot) {
 }
 
 export function listSlots() {
-  const out = [];
+  const out: any[] = [];
   for (let i = 0; i < 3; i++) {
     const raw = readRaw(i);
     out.push(raw && raw.corrupted ? { slot: i, corrupted: true } : raw ? { slot: i, ...raw.meta } : { slot: i, empty: true });
@@ -97,13 +97,13 @@ export function listSlots() {
   return out;
 }
 
-export function deleteSlot(slot) { try { localStorage.removeItem(KEY(slot)); } catch (e) {} }
+export function deleteSlot(slot: number) { try { localStorage.removeItem(KEY(slot)); } catch (e) {} }
 export function hasAnySave() { for (let i = 0; i < 3; i++) if (localStorage.getItem(KEY(i))) return true; return false; }
 
 // ----------------------------------------------------------- load handshake --
 
 // Read a slot, stash its snapshot, and restart the scene so it rebuilds clean.
-export function requestLoad(scene, slot) {
+export function requestLoad(scene: any, slot: number): { ok: boolean; error?: string } {
   const raw = readRaw(slot);
   if (!raw || raw.corrupted || !raw.data) return { ok: false, error: raw && raw.corrupted ? 'Save is corrupted.' : 'Empty slot.' };
   PENDING = raw.data;
@@ -118,9 +118,9 @@ export function hasPending() { return !!PENDING; }
 
 // Reconstruct dynamic state onto a freshly-created scene. Each section is
 // independently guarded so one failure can't abort the whole load.
-export function applySave(scene, data) {
+export function applySave(scene: any, data: any) {
   if (!data) return;
-  const sect = (name, fn) => { try { fn(); } catch (e) { console.error('[Load] section "' + name + '" failed', e); } };
+  const sect = (name: string, fn: () => void) => { try { fn(); } catch (e) { console.error('[Load] section "' + name + '" failed', e); } };
 
   sect('world', () => {
     scene.gameDay = data.world.gameDay;

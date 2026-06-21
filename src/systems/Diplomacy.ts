@@ -4,10 +4,22 @@ import Phaser from 'phaser';
 // with the player that drifts and reacts to actions, gating how aggressively
 // they attack and unlocking pacts/alliances at high values.
 
-const THRESH = (r) => (r <= -80 ? 'Coordinated' : r < -50 ? 'Hostile' : r < 0 ? 'Neutral' : r < 50 ? 'Cautious' : r < 80 ? 'Friendly' : 'Allied');
+const THRESH = (r: number) => (r <= -80 ? 'Coordinated' : r < -50 ? 'Hostile' : r < 0 ? 'Neutral' : r < 50 ? 'Cautious' : r < 80 ? 'Friendly' : 'Allied');
 
 export class Diplomacy {
-  constructor(scene) {
+  scene: any;
+  rel: Record<string, number>;
+  nap: Record<string, boolean>;
+  ally: Record<string, boolean>;
+  treaties: Record<string, any>;
+  _days: Record<string, number>;
+  _coalitionPending: boolean;
+  _coalitionDay: number;
+  _warCooldown?: Record<string, number>;
+  _last?: string;
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.rel = {};
     this.nap = {}; // non-aggression pact accepted
@@ -23,7 +35,7 @@ export class Diplomacy {
 
   get(key) { return this.rel[key] || 0; }
   status(key) { return this.nap[key] ? (this.ally[key] ? 'Allied (pact)' : 'Non-aggression') : THRESH(this.get(key)); }
-  change(key, d, reason) { this.rel[key] = Phaser.Math.Clamp((this.rel[key] || 0) + d, -100, 100); if (reason) this._last = `${key}: ${reason}`; }
+  change(key: string, d: number, reason?: string) { this.rel[key] = Phaser.Math.Clamp((this.rel[key] || 0) + d, -100, 100); if (reason) this._last = `${key}: ${reason}`; }
 
   onPlayerAttack(key) { this.change(key, -15, 'you attacked them'); }
   onBuildingDestroyed(key) { this.change(key, -25, 'you destroyed a building'); }
@@ -164,5 +176,5 @@ export class Diplomacy {
   }
 
   serialize() { return { rel: { ...this.rel }, nap: { ...this.nap }, ally: { ...this.ally }, treaties: JSON.parse(JSON.stringify(this.treaties)), coalitionPending: this._coalitionPending, coalitionDay: this._coalitionDay, warCooldown: this._warCooldown || {} }; }
-  restore(d) { if (!d) return; Object.assign(this.rel, d.rel || {}); Object.assign(this.nap, d.nap || {}); Object.assign(this.ally, d.ally || {}); if (d.treaties) this.treaties = d.treaties; this._coalitionPending = !!d.coalitionPending; this._coalitionDay = d.coalitionDay || 0; this._warCooldown = d.warCooldown || {}; }
+  restore(d: any) { if (!d) return; Object.assign(this.rel, d.rel || {}); Object.assign(this.nap, d.nap || {}); Object.assign(this.ally, d.ally || {}); if (d.treaties) this.treaties = d.treaties; this._coalitionPending = !!d.coalitionPending; this._coalitionDay = d.coalitionDay || 0; this._warCooldown = d.warCooldown || {}; }
 }

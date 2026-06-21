@@ -9,7 +9,11 @@ import { GAME_W } from '../scenes/GameScene.js';
 const MAX_ROUTES = 3;
 
 export class Caravans {
-  constructor(scene) {
+  scene: any;
+  routes: any[];
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.routes = []; // { from, to, resource, amount, progress }
   }
@@ -17,7 +21,7 @@ export class Caravans {
   // Owned sites: the main Castle plus conquered neutral settlements.
   sites() {
     const s = this.scene;
-    const out = [];
+    const out: any[] = [];
     if (s.buildings.castle) out.push({ name: 'Castle', col: s.buildings.castle.col, row: s.buildings.castle.row, x: s.buildings.castle.x, y: s.buildings.castle.y, specialty: 'gold' });
     if (s.settlements) for (const st of s.settlements.list) if (st.owner === 'player') out.push({ name: st.name, col: st.col, row: st.row, x: st.x, y: st.y, specialty: st.specialty });
     return out;

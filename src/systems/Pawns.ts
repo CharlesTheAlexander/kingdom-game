@@ -13,7 +13,7 @@ const SCALE = 32 / 192;
 
 // produces-type -> { node to harvest, walk-out anim (tool), interact anim, carry-home anim }
 // (Polish Phase 1) tool matches the resource: axe=wood, pickaxe=stone, meat=food.
-const GATHER = {
+const GATHER: Record<string, any> = {
   wood: { node: 'wood', walk: 'pawn_run_axe', interact: 'pawn_interact_axe', carry: 'pawn_run_wood' },
   stone: { node: 'stone', walk: 'pawn_run_pickaxe', interact: 'pawn_interact_pickaxe', carry: 'pawn_run_gold' }, // no "carry stone" art; gold stand-in
   food: { node: 'food', walk: 'pawn_run_meat', interact: 'pawn_idle', carry: 'pawn_run_meat' },
@@ -21,7 +21,7 @@ const GATHER = {
 
 // (FIX 1) Idle/freelance gathering yields per trip, by node type. Gold nodes are
 // excluded — gold comes from the Castle/expeditions, not freelancers.
-const FREELANCE = {
+const FREELANCE: Record<string, any> = {
   wood: { carry: 'pawn_run_wood', res: 'wood', amt: 3, walk: 'pawn_run_axe', interact: 'pawn_interact_axe' },
   stone: { carry: 'pawn_run_gold', res: 'stone', amt: 4, walk: 'pawn_run_pickaxe', interact: 'pawn_interact_pickaxe' }, // (Balance) 2->4: idle stone was RNG-low (~20/day), gating the Mine
   food: { carry: 'pawn_run_meat', res: 'food', amt: 4, walk: 'pawn_run_meat', interact: 'pawn_idle' },
@@ -29,7 +29,17 @@ const FREELANCE = {
 const FREELANCE_TYPES = ['wood', 'stone', 'food'];
 
 class Pawn {
-  constructor(scene, x, y) {
+  scene: any;
+  x: number;
+  y: number;
+  spr: any;
+  state: string;
+  assigned: any;
+  targetNode: any;
+  carryRes: any;
+  [key: string]: any;
+
+  constructor(scene: any, x: number, y: number) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -186,12 +196,16 @@ class Pawn {
 }
 
 export class PawnManager {
-  constructor(scene) {
+  scene: any;
+  pawns: any[];
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.pawns = [];
   }
 
-  sync(targetCount) {
+  sync(targetCount: number) {
     while (this.pawns.length < targetCount) {
       const castle = this.scene.buildings.castle;
       const x = (castle ? castle.x : 480) + Phaser.Math.Between(-30, 30);

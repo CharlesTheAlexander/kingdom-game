@@ -16,7 +16,7 @@ import { sfx } from '../audio/SoundEngine.js';
 
 const SEC_PER_DAY = 300; // matches IsometricScene DAY_MS (300000ms)
 
-const DEFS = {
+const DEFS: Record<string, any> = {
   // (Polish Phase 5) reward strings kept short so they fit the expedition card.
   scout: { name: 'Scouting Party', cost: 2, days: 0.5, maxSlots: 2, reward: 'Reveal enemy army · maybe Artifact' },
   raid: { name: 'Raid Enemy Camp', cost: 5, days: 1, maxSlots: 2, reward: '20-40 Iron · Mercenary? · 30% loss' },
@@ -30,7 +30,12 @@ const DEFS = {
 const WSCALE = 36 / 192;
 
 export class ExpeditionManager {
-  constructor(scene) {
+  scene: any;
+  defs: Record<string, any>;
+  state: Record<string, any[]>;
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.defs = DEFS;
     // Each type holds an array of active slots: [{ timeLeft }]. (FIX 3)

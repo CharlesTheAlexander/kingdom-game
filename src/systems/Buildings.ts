@@ -4,7 +4,22 @@ import { sfx } from '../audio/SoundEngine.js';
 
 // A single placed building: its visuals, HP, level and per-tick behaviour.
 export class Building {
-  constructor(scene, typeKey, col, row) {
+  scene: any;
+  typeKey: string;
+  type: any;
+  col: number;
+  row: number;
+  level: number;
+  maxHp: number;
+  hp: number;
+  alive: boolean;
+  workers: number;
+  x: number;
+  y: number;
+  rect: any;
+  [key: string]: any;
+
+  constructor(scene: any, typeKey: string, col: number, row: number) {
     this.scene = scene;
     this.typeKey = typeKey;
     this.type = BuildingTypes[typeKey];
@@ -88,7 +103,7 @@ export class Building {
   // Whole-number production. Called once per second by the manager.
   // (Bug 4) Soldiers are no longer auto-produced — the Barracks trains units
   // manually via its training slots, so 'soldiers' is skipped here.
-  produce(resources, scene) {
+  produce(resources: any, scene: any) {
     if (this.type.attack || !this.type.produces || this.type.produces === 'soldiers') return;
     // (Session-1 Phase 5) Tax revolt → workers strike, no production today.
     if (scene && scene._strikeUntil && scene.gameDay < scene._strikeUntil) return;
@@ -183,7 +198,15 @@ export class Building {
 
 // Owns the placement grid, worker accounting and all building updates.
 export class BuildingManager {
-  constructor(scene, cols, rows) {
+  scene: any;
+  cols: number;
+  rows: number;
+  buildings: any[];
+  grid: any[][];
+  castle: any;
+  [key: string]: any;
+
+  constructor(scene: any, cols: number, rows: number) {
     this.scene = scene;
     this.cols = cols;
     this.rows = rows;
@@ -233,7 +256,7 @@ export class BuildingManager {
   }
 
   // Validate a build attempt. Returns { ok, reason }.
-  canPlace(typeKey, resources, maxBuildings) {
+  canPlace(typeKey: string, resources: any, maxBuildings: number): { ok: boolean; reason?: string } {
     const type = BuildingTypes[typeKey];
     if (this.placedCount() >= maxBuildings) {
       return { ok: false, reason: 'Upgrade your settlement to build more' };
@@ -253,7 +276,7 @@ export class BuildingManager {
   // so no caller (or future code path) can place a tier-locked building early.
   // `opts.ignoreStage` lets save-load and the Scholar starting Library bypass it,
   // since those are authoritative placements.
-  place(typeKey, col, row, opts = {}) {
+  place(typeKey: string, col: number, row: number, opts: any = {}) {
     if (this.isOccupied(col, row)) return null;
     const type = BuildingTypes[typeKey];
     if (!opts.ignoreStage && type && type.stageUnlock && this.scene.currentStage && this.scene.currentStage() < type.stageUnlock) {

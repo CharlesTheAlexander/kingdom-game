@@ -21,11 +21,11 @@ const LEASH = 12 * 48;
 
 // Shared move-to-command handler for any unit (Phase 3 box-select). Returns true
 // while a command is active so the unit's normal AI is skipped that frame.
-function speedMul(u) {
+function speedMul(u: any) {
   return u.scene.buffs ? u.scene.buffs.troopSpeed : 1; // War Drum artifact (Phase 5)
 }
 
-function runCommand(u, dt, speed, runAnim, idleAnim) {
+function runCommand(u: any, dt: number, speed: number, runAnim: string, idleAnim: string) {
   if (!u.cmd) return false;
   const c = u.cmd;
   const d = Phaser.Math.Distance.Between(u.x, u.y, c.x, c.y);
@@ -51,7 +51,19 @@ function runCommand(u, dt, speed, runAnim, idleAnim) {
 }
 
 class Warrior {
-  constructor(scene, x, y, homeX, homeY, opts = {}) {
+  scene: any;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  spr: any;
+  target: any;
+  cmd: any;
+  label: any;
+  [key: string]: any;
+
+  constructor(scene: any, x: number, y: number, homeX: number, homeY: number, opts: any = {}) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -178,7 +190,17 @@ class Warrior {
 // Stationary blue archer (Phase 4): stays near the barracks, shoots the nearest
 // enemy within 4 tiles for 12 dmg/sec.
 class Archer {
-  constructor(scene, x, y) {
+  scene: any;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  spr: any;
+  cmd: any;
+  [key: string]: any;
+
+  constructor(scene: any, x: number, y: number) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -244,7 +266,17 @@ class Archer {
 // Blue monk (Phase 4): no combat. Follows the nearest warrior and heals them
 // 5 HP/sec while their HP is below 80%.
 class Monk {
-  constructor(scene, x, y) {
+  scene: any;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  spr: any;
+  cmd: any;
+  [key: string]: any;
+
+  constructor(scene: any, x: number, y: number) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -329,7 +361,13 @@ class Monk {
 }
 
 export class TroopManager {
-  constructor(scene) {
+  scene: any;
+  warriors: any[];
+  archers: any[];
+  monks: any[];
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.warriors = [];
     this.archers = [];
@@ -370,7 +408,7 @@ export class TroopManager {
 
   // (Save system) Capture every living unit's type/position/hp.
   serialize() {
-    const out = [];
+    const out: any[] = [];
     for (const w of this.warriors) if (w.alive) out.push({ t: w.knight ? 'knight' : w.mercenary ? 'mercenary' : 'warrior', x: Math.round(w.x), y: Math.round(w.y), hp: Math.round(w.hp), maxHp: w.maxHp, cmd: !!w.playerCommanded });
     for (const a of this.archers) if (a.alive) out.push({ t: 'archer', x: Math.round(a.x), y: Math.round(a.y), hp: Math.round(a.hp), maxHp: a.maxHp, cmd: !!a.playerCommanded });
     for (const m of this.monks) if (m.alive) out.push({ t: 'monk', x: Math.round(m.x), y: Math.round(m.y), hp: Math.round(m.hp), maxHp: m.maxHp, cmd: !!m.playerCommanded });
@@ -378,11 +416,11 @@ export class TroopManager {
   }
 
   // (Save system) Rebuild units from serialized data onto a clean roster.
-  restore(list) {
+  restore(list: any) {
     this.removeAll();
     for (const d of list || []) {
       const x = d.x, y = d.y;
-      let u;
+      let u: any;
       if (d.t === 'archer') { u = new Archer(this.scene, x, y); this.archers.push(u); }
       else if (d.t === 'monk') { u = new Monk(this.scene, x, y); this.monks.push(u); }
       else if (d.t === 'knight') { u = new Warrior(this.scene, x, y, x, y, { knight: true, hp: 120, dps: 25, scale: 44 / 192, tint: 0x9fb8d8, label: 'Knight' }); this.warriors.push(u); }
@@ -478,7 +516,7 @@ export class TroopManager {
   }
 
   // Remove up to n warriors quietly (they leave on an expedition).
-  detach(n) {
+  detach(n: number) {
     for (let i = 0; i < n && this.warriors.length > 0; i++) {
       const w = this.warriors.pop();
       w.alive = false;
