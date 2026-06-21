@@ -74,7 +74,10 @@ const PANEL_H = 130;
 const GRID_W = COLS * TILE; // 1440 (world width)
 const GRID_H = ROWS * TILE; // 1056 (world grid height)
 // GAME_W/GAME_H are the fixed VIEWPORT (canvas) size — UI is anchored to this.
-export const GAME_W = 960;
+// (Phase 2) 16:10 design resolution — fills the browser/Mac display via Scale.FIT
+// with minimal letterbox. GAME_H kept at 900 so no vertical layout shifts; the
+// extra width is used by the redesigned UI in Phase 3.
+export const GAME_W = 1440;
 export const GAME_H = 900;
 
 // Barracks unit training. All three count toward the Soldiers number.

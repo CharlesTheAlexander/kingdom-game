@@ -12,8 +12,9 @@ const config = {
   height: GAME_H,
   backgroundColor: '#0f0f1a',
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.FIT,          // (Phase 2) scale the 16:10 canvas to fill the window
     autoCenter: Phaser.Scale.CENTER_BOTH,
+    expandParent: true,
   },
   // IsometricScene is the active scene (first in the array auto-starts);
   // GameScene stays registered as reference but is not started. ContinentScene
@@ -22,6 +23,9 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
+
+// (Phase 2) Keep the canvas matched to the window on resize.
+window.addEventListener('resize', () => { game.scale.refresh(); });
 
 // Dev-only handle for debugging in the browser console (stripped from prod builds).
 if (import.meta.env.DEV) window.__game = game;
