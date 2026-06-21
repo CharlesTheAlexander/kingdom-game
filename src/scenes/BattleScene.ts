@@ -4,7 +4,7 @@ import { registerUnitAnimations, playLoop, playOnce } from '../systems/Animation
 import { sfx } from '../audio/SoundEngine.js';
 
 // (Polish Phase 1) idle texture -> { walk, attack } animation keys for battle units.
-const ANIM_SET = {
+const ANIM_SET: Record<string, any> = {
   blue_warrior_idle: { run: 'blue_warrior_run', atk: 'blue_warrior_attack' },
   warrior_idle: { run: 'red_warrior_run', atk: 'red_warrior_attack' },
   yellow_warrior_idle: { run: 'yellow_warrior_run', atk: 'yellow_warrior_attack' },
@@ -28,7 +28,7 @@ const MELEE = 42;          // px melee range (~1 tile)
 const HORIZON = Math.round(GAME_H * 0.30);
 
 // Per-type stats. speed in px/sec, range in px (0 = melee).
-const STATS = {
+const STATS: Record<string, any> = {
   warrior: { hp: 50, dmg: 15, speed: 52, range: 0, tex: 'blue_warrior_idle', heal: 0 },
   mercenary: { hp: 50, dmg: 18, speed: 52, range: 0, tex: 'yellow_warrior_idle', heal: 0 },
   archer: { hp: 25, dmg: 12, speed: 30, range: 168, tex: 'blue_archer_idle', heal: 0 },
@@ -37,13 +37,13 @@ const STATS = {
   goblin: { hp: 15, dmg: 8, speed: 74, range: 0, tex: 'goblin_idle', heal: 0 },
   garrison: { hp: 50, dmg: 15, speed: 0, range: 0, tex: 'blue_warrior_idle', heal: 0, hold: true },
 };
-const FACTION_WARRIOR = { red: 'warrior_idle', purple: 'purple_warrior_idle', yellow: 'yellow_warrior_idle', neutral: 'blue_warrior_idle', goblin: 'goblin_idle' };
-const FACTION_LABEL = { red: 'Red Kingdom', purple: 'Purple Kingdom', yellow: 'Yellow Kingdom', neutral: 'Free Company', goblin: 'Goblin Horde' };
-const FACTION_COLOR = { red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a, neutral: 0x6aa0d6, goblin: 0x6ab04a };
+const FACTION_WARRIOR: Record<string, string> = { red: 'warrior_idle', purple: 'purple_warrior_idle', yellow: 'yellow_warrior_idle', neutral: 'blue_warrior_idle', goblin: 'goblin_idle' };
+const FACTION_LABEL: Record<string, string> = { red: 'Red Kingdom', purple: 'Purple Kingdom', yellow: 'Yellow Kingdom', neutral: 'Free Company', goblin: 'Goblin Horde' };
+const FACTION_COLOR: Record<string, number> = { red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a, neutral: 0x6aa0d6, goblin: 0x6ab04a };
 
 // Terrain palettes: sky (top of gradient), horizon (band), ground (bottom),
 // the scatter sprite, and how many to scatter. name shown in the pre-battle.
-const TERRAIN = {
+const TERRAIN: Record<string, any> = {
   forest: { sky: 0x334a3a, horizon: 0x223626, ground: 0x14241a, deco: 'iso_forest1', bg: 16, obs: 7, name: 'Forest Clearing' },
   mountains: { sky: 0x46484f, horizon: 0x33343c, ground: 0x202128, deco: 'iso_mtn', bg: 12, obs: 6, name: 'Mountain Pass' },
   plains: { sky: 0x4a5838, horizon: 0x33401f, ground: 0x202d16, deco: 'iso_rock', bg: 6, obs: 3, name: 'Open Plains' },
@@ -51,7 +51,20 @@ const TERRAIN = {
 };
 
 class BUnit {
-  constructor(scene, side, type, x, y, texOverride, opts = {}) {
+  scene: any;
+  side: string;
+  type: string;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  spr: any;
+  block: boolean;
+  count: number;
+  [key: string]: any;
+
+  constructor(scene: any, side: string, type: string, x: number, y: number, texOverride?: any, opts: any = {}) {
     this.scene = scene;
     this.side = side; // 'player' | 'enemy'
     this.type = type;
@@ -119,6 +132,8 @@ class BUnit {
 }
 
 export class BattleScene extends Phaser.Scene {
+  [key: string]: any;
+
   constructor() { super('BattleScene'); }
 
   preload() {
@@ -291,7 +306,7 @@ export class BattleScene extends Phaser.Scene {
   }
 
   // armyData: [{type, count}]
-  spawnArmy(side, armyData) {
+  spawnArmy(side: string, armyData: any, _color?: any) {
     const x = side === 'player' ? GAME_W * 0.80 : GAME_W * 0.20;
     const total = (armyData || []).reduce((s, g) => s + (g.count || 0), 0);
     // (BUG 12) Over 10 units a side renders as formation BLOCKS (one per type),
@@ -664,7 +679,7 @@ export class BattleScene extends Phaser.Scene {
     const retreated = kind === 'retreat';
     sfx.play(victory ? 'victory' : 'defeat'); // (Polish Phase 2)
     // Survivors by type.
-    const survivors = {};
+    const survivors: Record<string, number> = {};
     let keepFrac = victory ? 1 : retreated ? 0.6 : 0.4;
     for (const u of this.sideUnits('player')) survivors[u.type] = (survivors[u.type] || 0) + (u.count || 1); // (BUG 12) blocks carry a count
     const army = Object.entries(survivors).map(([type, count]) => ({ type, count: Math.max(0, Math.round(count * keepFrac)) }));

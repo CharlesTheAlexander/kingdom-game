@@ -13,19 +13,21 @@ const MX = (GAME_W - MAP_PX) / 2;   // top-left of the map on screen
 const MY = 86;
 
 // (Phase 4 Decision 4) More saturated, distinct biome colours.
-const BIOME = {
+const BIOME: Record<string, number> = {
   start: 0x3a8a3a, middle: 0x5a7a2a, forest: 0x1a4a1a, mountains: 0x6b6b5a,
   delta: 0x5a7a2a, wildlands: 0x4a4a1a,
 };
 const WATER = 0x2a5a8a;
 
-function blend(a, b, t) {
+function blend(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
   const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
   return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
 }
 
 export class ContinentScene extends Phaser.Scene {
+  [key: string]: any;
+
   constructor() { super('ContinentScene'); }
 
   create() {
@@ -90,7 +92,7 @@ export class ContinentScene extends Phaser.Scene {
     seen[4] = true;
     try { localStorage.setItem('kg_tut', JSON.stringify(seen)); } catch (e) {}
     const W = 540, H = 110, cx = GAME_W / 2, top = GAME_H - 34 - 20 - H - 14;
-    const els = [];
+    const els: any[] = [];
     els.push(this.add.rectangle(cx, top + H / 2, W, H, 0x1a140c, 0.97).setStrokeStyle(2, 0xc9a14a, 0.95).setDepth(60));
     els.push(this.add.text(cx - W / 2 + 18, top + 12, '📜 The Continent', { fontFamily: 'monospace', fontSize: '16px', color: '#ffe9b0', fontStyle: 'bold' }).setDepth(61));
     els.push(this.add.text(cx - W / 2 + 18, top + 36, 'This is your continent. Your territory glows; enemy kingdoms sit in the far corners; neutral settlements can be conquered. Press Tab or the button below to return.', { fontFamily: 'monospace', fontSize: '12px', color: '#f0e6d0', wordWrap: { width: W - 36 }, lineSpacing: 3 }).setDepth(61));
@@ -121,7 +123,7 @@ export class ContinentScene extends Phaser.Scene {
   rebuildMap() {
     const iso = this.iso;
     if (!iso || !iso.biomeGrid) return;
-    const tex = this.textures.get('continentMap');
+    const tex = this.textures.get('continentMap') as Phaser.Textures.CanvasTexture;
     const ctx = tex.getContext();
     const img = ctx.createImageData(N, N);
     const data = img.data;
@@ -219,7 +221,7 @@ export class ContinentScene extends Phaser.Scene {
     }
     // (Phase 2) Armies on the map — arrow dots in faction colour.
     if (iso.armyMgr) {
-      const FC = { player: 0x3a7bd5, red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a };
+      const FC: Record<string, number> = { player: 0x3a7bd5, red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a };
       for (const a of iso.armyMgr.armies) {
         const p = this.toScreen(a.col, a.row);
         const col = FC[a.faction] || 0x888888;
@@ -306,7 +308,7 @@ export class ContinentScene extends Phaser.Scene {
   // (Bug 3) Normal close: fade out, then hand back to the world. A fallback timer
   // guarantees the hand-off even if the fade-complete event never fires, so the
   // player can never get stuck on a faded continent screen.
-  close(focus) {
+  close(focus?: any) {
     if (this._closing) return;
     this._closing = true;
     this._focus = focus || null;

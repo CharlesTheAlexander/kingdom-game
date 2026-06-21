@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import Phaser from 'phaser';
 import './style.css';
 import { GameScene, GAME_W, GAME_H } from './scenes/GameScene.js';
@@ -5,7 +6,7 @@ import { IsometricScene } from './scenes/IsometricScene.js';
 import { ContinentScene } from './scenes/ContinentScene.js';
 import { BattleScene } from './scenes/BattleScene.js';
 
-const config = {
+const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'app',
   width: GAME_W,
@@ -28,4 +29,4 @@ const game = new Phaser.Game(config);
 window.addEventListener('resize', () => { game.scale.refresh(); });
 
 // Dev-only handle for debugging in the browser console (stripped from prod builds).
-if (import.meta.env.DEV) window.__game = game;
+if (import.meta.env.DEV) (window as any).__game = game;
