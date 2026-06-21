@@ -8,7 +8,9 @@
 // (Phase 2 — worker allocation) Production buildings define `maxWorkers` and a
 // `workerRates` table indexed by the number of allocated workers (rate per sec
 // for `produces`). 0 workers = 0 production. Workers are assigned manually.
-export const BuildingTypes = {
+import type { BuildingType, ResourceCost } from '../types';
+
+export const BuildingTypes: Record<string, BuildingType> = {
   castle: {
     key: 'castle', name: 'Castle', cost: {}, maxWorkers: 0, hp: 200,
     // (Polish Phase 6 balance) Trimmed 2 -> 1.5 gold/sec. Sim showed ~600 gold/day
@@ -98,15 +100,15 @@ export const MAX_LEVEL = 5;
 const OUTPUT_CURVE = [1, 1.5, 2.25, 3, 4]; // index = level-1
 
 // Upgrades cost GOLD only and rise each level (gates the high tiers).
-export function upgradeCost(type, level) {
+export function upgradeCost(type: string, level: number): number {
   return Math.round(60 * Math.pow(1.8, level - 1));
 }
-export function outputMultiplier(level) {
+export function outputMultiplier(level: number): number {
   return OUTPUT_CURVE[Math.max(0, Math.min(OUTPUT_CURVE.length - 1, level - 1))] || 1;
 }
 
-const RES_ABBR = { gold: 'G', wood: 'W', stone: 'S', food: 'F', iron: 'Fe', equipment: 'Eq' };
-export function formatCost(cost) {
+const RES_ABBR: Record<string, string> = { gold: 'G', wood: 'W', stone: 'S', food: 'F', iron: 'Fe', equipment: 'Eq' };
+export function formatCost(cost: ResourceCost): string {
   const parts = Object.entries(cost).map(([k, v]) => `${v}${RES_ABBR[k] || k}`);
   return parts.length ? parts.join(' ') : 'Free';
 }
