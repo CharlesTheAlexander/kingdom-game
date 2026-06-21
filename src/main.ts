@@ -33,3 +33,21 @@ window.addEventListener('resize', () => { game.scale.refresh(); });
 
 // Dev-only handle for debugging in the browser console (stripped from prod builds).
 if (import.meta.env.DEV) (window as any).__game = game;
+
+// Phase 1 (Bannerlord rebuild) DEV-ONLY debug hook. Exposes the world generator
+// + chunk renderer so the headless audit can generate a world and inspect it
+// WITHOUT wiring anything into the scenes (that's Phase 2). This is the ONLY
+// main.ts change allowed this phase — no scene changes.
+if (import.meta.env.DEV) {
+  import('./systems/WorldGenerator.js').then((wg) => {
+    import('./systems/ChunkManager.js').then((cm) => {
+      (window as any).__worldgen = {
+        generateWorld: wg.generateWorld,
+        biomeHistogram: wg.biomeHistogram,
+        riverTileCount: wg.riverTileCount,
+        getLastWorld: wg.getLastWorld,
+        ChunkManager: cm.ChunkManager,
+      };
+    });
+  });
+}
