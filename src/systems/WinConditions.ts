@@ -43,6 +43,8 @@ export class WinConditions {
   // Returns a win-path name or null. Pure (no side effects) so it's testable.
   check(): string | null {
     const s = this.scene;
+    // (V2 Phase 11) The secret fourth path — restore the old empire.
+    if (s.narrative && s.narrative.empireRestored) return 'Empire';
     const total = this.totalSettlements();
     if (total > 0 && this.playerControlled() / total >= CONQUEST_FRACTION) return 'Conquest';
 
@@ -66,7 +68,8 @@ export class WinConditions {
     const path = this.check();
     if (path) {
       this.triggered = true;
-      if (this.scene.showEndScreen) this.scene.showEndScreen(true, path);
+      const label = path === 'Empire' ? 'The Old Empire Restored —' : path; // (V2 P11) unique 4th ending
+      if (this.scene.showEndScreen) this.scene.showEndScreen(true, label);
     }
   }
 

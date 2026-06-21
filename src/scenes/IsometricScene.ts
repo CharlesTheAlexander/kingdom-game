@@ -64,6 +64,7 @@ import { Maintenance } from '../systems/Maintenance.js';
 import { RoyalCourt } from '../systems/RoyalCourt.js';
 import { Succession } from '../systems/Succession.js';
 import { Espionage, MISSIONS } from '../systems/Espionage.js';
+import { Narrative } from '../systems/Narrative.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -299,6 +300,7 @@ export class IsometricScene extends GameScene {
     this.court = new RoyalCourt(this); // (V2 Phase 7) advisors
     this.succession = new Succession(this); // (V2 Phase 8) heir, marriage, succession
     this.espionage = new Espionage(this); // (V2 Phase 9) spy network
+    this.narrative = new Narrative(this); // (V2 Phase 11) story arc + 4th win path
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -1015,7 +1017,8 @@ export class IsometricScene extends GameScene {
     this.closeCourtPanel();
     const C = this.court; if (!C) return;
     const fix = (o) => o.setScrollFactor(0).setDepth(122);
-    const W = 540, ht = 92 + C.advisors.length * 70, x = (GAME_W - W) / 2, y = (GAME_H - ht) / 2, els = [];
+    const empire = !!(this.narrative && this.narrative.canRestoreEmpire());
+    const W = 540, ht = 92 + C.advisors.length * 70 + (empire ? 40 : 0), x = (GAME_W - W) / 2, y = (GAME_H - ht) / 2, els = [];
     els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.5).setOrigin(0, 0).setInteractive()));
     els.push(fix(this.add.rectangle(x, y, W, ht, 0x171320, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
     els.push(fix(this.add.text(x + W / 2, y + 12, 'THE ROYAL COURT', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
@@ -1044,6 +1047,14 @@ export class IsometricScene extends GameScene {
         els.push(fix(this.add.text(x + 44, ry + 34, 'No counsel pending. Reports arrive weekly.', { fontFamily: 'monospace', fontSize: '10px', color: '#7d7768', fontStyle: 'italic' })));
       }
       ry += 70;
+    }
+    // (V2 Phase 11) The secret fourth path — restore the old empire.
+    if (this.narrative && this.narrative.canRestoreEmpire()) {
+      const cost = this.narrative.restoreEmpireCost();
+      const eb = fix(this.add.rectangle(x + 20, y + ht - 38, W - 40, 28, 0x4a3a1a, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xffd24a, 0.95).setInteractive({ useHandCursor: true }));
+      const et = fix(this.add.text(x + W / 2, y + ht - 24, `⟡ Restore the Old Empire — ${cost} gold (a final victory)`, { fontFamily: 'monospace', fontSize: '12px', color: '#ffe9a8', fontStyle: 'bold' }).setOrigin(0.5));
+      eb.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); if (this.narrative.restoreEmpire()) this.closeCourtPanel(); });
+      els.push(eb, et);
     }
     this._courtPanel = els;
   }
@@ -3956,6 +3967,7 @@ export class IsometricScene extends GameScene {
     if (this.succession) this.succession.onNewDay(); // (V2 Phase 8) heir raising + natural death
     if (this.espionage) this.espionage.onNewDay(); // (V2 Phase 9) spy training
     if (this.wildlife && this.wildlife.onNewDay) this.wildlife.onNewDay(); // (V2 Phase 10) ecosystem + goblin camp growth
+    if (this.narrative) this.narrative.onNewDay(); // (V2 Phase 11) story beats + Truth path
     // (Completion Phase 7) Advance Siege Workshop training.
     for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
