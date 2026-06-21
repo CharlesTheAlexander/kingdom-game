@@ -298,9 +298,146 @@ export function generateAIBuildings(scene: any) {
   }
 }
 
+// ---- unit spritesheet helpers ----------------------------------------------
+// Units are 192x192 frames (the engine scales them by 36/192) so animation +
+// scale math stays identical. We build a wide canvas, draw each frame, and add
+// numeric sub-frames so generateFrameNumbers(key,{start,end}) keeps working.
+const css = (n: number) => '#' + (n & 0xffffff).toString(16).padStart(6, '0');
+function fillRect2(ctx: any, x: number, y: number, w: number, h: number, c: number) { ctx.fillStyle = css(c); ctx.fillRect(x, y, w, h); }
+function disc(ctx: any, x: number, y: number, r: number, c: number) { ctx.fillStyle = css(c); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+
+function spriteSheet(scene: any, key: string, frames: number, draw: (ctx: any, t: number, i: number) => void) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const tex = scene.textures.createCanvas(key, frames * 192, 192);
+  const ctx = tex.getContext();
+  for (let i = 0; i < frames; i++) {
+    ctx.save(); ctx.translate(i * 192, 0);
+    draw(ctx, frames > 1 ? i / (frames - 1) : 0, i);
+    ctx.restore();
+    tex.add(i, 0, i * 192, 0, 192, 192);
+  }
+  tex.refresh();
+}
+
+// A humanoid centred at x=96, feet ~y150. opts drive pose + gear.
+function figure(ctx: any, P: any, o: any = {}) {
+  const cx = 96, gY = 150, bob = o.bob || 0, lean = o.lean || 0, lp = o.legPhase || 0;
+  // Legs + boots (lp spreads them for the run cycle).
+  fillRect2(ctx, cx - 9 + lp * 7, gY - 30 + bob, 8, 30, P.legs);
+  fillRect2(ctx, cx + 1 - lp * 7, gY - 30 + bob, 8, 30, P.legs);
+  fillRect2(ctx, cx - 10 + lp * 7, gY - 4 + bob, 10, 5, 0x241a10);
+  fillRect2(ctx, cx + 0 - lp * 7, gY - 4 + bob, 10, 5, 0x241a10);
+  // Cape (champion/knight) behind body.
+  if (o.cape) { ctx.fillStyle = css(o.cape); ctx.beginPath(); ctx.moveTo(cx - 14 + lean, 74 + bob); ctx.lineTo(cx + 14 + lean, 74 + bob); ctx.lineTo(cx + 20 + lean, 128 + bob); ctx.lineTo(cx - 20 + lean, 128 + bob); ctx.closePath(); ctx.fill(); }
+  // Torso.
+  fillRect2(ctx, cx - 18 + lean, 72 + bob, 36, 50, P.tunic);
+  fillRect2(ctx, cx - 18 + lean, 112 + bob, 36, 10, P.tunicDark);
+  if (P.trim) fillRect2(ctx, cx - 18 + lean, 84 + bob, 36, 3, P.trim);
+  // Head + face.
+  disc(ctx, cx + lean, 56 + bob, 16, P.skin);
+  disc(ctx, cx - 5 + lean, 55 + bob, 2, 0x20140c);
+  disc(ctx, cx + 5 + lean, 55 + bob, 2, o.glowEyes ? 0x66ccff : 0x20140c);
+  // Headgear.
+  if (o.helmet) { ctx.fillStyle = css(P.helmet); ctx.beginPath(); ctx.arc(cx + lean, 54 + bob, 17, Math.PI, 0); ctx.fill(); ctx.fillRect(cx - 17 + lean, 52 + bob, 34, 4); if (o.visor) fillRect2(ctx, cx - 12 + lean, 54 + bob, 24, 4, 0x14202c); }
+  if (o.hood) { ctx.fillStyle = css(P.hood); ctx.beginPath(); ctx.arc(cx + lean, 52 + bob, 18, Math.PI * 1.04, -Math.PI * 0.04); ctx.fill(); ctx.fillRect(cx - 18 + lean, 50 + bob, 36, 6); }
+  // Shield on the left arm.
+  if (o.shield) { ctx.fillStyle = css(P.shield); ctx.beginPath(); ctx.moveTo(cx - 28 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 100 + bob); ctx.lineTo(cx - 21 + lean, 108 + bob); ctx.lineTo(cx - 28 + lean, 100 + bob); ctx.closePath(); ctx.fill(); if (o.cross) fillRect2(ctx, cx - 22 + lean, 84 + bob, 2, 18, 0xe8c84a); }
+  // Weapon arm (ang in radians from shoulder, 0 = straight down toward +x).
+  const sx = cx + 16 + lean, sy = 84 + bob, ang = o.armAng != null ? o.armAng : Math.PI * 0.5;
+  fillRect2(ctx, cx + 12 + lean, 76 + bob, 7, 26, P.tunic); // upper arm stub
+  const hx = sx + Math.cos(ang) * 22, hy = sy + Math.sin(ang) * 22;
+  ctx.strokeStyle = css(P.skin); ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+  drawWeapon(ctx, o.weapon, hx, hy, ang, P, o);
+}
+
+function drawWeapon(ctx: any, w: string, hx: number, hy: number, ang: number, P: any, o: any) {
+  if (!w) return;
+  const ex = hx + Math.cos(ang), ey = hy + Math.sin(ang);
+  if (w === 'sword' || w === 'bigsword') {
+    const len = w === 'bigsword' ? 46 : 32; const a = ang - Math.PI * 0.5; // blade points "up" from hand
+    ctx.strokeStyle = css(0xd2d6dc); ctx.lineWidth = w === 'bigsword' ? 6 : 4; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + Math.cos(a) * len, hy + Math.sin(a) * len); ctx.stroke();
+    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx - Math.cos(a) * 5, hy - Math.sin(a) * 5); ctx.lineTo(hx + Math.cos(a) * 5, hy + Math.sin(a) * 5); ctx.stroke();
+  } else if (w === 'axe') {
+    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx, hy + 10); ctx.lineTo(hx, hy - 22); ctx.stroke();
+    ctx.fillStyle = css(0xb8bcc2); ctx.beginPath(); ctx.moveTo(hx, hy - 22); ctx.lineTo(hx + 12, hy - 18); ctx.lineTo(hx + 10, hy - 6); ctx.lineTo(hx, hy - 12); ctx.closePath(); ctx.fill();
+  } else if (w === 'pickaxe') {
+    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx, hy + 10); ctx.lineTo(hx, hy - 22); ctx.stroke();
+    ctx.strokeStyle = css(0x9aa0a6); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(hx - 12, hy - 18); ctx.quadraticCurveTo(hx, hy - 26, hx + 12, hy - 18); ctx.stroke();
+  } else if (w === 'bow') {
+    const pull = o.pull || 0; // 0..1 string draw
+    ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(hx, hy, 22, ang - 1.1, ang + 1.1); ctx.stroke();
+    const t1x = hx + Math.cos(ang - 1.1) * 22, t1y = hy + Math.sin(ang - 1.1) * 22, t2x = hx + Math.cos(ang + 1.1) * 22, t2y = hy + Math.sin(ang + 1.1) * 22;
+    const mx = hx - Math.cos(ang) * (6 - pull * 10), my = hy - Math.sin(ang) * (6 - pull * 10);
+    ctx.strokeStyle = '#eee'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(t1x, t1y); ctx.lineTo(mx, my); ctx.lineTo(t2x, t2y); ctx.stroke();
+    ctx.strokeStyle = css(0xeae0c8); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + Math.cos(ang) * 22, my + Math.sin(ang) * 22); ctx.stroke();
+  } else if (w === 'staff') {
+    ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx, hy + 14); ctx.lineTo(hx, hy - 30); ctx.stroke();
+    if (o.healGlow) disc(ctx, hx, hy - 32, 4 + o.healGlow * 6, 0xfff2a8);
+  }
+  // Carried resource (pawns) drawn over the shoulder.
+  if (o.carry) { const c = o.carry === 'wood' ? 0x8b5e3c : o.carry === 'gold' ? 0xe8c84a : 0xc0504a; fillRect2(ctx, 96 - 6, 64 + (o.bob || 0), 12, 8, c); }
+}
+
+// Per-state pose generators ---------------------------------------------------
+const PAL: Record<string, any> = {
+  warriorB: { tunic: 0x2a4a9b, tunicDark: 0x1a306b, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x7a8088, shield: 0x2a4a9b },
+  warriorR: { tunic: 0x9b2a2a, tunicDark: 0x6b1a1a, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x5a4040, shield: 0x9b2a2a },
+  warriorY: { tunic: 0xb39a2a, tunicDark: 0x7a661a, legs: 0x4a3a1a, skin: 0xe2b78c, helmet: 0x6a5a30, shield: 0xb39a2a },
+  warriorP: { tunic: 0x6a3aa0, tunicDark: 0x44206b, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x5a4a78, shield: 0x6a3aa0 },
+  archer: { tunic: 0x3a6a3a, tunicDark: 0x244a24, legs: 0x4a3a22, skin: 0xe2b78c, hood: 0x2f5a2f },
+  archerR: { tunic: 0x7a3030, tunicDark: 0x521e1e, legs: 0x4a3a22, skin: 0xe2b78c, hood: 0x6a2424 },
+  monk: { tunic: 0x6b4a2a, tunicDark: 0x4a3018, legs: 0x4a3018, skin: 0xe2b78c, hood: 0x5c3e1e },
+  pawn: { tunic: 0x7a5a3a, tunicDark: 0x523c24, legs: 0x4a3624, skin: 0xe2b78c },
+  goblin: { tunic: 0x3a5a24, tunicDark: 0x24401a, legs: 0x2a3a18, skin: 0x4a7a2a, hood: 0x2a401a },
+};
+
+function idlePose(t: number) { return { bob: Math.round(Math.sin(t * Math.PI * 2) * 1.5) }; }
+function runPose(t: number) { return { legPhase: Math.sin(t * Math.PI * 2), bob: -Math.abs(Math.round(Math.cos(t * Math.PI * 2) * 2)), lean: 2 }; }
+
+// Generate the standard 4-state set (idle/run/attack/attack2) for a warrior-type.
+function warriorSheets(scene: any, P: any, keys: { idle: string; run: string; atk?: string; atk2?: string }, gear: any = {}) {
+  spriteSheet(scene, keys.idle, 8, (ctx, t) => figure(ctx, P, { ...gear, ...idlePose(t), weapon: gear.weapon || 'sword', armAng: Math.PI * 0.5 }));
+  spriteSheet(scene, keys.run, 6, (ctx, t) => figure(ctx, P, { ...gear, ...runPose(t), weapon: gear.weapon || 'sword', armAng: Math.PI * 0.55 }));
+  if (keys.atk) spriteSheet(scene, keys.atk, 4, (ctx, t) => figure(ctx, P, { ...gear, weapon: gear.weapon || 'sword', armAng: Math.PI * (0.95 - t * 0.7) })); // wind up -> swing
+  if (keys.atk2) spriteSheet(scene, keys.atk2, 4, (ctx, t) => figure(ctx, P, { ...gear, weapon: gear.weapon || 'sword', armAng: Math.PI * (0.25 + t * 0.3) })); // follow through
+}
+
+// ---- PHASE 4: player units -------------------------------------------------
+export function generateUnits(scene: any) {
+  // Warrior (blue) — sword + shield + helmet.
+  warriorSheets(scene, PAL.warriorB, { idle: 'blue_warrior_idle', run: 'blue_warrior_run', atk: 'blue_warrior_attack', atk2: 'blue_warrior_attack2' }, { helmet: true, shield: true });
+  // Knight (BattleScene 'blue_lancer') — heavier, caped, big sword.
+  spriteSheet(scene, 'blue_lancer', 8, (ctx, t) => figure(ctx, PAL.warriorB, { helmet: true, visor: true, shield: true, cross: true, cape: 0x2a4a9b, weapon: 'bigsword', ...idlePose(t), armAng: Math.PI * 0.5 }));
+
+  // Archer (blue) — bow + green hood, no shield.
+  spriteSheet(scene, 'blue_archer_idle', 6, (ctx, t) => figure(ctx, PAL.archer, { hood: true, weapon: 'bow', ...idlePose(t), armAng: 0 }));
+  spriteSheet(scene, 'blue_archer_run', 4, (ctx, t) => figure(ctx, PAL.archer, { hood: true, weapon: 'bow', ...runPose(t), armAng: 0.2 }));
+  spriteSheet(scene, 'blue_archer_shoot', 8, (ctx, t) => figure(ctx, PAL.archer, { hood: true, weapon: 'bow', armAng: 0, pull: t < 0.7 ? t / 0.7 : 0 })); // draw then release
+
+  // Monk — robe + hood + staff, no weapon dmg.
+  spriteSheet(scene, 'monk_idle', 6, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', ...idlePose(t), armAng: Math.PI * 0.5 }));
+  spriteSheet(scene, 'monk_run', 4, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', ...runPose(t), armAng: Math.PI * 0.55 }));
+  spriteSheet(scene, 'monk_heal', 11, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', armAng: Math.PI * 0.2, healGlow: Math.sin(t * Math.PI) }));
+  // Heal effect sprite (single frame glow).
+  spriteSheet(scene, 'heal_effect', 1, (ctx) => { disc(ctx, 96, 96, 26, 0xfff2a8); ctx.globalAlpha = 0.5; disc(ctx, 96, 96, 40, 0xffffff); ctx.globalAlpha = 1; });
+
+  // Pawn / worker — peasant; run variants carry resources / hold tools; interact
+  // variants are the chopping / mining poses.
+  spriteSheet(scene, 'pawn_idle', 8, (ctx, t) => figure(ctx, PAL.pawn, { ...idlePose(t), armAng: Math.PI * 0.5 }));
+  spriteSheet(scene, 'pawn_run', 6, (ctx, t) => figure(ctx, PAL.pawn, { ...runPose(t), armAng: Math.PI * 0.55 }));
+  for (const [key, carry] of [['pawn_run_wood', 'wood'], ['pawn_run_gold', 'gold'], ['pawn_run_meat', 'meat']] as any[]) {
+    spriteSheet(scene, key, 6, (ctx, t) => figure(ctx, PAL.pawn, { ...runPose(t), carry, armAng: Math.PI * 0.55 }));
+  }
+  spriteSheet(scene, 'pawn_run_axe', 6, (ctx, t) => figure(ctx, PAL.pawn, { ...runPose(t), weapon: 'axe', armAng: Math.PI * 0.55 }));
+  spriteSheet(scene, 'pawn_run_pickaxe', 6, (ctx, t) => figure(ctx, PAL.pawn, { ...runPose(t), weapon: 'pickaxe', armAng: Math.PI * 0.55 }));
+  spriteSheet(scene, 'pawn_interact_axe', 6, (ctx, t) => figure(ctx, PAL.pawn, { weapon: 'axe', armAng: Math.PI * (0.9 - Math.abs(Math.sin(t * Math.PI)) * 0.6), lean: 4 }));
+  spriteSheet(scene, 'pawn_interact_pickaxe', 6, (ctx, t) => figure(ctx, PAL.pawn, { weapon: 'pickaxe', armAng: Math.PI * (0.9 - Math.abs(Math.sin(t * Math.PI)) * 0.6), lean: 4 }));
+}
+
 // Master entry — phases are added here as they are built.
 export function generateAll(scene: any) {
   generateTerrain(scene);
   generateBuildings(scene);
   generateAIBuildings(scene);
+  generateUnits(scene);
 }
