@@ -1678,11 +1678,29 @@ export class IsometricScene extends GameScene {
 
     if (screen === 'main') {
       const bx = px + 180, bw = 200; let y = py + 80;
-      btn('Continue', bx, y, bw, 44, () => this.closeMenu()); y += 56;
-      btn('Save Game', bx, y, bw, 44, () => this.renderMenu('save')); y += 56;
-      btn('Load Game', bx, y, bw, 44, () => this.renderMenu('load')); y += 56;
-      btn('Settings', bx, y, bw, 44, () => this.renderMenu('settings')); y += 56;
+      btn('Continue', bx, y, bw, 44, () => this.closeMenu()); y += 50;
+      btn('Win Progress', bx, y, bw, 44, () => this.renderMenu('winprogress')); y += 50; // (Completion Phase 11)
+      btn('Save Game', bx, y, bw, 44, () => this.renderMenu('save')); y += 50;
+      btn('Load Game', bx, y, bw, 44, () => this.renderMenu('load')); y += 50;
+      btn('Settings', bx, y, bw, 44, () => this.renderMenu('settings')); y += 50;
       btn('New Game', bx, y, bw, 44, () => this.renderMenu('newgame'), 0x8a3a3a);
+    } else if (screen === 'winprogress') {
+      // (Completion Phase 11) Progress toward all three victory paths.
+      text('PATHS TO VICTORY', GAME_W / 2, py + 56, { ox: 0.5, bold: true, size: '18px', color: '#ffe9b0' });
+      const wc = this.winConditions;
+      const have = wc ? wc.playerControlled() : 0, total = wc ? wc.totalSettlements() : 0, need = Math.ceil(total * 0.75);
+      const aliveK = (this.kingdoms || []).filter((k) => k.castleAlive);
+      const allied = this.diplomacy ? aliveK.filter((k) => this.diplomacy.get(k.cfg.key) >= 80).length : 0;
+      const stage = this.currentStage(), pop = this.population ? this.population.count : 0, techs = this.research ? this.research.completed.size : 0, happyDays = wc ? wc.legacyHappyDays : 0;
+      const card = (y, title, lines, done) => {
+        els.push(fix(this.add.rectangle(px + 24, y, panelW - 48, 96, 0x0e1219, 0.95).setOrigin(0, 0).setDepth(102).setStrokeStyle(2, done ? 0x4ad66b : 0x39455a, 0.9)));
+        text(title, px + 38, y + 8, { bold: true, color: done ? '#9af0a0' : '#ffe9b0', size: '15px' });
+        lines.forEach((ln, i) => text(ln, px + 38, y + 32 + i * 18, { color: '#cfc1a6', size: '12px' }));
+      };
+      card(py + 84, '⚔ Conquest', [`Settlements: ${have}/${total}  (need ${need} = 75%)`, have >= need ? 'ACHIEVED — you rule the continent!' : `${need - have} more to claim victory`], total > 0 && have >= need);
+      card(py + 186, '🕊 Diplomacy', [`Alliances (+80): ${allied}/${Math.max(1, aliveK.length)} surviving kingdoms`, allied >= aliveK.length && aliveK.length >= 1 ? 'ACHIEVED — the continent is united!' : 'Ally with every surviving kingdom'], allied >= aliveK.length && aliveK.length >= 1);
+      card(py + 288, '👑 Legacy', [`Stage ${stage}/7 · Pop ${pop}/50 · Techs ${techs}/5`, `Happy days ${happyDays}/5 in a row`], stage >= 7 && pop >= 50 && techs >= 5 && happyDays >= 5);
+      btn('Back', px + panelW / 2 - 60, py + panelH - 44, 120, 36, () => this.renderMenu('main'));
     } else if (screen === 'save' || screen === 'load') {
       text(screen === 'save' ? 'SAVE GAME' : 'LOAD GAME', GAME_W / 2, py + 56, { ox: 0.5, bold: true, size: '16px', color: '#ffe9b0' });
       const slots = SaveManager.listSlots();
@@ -2297,6 +2315,18 @@ export class IsometricScene extends GameScene {
     this.time.delayedCall(2500, () => this.hideTip());
   }
 
+  // (Completion Phase 11) Hover tooltip for an army icon: composition, morale,
+  // supply and current order.
+  showArmyTip(army) {
+    if (!army) return;
+    const units = (army.units || []).map((u) => `${u.type} x${u.count}`).join(', ') || 'empty';
+    const mood = army.morale >= 60 ? 'Good' : army.morale >= 30 ? 'Shaky' : 'Breaking';
+    const order = army.marchTargetCol != null ? `Marching (~${this.armyMgr.etaDays(army).toFixed(1)}d)` : (army.state || 'idle');
+    const p = this.tileCenter(army.col, army.row), cam = this.cameras.main;
+    const sx = (p.x - cam.scrollX) * cam.zoom, sy = (p.y - cam.scrollY) * cam.zoom;
+    this.showTip(Phaser.Math.Clamp(sx, 120, GAME_W - 120), Phaser.Math.Clamp(sy - 44, 50, GAME_H - 120), army.name, `${units}\nMorale: ${Math.round(army.morale)} (${mood}) · Supply: ${army.supplyDays}d\nOrder: ${order}`);
+  }
+
   seasonColor(day) {
     return { 'Early Spring': 0x66cc66, 'Late Spring': 0x66cc66, Summer: 0xffd24a, 'Early Autumn': 0xd2772a, 'Late Autumn': 0xc06010, Winter: 0x7fa8d8 }[this.seasonHint(day)] || 0x66cc66;
   }
@@ -2628,6 +2658,25 @@ export class IsometricScene extends GameScene {
     if (this.population) this.population.happiness = Math.min(100, this.population.happiness + 30);
     this._lastTributeDay = this.gameDay; this.showToast('Wealth distributed — happiness +30'); this.updatePopulationHud && this.updatePopulationHud(); this.refreshPanel();
   }
+  // (Completion Phase 11) One-time intro card the first time a system appears.
+  introCard(key, title, body) {
+    let seen = {};
+    try { seen = JSON.parse(localStorage.getItem('kg_intro') || '{}'); } catch (e) {}
+    if (seen[key]) return; seen[key] = true;
+    try { localStorage.setItem('kg_intro', JSON.stringify(seen)); } catch (e) {}
+    const fix = (o) => o.setScrollFactor(0).setDepth(98);
+    const W = 520, H = 92, cx = GAME_W / 2, top = this.PANEL_Y - H - 16, els = [];
+    els.push(fix(this.add.rectangle(cx, top + H / 2, W, H, 0x1a140c, 0.98).setStrokeStyle(2, 0xc9a14a, 0.95)));
+    els.push(fix(this.add.text(cx - W / 2 + 16, top + 10, '★ ' + title, { fontFamily: 'monospace', fontSize: '15px', color: '#ffe9b0', fontStyle: 'bold' })));
+    els.push(fix(this.add.text(cx - W / 2 + 16, top + 34, body, { fontFamily: 'monospace', fontSize: '12px', color: '#f0e6d0', wordWrap: { width: W - 120 }, lineSpacing: 3 })));
+    const b = fix(this.add.rectangle(cx + W / 2 - 56, top + H - 24, 92, 26, 0x2d6cb0).setStrokeStyle(1, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(b); els.push(fix(this.add.text(cx + W / 2 - 56, top + H - 24, 'Got it', { fontFamily: 'monospace', fontSize: '12px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const close = () => els.forEach((o) => o.destroy());
+    b.on('pointerdown', (p, lx, ly, ev) => { if (ev) ev.stopPropagation(); close(); });
+    this.time.delayedCall(13000, close);
+    if (this.routeCameras) this.routeCameras();
+  }
+
   // (Completion Phase 8) Buy detailed intel on one faction for 5 days.
   spyOn(key) {
     if (!this.resources.spend({ gold: 75 })) { this.showToast('Need 75 gold'); return; }
@@ -3258,6 +3307,7 @@ export class IsometricScene extends GameScene {
     });
     // (Completion Phase 4) Call the Great Council when +60 with 2+ kingdoms.
     if (this.greatCouncil && this.greatCouncil.canCall()) {
+      this.introCard('council', 'Great Council', 'You can now unite friendly kingdoms under your leadership. Call the council for powerful continent-wide decrees.');
       const cx = 834, cw = 200;
       const cb = this.add.rectangle(cx, this.PANEL_Y + 4, cw, 16, 0x6a4aa0, 0.98).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(1, 0xffe23f, 0.95).setInteractive({ useHandCursor: true });
       this.panel.add(cb);

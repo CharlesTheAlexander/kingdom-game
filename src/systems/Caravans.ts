@@ -34,6 +34,7 @@ export class Caravans {
     const dist = Phaser.Math.Distance.Between(from.col, from.row, to.col, to.row);
     this.routes.push({ from, to, resource: from.specialty, amount: 40, progress: 0, days: Math.max(1, Math.round(dist / 30)) });
     if (this.scene.showToast) this.scene.showToast(`Caravan route: ${from.name} → ${to.name}`);
+    this.scene.introCard && this.scene.introCard('caravan', 'Caravan Route', 'Delivers the source settlement’s specialty resource to your Castle each day. Roads make it faster.');
     this.scene.refreshPanel();
   }
 

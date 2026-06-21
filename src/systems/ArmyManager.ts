@@ -97,6 +97,7 @@ export class ArmyManager {
     this.armies.push(army);
     this.makeIcon(army);
     this.scene.logEvent && this.scene.logEvent(`Formed ${army.name} (${total} units)`, 'info');
+    this.scene.introCard && this.scene.introCard('army', 'Your Army', 'Select it and right-click to march. Armies need food supply to stay in the field, and rout if morale collapses.');
     return army;
   }
 
@@ -246,6 +247,8 @@ export class ArmyManager {
     // Player army icons are clickable to select.
     g.setInteractive(new Phaser.Geom.Circle(0, 0, 20), Phaser.Geom.Circle.Contains);
     g.on('pointerdown', (pt, lx, ly, ev) => { if (ev) ev.stopPropagation(); if (army.faction === 'player') this.selectArmy(army); });
+    g.on('pointerover', () => this.scene.showArmyTip && this.scene.showArmyTip(army)); // (Completion Phase 11)
+    g.on('pointerout', () => this.scene.hideTip && this.scene.hideTip());
     this.drawIcon(army);
   }
 

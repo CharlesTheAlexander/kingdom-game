@@ -35,6 +35,7 @@ export class Research {
     const t = TECHS.find((x) => x.id === id);
     if (!t || !this.available(t) || this.current) return;
     this.current = id; this.progress = 0;
+    this.scene.introCard && this.scene.introCard('research', 'Research', 'Each technology grants a permanent bonus; some unlock new units or buildings. Staff the Library to progress.');
     if (this.scene.traitBonuses && this.scene.traitBonuses.freeResearch && !this._usedFree) { this._usedFree = true; this.complete(); }
     this.scene.refreshPanel && this.scene.refreshPanel();
   }

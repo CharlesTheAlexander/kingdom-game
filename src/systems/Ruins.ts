@@ -138,6 +138,7 @@ export class Ruins {
     if (s.showDiscovery) s.showDiscovery('ruin', ruin.name, 'An ancient ruin, silent for centuries. Something may yet remain within.');
     if (s.worldEvents) s.worldEvents.pushNews(`Your scouts discovered ${ruin.name}. Send an expedition to investigate.`);
     if (s.logEvent) s.logEvent(`Discovered ${ruin.name}`, 'gold');
+    if (s.introCard) s.introCard('ruin', 'Ancient Ruin', 'Send an Expedition (Military panel → Ruins) to explore it for a rare, one-time reward.');
     if (s.stats) s.stats.note('ruinsDiscovered');
   }
 
