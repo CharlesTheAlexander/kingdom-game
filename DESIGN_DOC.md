@@ -766,3 +766,29 @@ compatibility with `GameScene`. `CanvasTexture` casts for `getContext()/refresh(
 headless Chrome boots clean (0 console errors), runs the per-frame loops, places
 buildings, runs 10 `onNewDay` cycles, and opens/closes both ContinentScene and
 BattleScene — all with zero console errors. Committed incrementally by batch.
+
+---
+
+## SECTION: PROCEDURAL ASSET GENERATION ✅
+
+All art is now generated at runtime (no Tiny Swords / Isometric Strategy packs).
+`src/systems/AssetGenerator.ts` draws every tile/sprite with Phaser Graphics +
+canvas and bakes textures via generateTexture/createCanvas under the EXISTING
+texture keys ("reskin in place"), so the iso projection, Blitter atlas, building
+auto-scale and unit animation spritesheets are untouched.
+
+- **P1 Terrain:** isometric diamond tiles (grass×3, water×3, rock, mountain,
+  forest×8, dirt/path/sand/snow) into the iso_* keys; diamond centred at tex (32,16).
+- **P2 Buildings:** 15 player keys + 3 castle stages, 64×64, accent-parameterized.
+- **P3 AI buildings:** red/purple/yellow factions reuse the shapes with accent flags.
+- **P4 Player units:** multi-frame 192px spritesheets (warrior/archer/monk/pawn +
+  carry/tool/interact variants, knight) via canvas + numeric frames → animations work.
+- **P5 Enemy/wildlife:** red/yellow/purple warriors, goblins (club+ears), red archer,
+  wolf + boar quadrupeds. Wolf now a real sprite (was a tinted warrior).
+- **P6 World objects:** oak/pine trees, rocks×4, gold + iron deposits, sheep (animated).
+- **P7 UI:** resource icons (wood/gold/food + planks/cutstone); panels/buttons/bars
+  were already Graphics-drawn.
+- **P8 Full replacement:** preload() loads NOTHING but a missing-texture fallback;
+  explosion/dust FX generated; 258 generated textures, 0 missing.
+- **P9 Verify:** headless playthrough + battle, FPS ~34, zero console errors/warnings,
+  clean `npm run build`.
