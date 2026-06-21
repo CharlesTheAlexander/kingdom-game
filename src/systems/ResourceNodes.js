@@ -203,6 +203,15 @@ export class ResourceNodeManager {
     return best;
   }
 
+  // (Phase 4 Decision 3) Add a small deposit at a tile (e.g. early-game stone).
+  addSmallNode(type, col, row, count) {
+    const { x, y } = this.scene.tileCenter(col, row);
+    const n = new ResourceNode(this.scene, type, x, y);
+    if (count) { n.maxCount = count; n.count = count; n.refreshLabel(); }
+    this.nodes.push(n);
+    return n;
+  }
+
   update(dtMs) {
     for (const n of this.nodes) n.update(dtMs);
     this.updateLabelVisibility();

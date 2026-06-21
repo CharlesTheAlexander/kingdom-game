@@ -12,11 +12,12 @@ const MAP_PX = 600;                 // on-screen size of the (square) continent
 const MX = (GAME_W - MAP_PX) / 2;   // top-left of the map on screen
 const MY = 86;
 
+// (Phase 4 Decision 4) More saturated, distinct biome colours.
 const BIOME = {
-  start: 0x86c186, middle: 0x7cb06a, forest: 0x356b35, mountains: 0x9b8d77,
-  delta: 0xa9d98a, wildlands: 0x8c8a4a,
+  start: 0x3a8a3a, middle: 0x5a7a2a, forest: 0x1a4a1a, mountains: 0x6b6b5a,
+  delta: 0x5a7a2a, wildlands: 0x4a4a1a,
 };
-const WATER = 0x3f86c6;
+const WATER = 0x2a5a8a;
 
 function blend(a, b, t) {
   const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
@@ -38,6 +39,9 @@ export class ContinentScene extends Phaser.Scene {
     this.add.rectangle(MX, MY, MAP_PX, MAP_PX).setOrigin(0, 0).setStrokeStyle(2, 0x3a4656);
 
     this.icons = this.add.graphics();
+    // (Phase 4 Decision 4) Subtle vignette around the map edges.
+    const vg = this.add.graphics().setDepth(50);
+    for (let i = 0; i < 5; i++) { vg.lineStyle(14 - i * 2, 0x000000, 0.05 + i * 0.02); vg.strokeRect(MX + i * 4, MY + i * 4, MAP_PX - i * 8, MAP_PX - i * 8); }
     this.iconText = this.add.container(0, 0);
     this.labels = this.add.container(0, 0);
     this.buildLabels();
@@ -171,26 +175,33 @@ export class ContinentScene extends Phaser.Scene {
     const explored = iso.territory ? iso.territory.explored : null;
     const isSeen = (c, r) => !explored || (explored[r] && explored[r][c]);
 
-    // AI kingdom castles (faction-coloured crowns).
+    // (Phase 4 Decision 4) AI castles — faction-coloured circle (8px).
     for (const k of iso.kingdoms || []) {
       if (!k.castleAlive) continue;
       const p = this.toScreen(k.castleCol, k.castleRow);
-      g.fillStyle(k.cfg.color, 1).fillTriangle(p.x - 6, p.y + 5, p.x + 6, p.y + 5, p.x, p.y - 7);
-      g.lineStyle(1.5, 0x000000, 0.6).strokeTriangle(p.x - 6, p.y + 5, p.x + 6, p.y + 5, p.x, p.y - 7);
+      g.fillStyle(k.cfg.color, 1).fillCircle(p.x, p.y, 6);
+      g.lineStyle(1.5, 0x000000, 0.6).strokeCircle(p.x, p.y, 6);
     }
-    // Neutral / conquered settlements (only if discovered).
+    // Neutral settlements — white diamond (6px); player-owned — blue circle.
     for (const s of iso.settlements ? iso.settlements.list : []) {
       if (s.owner !== 'player' && !s.discovered) continue;
       const p = this.toScreen(s.col, s.row);
       if (s.owner === 'player') { g.fillStyle(0x4aa0ff, 1).fillCircle(p.x, p.y, 4); g.lineStyle(1, 0xffffff, 0.8).strokeCircle(p.x, p.y, 4); }
-      else { g.fillStyle(0xb9bec6, 1).fillRect(p.x - 3, p.y - 3, 6, 6); g.lineStyle(1, 0x000, 0.6).strokeRect(p.x - 3, p.y - 3, 6, 6); }
+      else { g.fillStyle(0xffffff, 1).fillPoints([{ x: p.x, y: p.y - 5 }, { x: p.x + 5, y: p.y }, { x: p.x, y: p.y + 5 }, { x: p.x - 5, y: p.y }], true); g.lineStyle(1, 0x000, 0.5); g.strokePoints([{ x: p.x, y: p.y - 5 }, { x: p.x + 5, y: p.y }, { x: p.x, y: p.y + 5 }, { x: p.x - 5, y: p.y }], true); }
     }
-    // Goblin camps (discovered, still active) — small red X.
+    // Goblin camps — dark red X (6px).
     for (const cmp of iso.goblinCamps ? iso.goblinCamps.list : []) {
       if (!cmp.alive || !cmp.discovered) continue;
       const p = this.toScreen(cmp.col, cmp.row);
-      g.lineStyle(2, 0xff5252, 1);
+      g.lineStyle(2, 0x8a1a1a, 1);
       g.lineBetween(p.x - 4, p.y - 4, p.x + 4, p.y + 4).lineBetween(p.x - 4, p.y + 4, p.x + 4, p.y - 4);
+    }
+    // (Phase 4 Decision 4) Ancient ruins (discovered) — gray triangle.
+    for (const ru of iso.ruins ? iso.ruins.list : []) {
+      if (!ru.discovered) continue;
+      const p = this.toScreen(ru.col, ru.row);
+      g.fillStyle(0x9aa0a6, 1).fillTriangle(p.x, p.y - 5, p.x - 5, p.y + 4, p.x + 5, p.y + 4);
+      g.lineStyle(1, 0x000, 0.5).strokeTriangle(p.x, p.y - 5, p.x - 5, p.y + 4, p.x + 5, p.y + 4);
     }
     // Player castle — blue crown.
     const c = iso.buildings.castle;
@@ -203,8 +214,8 @@ export class ContinentScene extends Phaser.Scene {
       g.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
       this.iconText.add(this.add.text((a.x + b.x) / 2, a.y - 4, 'local view', { fontFamily: 'monospace', fontSize: '11px', color: '#ffe9b0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 1));
       const p = this.toScreen(c.col, c.row);
-      g.fillStyle(0x2aa0ff, 1).fillTriangle(p.x - 8, p.y + 6, p.x + 8, p.y + 6, p.x, p.y - 9);
-      g.lineStyle(2, 0xffffff, 0.9).strokeTriangle(p.x - 8, p.y + 6, p.x + 8, p.y + 6, p.x, p.y - 9);
+      // (Phase 4 Decision 4) Player castle — gold star.
+      this.iconText.add(this.add.text(p.x, p.y, '★', { fontFamily: 'monospace', fontSize: '16px', color: '#ffd24a', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(5));
     }
     // (Phase 2) Armies on the map — arrow dots in faction colour.
     if (iso.armyMgr) {

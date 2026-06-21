@@ -195,8 +195,22 @@ export class Territory {
     };
     draw(6, 0.07);
     draw(2, 0.3);
-    // A gentle one-time alpha pulse so the frontier feels alive (cheap — it
-    // animates the single border graphic, not the 40k terrain tiles).
+    // (Phase 4 Decision 1) Automatic settlement walls along the border, by stage:
+    // 3 = wooden fence, 4 = wooden wall, 6 = stone wall, 7+ = full fortification.
+    const stage = s.currentStage ? s.currentStage() : 0;
+    let wall = null;
+    if (stage >= 7) wall = { color: 0x9aa0a6, width: 7 };
+    else if (stage >= 6) wall = { color: 0x8a8f99, width: 5 };
+    else if (stage >= 4) wall = { color: 0x7a5a32, width: 5 };
+    else if (stage >= 3) wall = { color: 0x6b4a28, width: 3 };
+    if (wall) {
+      g.lineStyle(wall.width, wall.color, 0.95);
+      for (const [c, r] of edges) { const pts = s.regionDiamond(c, c, r, r); s.strokeDiamond(g, pts); g.strokePath(); }
+      if (stage >= 7) { // merlons: little stone caps at each edge tile's top
+        g.fillStyle(0xb6bcc4, 0.95);
+        for (const [c, r] of edges) { const p = s.tileCenter(c, r); g.fillRect(p.x - 2, p.y - 12, 4, 5); }
+      }
+    }
     if (!this._borderPulse) {
       this._borderPulse = this.scene.tweens.add({ targets: g, alpha: { from: 0.7, to: 1 }, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }

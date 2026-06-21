@@ -84,8 +84,10 @@ export const BuildingTypes = {
   },
 };
 
-// Order shown in the build menu. Advanced types appear once their stage unlocks.
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'wall', 'market', 'tavern', 'blacksmith'];
+// Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now
+// grow automatically by settlement tier. The wall type def is kept above only so
+// old saves containing a placed Wall still load without error.
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'library'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 export const MAX_LEVEL = 3;

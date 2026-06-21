@@ -363,6 +363,8 @@ export class IsometricScene extends GameScene {
     this.drawGrid();
     this.scatterDecorations();
     this.nodes.spawnInitial();
+    // (Phase 4 Decision 3) early-game stone near the castle is added after the
+    // castle is placed (see spawnStartStone call below).
     this.makeSkyGrade();
     this.makeVignette();
     this.createDayNightOverlay();
@@ -370,6 +372,7 @@ export class IsometricScene extends GameScene {
 
     this.buildings.place('castle', Math.floor(N / 2), Math.floor(N / 2));
     this.decorateBuilding(this.buildings.castle);
+    this.spawnStartStone(); // (Phase 4 Decision 3) early-game stone near the castle
 
     this.buildHud();
     this.createDayCounter();
@@ -1351,6 +1354,23 @@ export class IsometricScene extends GameScene {
     const t = TRAITS[traitId]; if (!t) return;
     Object.assign(this.traitBonuses, t.bonuses || {});
     if (this.armyMgr) this.armyMgr.maxPlayerArmies = this.traitBonuses.armyCap;
+  }
+
+  // (Phase 4 Decision 3) Three small stone deposits within 8 tiles of the castle
+  // so early-game stone isn't a wall; they run out (20 each) so the player expands.
+  spawnStartStone() {
+    const c = this.buildings.castle; if (!c || !this.nodes) return;
+    let placed = 0;
+    const offsets = [[5, 3], [-4, 5], [6, -4], [-5, -3], [3, 6], [-6, 2]];
+    for (const [dc, dr] of offsets) {
+      if (placed >= 3) break;
+      const col = c.col + dc, row = c.row + dr;
+      if (col < 0 || row < 0 || col >= N || row >= N) continue;
+      if (this.terrainType && this.terrainType[row] && this.terrainType[row][col] === 'water') continue;
+      if (this.buildings.isOccupied(col, row)) continue;
+      this.nodes.addSmallNode('stone', col, row, 20);
+      placed++;
+    }
   }
 
   // Library spawn for the Scholar trait (Phase 5 building; no-op if absent).
@@ -3029,9 +3049,18 @@ export class IsometricScene extends GameScene {
   }
 
   // AI army reached the player castle → defend with the home garrison (unassigned troops).
+  hasWalls() { return (this.currentStage ? this.currentStage() : 0) >= 3; } // (Phase 4) auto-walls exist from Large Village
+
   aiArmyAttacksPlayer(aiArmy) {
     if (this._inBattle) return;
     if (this.armyMgr.totalUnits(aiArmy) <= 0) { this.armyMgr.removeArmy(aiArmy); return; } // (BUG 3) empty army can't attack
+    // (Phase 4 Decision 1) Walls delay the first breach by 5s.
+    if (this.hasWalls() && !aiArmy._breached) {
+      aiArmy._breached = true;
+      this.threatWarning(`${aiArmy.name} is breaching the walls...`, 0xffd24a, true);
+      this.time.delayedCall(5000, () => { if (this.armyMgr.armies.includes(aiArmy)) this.aiArmyAttacksPlayer(aiArmy); });
+      return;
+    }
     const defenders = this.troops.snapshot();
     const defTotal = defenders.reduce((s, g) => s + g.count, 0);
     if (defTotal === 0) {
@@ -3284,9 +3313,10 @@ export class IsometricScene extends GameScene {
       if (d < td) { td = d; target = k; }
     }
     if (target && td < this.TILE * 1.4) {
-      this.commandUnits(target.castleX + 30, target.castleY, true, target);
-      this.floatText(target.castleX, target.castleY - 30, 'Attack!', '#ff8a80');
-      if (this.diplomacy && !target._playerAttacked) { target._playerAttacked = true; this.time.delayedCall(5000, () => (target._playerAttacked = false)); this.diplomacy.onPlayerAttack(target.cfg.key); }
+      // (Phase 4 Decision 2) Unassigned units are DEFENDERS — they cannot march
+      // out to attack. Offensive action requires forming an Army.
+      this.floatText(target.castleX, target.castleY - 30, 'Form an army to attack', '#ffd24a');
+      this.showToast('Unassigned units defend the castle — form an Army (bottom bar) to attack');
       return;
     }
     let node = null, nd = Infinity;
