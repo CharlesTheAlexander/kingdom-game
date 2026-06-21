@@ -46,6 +46,7 @@ export function capture(scene: any) {
     heroes: scene.heroes && scene.heroes.serialize ? scene.heroes.serialize() : null,
     maintenance: scene.maintenance && scene.maintenance.serialize ? scene.maintenance.serialize() : null,
     court: scene.court && scene.court.serialize ? scene.court.serialize() : null,
+    succession: scene.succession && scene.succession.serialize ? scene.succession.serialize() : null,
     roads: scene.roads && scene.roads.serialize ? scene.roads.serialize() : null,
     stats: { battlesWon: scene._battlesWon || 0 },
     kingdomStats: scene.stats && scene.stats.serialize ? scene.stats.serialize() : null,
@@ -189,6 +190,7 @@ export function applySave(scene: any, data: any) {
   sect('heroes', () => { if (data.heroes && scene.heroes) scene.heroes.restore(data.heroes); });
   sect('maintenance', () => { if (data.maintenance && scene.maintenance) scene.maintenance.restore(data.maintenance); });
   sect('court', () => { if (data.court && scene.court) scene.court.restore(data.court); });
+  sect('succession', () => { if (data.succession && scene.succession) scene.succession.restore(data.succession); });
   sect('roads', () => { if (data.roads && scene.roads) scene.roads.restore(data.roads); });
   sect('winConditions', () => { if (data.winConditions && scene.winConditions) scene.winConditions.restore(data.winConditions); if (data.stats) scene._battlesWon = data.stats.battlesWon || 0; });
   sect('ruins', () => { if (data.ruins && scene.ruins) scene.ruins.restore(data.ruins); });

@@ -62,6 +62,7 @@ import { FactionLeaders } from '../systems/FactionLeaders.js';
 import { Heroes } from '../systems/Heroes.js';
 import { Maintenance } from '../systems/Maintenance.js';
 import { RoyalCourt } from '../systems/RoyalCourt.js';
+import { Succession } from '../systems/Succession.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -295,6 +296,7 @@ export class IsometricScene extends GameScene {
     this.maintenance = new Maintenance(this); // (V2 Phase 6) building aging + disasters
     this._plagueMult = 1;
     this.court = new RoyalCourt(this); // (V2 Phase 7) advisors
+    this.succession = new Succession(this); // (V2 Phase 8) heir, marriage, succession
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -997,6 +999,45 @@ export class IsometricScene extends GameScene {
     }
     this._courtPanel = els;
   }
+
+  // (V2 Phase 8) A brief wedding celebration in the great hall.
+  weddingCeremony(key) {
+    const fix = (o) => o.setScrollFactor(0).setDepth(160);
+    const els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x1a0f1a, 0.82).setOrigin(0, 0).setInteractive()));
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 60, '♥', { fontFamily: 'monospace', fontSize: '64px', color: '#ff9ad6' }).setOrigin(0.5)));
+    const fname = this.succession ? this.succession.factionName(key) : key;
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 + 10, 'A ROYAL WEDDING', { fontFamily: 'monospace', fontSize: '30px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5)));
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 + 48, `Heir ${this.succession.heir.name} weds into the ${fname}.\nThe crowns are united in lasting alliance.`, { fontFamily: 'monospace', fontSize: '14px', color: '#e7d6c0', align: 'center' }).setOrigin(0.5)));
+    sfx.play && sfx.play('victory');
+    this.tweens.add({ targets: els[1], scale: { from: 0.4, to: 1 }, duration: 500, ease: 'Back.out' });
+    this.time.delayedCall(2600, () => els.forEach((o) => o.destroy()));
+  }
+
+  // (V2 Phase 8) One-time prompt: how shall the heir be raised? Shapes their trait.
+  openHeirRaising() {
+    if (this._heirPanel || !this.succession) return;
+    const fix = (o) => o.setScrollFactor(0).setDepth(124);
+    const choices = this.succession.upbringingChoices();
+    const W = 460, ht = 150 + choices.length * 56, x = (GAME_W - W) / 2, y = (GAME_H - ht) / 2, els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.6).setOrigin(0, 0).setInteractive()));
+    els.push(fix(this.add.rectangle(x, y, W, ht, 0x18141f, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(x + W / 2, y + 14, 'RAISING THE HEIR', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(x + W / 2, y + 42, `Young ${this.succession.heir.name} comes of age. How shall they be raised?\nIt will shape the realm they one day inherit.`, { fontFamily: 'monospace', fontSize: '11px', color: '#c9bfa6', align: 'center' }).setOrigin(0.5, 0)));
+    let ry = y + 92;
+    for (const c of choices) {
+      const btn = fix(this.add.rectangle(x + 30, ry, W - 60, 46, 0x2a2436, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setInteractive({ useHandCursor: true }));
+      const t1 = fix(this.add.text(x + 44, ry + 7, c.label, { fontFamily: 'monospace', fontSize: '13px', color: '#ffe9b0', fontStyle: 'bold' }));
+      const t2 = fix(this.add.text(x + 44, ry + 25, `${c.note}  (rules as ${c.trait})`, { fontFamily: 'monospace', fontSize: '10px', color: '#bcae90' }));
+      btn.on('pointerover', () => btn.setFillStyle(0x3a3248, 0.97));
+      btn.on('pointerout', () => btn.setFillStyle(0x2a2436, 0.95));
+      btn.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.succession.raiseHeir(c.key); this.closeHeirRaising(); });
+      els.push(btn, t1, t2);
+      ry += 56;
+    }
+    this._heirPanel = els;
+  }
+  closeHeirRaising() { if (this._heirPanel) { this._heirPanel.forEach((o) => o.destroy()); this._heirPanel = null; } }
 
   // (V2 Phase 6) Quick response panel for a burning building.
   closeFirePanel() { if (this._firePanel) { this._firePanel.forEach((o) => o.destroy()); this._firePanel = null; } }
@@ -3571,6 +3612,10 @@ export class IsometricScene extends GameScene {
       if (spied) {
         this.panelText(826, y + 2, `INTEL (${Math.max(0, Math.ceil(k._spyUntil - (this.gameDay || 0)))}d)`, { color: '#9af0a0', size: '10px', bold: true });
         this.panelText(826, y + 16, `~${Math.round((k.barracksCount || 1) * 120 + 200)}g · ${k.regrouping ? 'regrouping' : 'mustering'}`, { color: '#cfc1a6', size: '10px' });
+      } else if (this.succession && this.succession.marriedTo === key) {
+        this.panelText(826, y + 9, '♥ United Crowns', { color: '#ff9ad6', size: '12px', bold: true }); // (V2 P8)
+      } else if (this.succession && this.succession.canMarry(key) && !this.succession.marriedTo) {
+        this.diploButton(826, y + 1, 96, 32, 'Marry', '500g · alliance', 0x6c2a5a, 0x9c3a8a, this.resources.gold >= 500, () => { this.succession.arrangeMarriage(key); this.refreshPanel(); }); // (V2 P8)
       } else {
         this.diploButton(826, y + 1, 96, 32, 'Spy', '75g · 5d', 0x2a4a5c, 0x3a6a7c, this.resources.gold >= 75, () => this.spyOn(key));
       }
@@ -3860,6 +3905,7 @@ export class IsometricScene extends GameScene {
     if (this.heroes) this.heroes.checkArrivals(); // (V2 Phase 3) hero arrivals
     if (this.maintenance) this.maintenance.onNewDay(); // (V2 Phase 6) aging + disasters
     if (this.court) this.court.onNewDay(); // (V2 Phase 7) royal court weekly reports
+    if (this.succession) this.succession.onNewDay(); // (V2 Phase 8) heir raising + natural death
     // (Completion Phase 7) Advance Siege Workshop training.
     for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
