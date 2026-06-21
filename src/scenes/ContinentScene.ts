@@ -177,6 +177,11 @@ export class ContinentScene extends Phaser.Scene {
     const explored = iso.territory ? iso.territory.explored : null;
     const isSeen = (c, r) => !explored || (explored[r] && explored[r][c]);
 
+    // (Completion Phase 5) Roads — thin brown dots along built road tiles.
+    if (iso.roads && iso.roads.tiles) {
+      g.fillStyle(0x8a7a52, 0.9);
+      for (const k of iso.roads.tiles) { const [c, r] = k.split(',').map(Number); const p = this.toScreen(c, r); g.fillCircle(p.x, p.y, 1.4); }
+    }
     // (Phase 4 Decision 4) AI castles — faction-coloured circle (8px).
     for (const k of iso.kingdoms || []) {
       if (!k.castleAlive) continue;

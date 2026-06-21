@@ -57,6 +57,7 @@ import { Resources } from '../systems/Resources.js';
 import * as AssetGenerator from '../systems/AssetGenerator.js';
 import { Banking } from '../systems/Banking.js';
 import { GreatCouncil } from '../systems/GreatCouncil.js';
+import { Roads } from '../systems/Roads.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -287,6 +288,7 @@ export class IsometricScene extends GameScene {
     this.diplomacy = new Diplomacy(this); // Phase 7: relationships with kingdoms
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
+    this.roads = new Roads(this); // (Completion Phase 5) player-built roads
     this.caravans = new Caravans(this); // Phase 5: trade routes between settlements
     this.settlements = new SettlementManager(this); // Phase B: neutral settlements
     this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
@@ -325,6 +327,7 @@ export class IsometricScene extends GameScene {
     // (Gameplay change 2) Escape cancels move/placement mode (or closes the menu).
     this.input.keyboard.on('keydown-ESC', () => {
       if (this._menuOpen) this.closeMenu();
+      else if (this._roadMode) { this._roadMode = false; this._roadStart = null; this.showToast && this.showToast('Road cancelled'); }
       else if (this.movingBuilding) this.cancelMoveBuilding();
       else if (this.placementType) { this.placementType = null; this.clearGhost(); this.refreshPanel(); }
     });
@@ -1203,6 +1206,13 @@ export class IsometricScene extends GameScene {
       if (p.rightButtonDown()) this._rightDrag = { sx: p.x, sy: p.y, moved: false };
     });
     this.input.on('pointerup', (p) => {
+      // (Completion Phase 5) Road mode: left-tap a start tile, then an end tile.
+      if (this._roadMode && p.button === 0 && p.y >= TOP_BAR && p.y <= GAME_H - PANEL_H) {
+        const t = this.pointerToTile(p.worldX, p.worldY); if (!t) return;
+        if (!this._roadStart) { this._roadStart = t; this.showToast && this.showToast('Now click the road end point (Esc to cancel)'); }
+        else { this.roads.buildPath(this._roadStart.col, this._roadStart.row, t.col, t.row); this._roadMode = false; this._roadStart = null; this.refreshPanel(); }
+        return;
+      }
       const tapped = this._rightDrag && !this._rightDrag.moved;
       this._rightDrag = null;
       if (!tapped || this.isGameOver || this.placementType) return;
@@ -2505,6 +2515,11 @@ export class IsometricScene extends GameScene {
       const ok = this.buildings.canPlace(k, this.resources, this.maxBuildings()).ok;
       this.buildPaletteButton(x, y, bw, h, k, ok);
     });
+    // (Completion Phase 5) Build Road tool in the Industry category.
+    if (title === 'INDUSTRY') {
+      const rx = 14 + list.length * (bw + gap), ry = this.PANEL_Y + 30;
+      this.spriteButton(rx, ry, bw, h, 'Road', '5 wood/tile', true, () => { this._roadMode = true; this._roadStart = null; this.placementType = null; this.clearGhost && this.clearGhost(); this.showToast && this.showToast('Build Road: click a start tile, then an end tile'); }, { active: this._roadMode });
+    }
     if (locked.length) this.panelText(14, this.PANEL_Y + PANEL_H - 22, `Locked (later stage): ${locked.map((k) => BuildingTypes[k].name).join(', ')}`, { color: '#7d8389', size: '10px' });
   }
 

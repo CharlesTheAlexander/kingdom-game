@@ -150,7 +150,9 @@ export class ArmyManager {
 
   stopMarch(army) { army.marchTargetCol = null; army.marchTargetRow = null; army.state = 'idle'; army.attackTarget = null; if (army._path) { army._path.clear(); } if (army._eta) army._eta.setVisible(false); }
 
-  speedAt(col, row) {
+  speedAt(col: number, row: number) {
+    // (Completion Phase 5) Roads are the fastest path across any terrain.
+    if (this.scene.roads && this.scene.roads.has(col, row)) return 4;
     let b = 'plains';
     try { b = this.scene.biomeAt(Math.round(col), Math.round(row)) || 'plains'; } catch (e) {}
     return MARCH_SPEED[b] || 2;
