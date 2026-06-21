@@ -162,7 +162,20 @@ export class BattleScene extends Phaser.Scene {
     this.applyFormation('enemy', 'LINE');
 
     this.buildHud();
+    this.createStartButton(); // (Phase 5) skip the pre-battle timer
     this.cameras.main.fadeIn(400, 0, 0, 0);
+  }
+
+  // (Phase 5) A "Start Battle Now" button that appears after 3s and skips the
+  // remaining pre-battle countdown.
+  createStartButton() {
+    const y = GAME_H - 104;
+    this.startBtn = this.add.rectangle(GAME_W / 2, y, 230, 42, 0xc9a84c).setStrokeStyle(2, 0xffffff, 0.9).setDepth(50).setInteractive({ useHandCursor: true }).setVisible(false);
+    this.startBtnTxt = this.add.text(GAME_W / 2, y, '⚔ Start Battle Now', { fontFamily: 'monospace', fontSize: '16px', color: '#1a140c', fontStyle: 'bold' }).setOrigin(0.5).setDepth(51).setVisible(false);
+    this.startBtn.on('pointerover', () => this.startBtn.setFillStyle(0xe6c86a));
+    this.startBtn.on('pointerout', () => this.startBtn.setFillStyle(0xc9a84c));
+    this.startBtn.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); if (this.phase === 'pre') this.startBattle(); });
+    this.time.delayedCall(3000, () => { if (this.phase === 'pre' && this.startBtn) { this.startBtn.setVisible(true); this.startBtnTxt.setVisible(true); } });
   }
 
   // Phase 3: terrain-themed battlefield — a banded sky+ground gradient (opaque
@@ -232,6 +245,8 @@ export class BattleScene extends Phaser.Scene {
   applyFormation(side, name) {
     const us = this.sideUnits(side);
     if (!us.length) return;
+    // (Phase 5) Remember start positions so we can ANIMATE into the new formation.
+    const prev = us.map((u) => ({ u, x: u.x, y: u.y }));
     const dir = side === 'player' ? -1 : 1;     // toward the centre
     const rear = -dir;                          // toward own back lines
     const frontX = side === 'player' ? GAME_W * 0.80 : GAME_W * 0.20;
@@ -262,7 +277,16 @@ export class BattleScene extends Phaser.Scene {
       ranks(archers, frontX + rear * 70, 28, 8);
       ranks(monks, frontX + rear * 120, 32, 6);
     }
-    us.forEach((u) => u.sync());
+    // (Phase 5) Animate units from their previous spots into the new formation
+    // so the player can see the arrangement form during pre-battle.
+    if (this.phase === 'pre') {
+      for (const { u, x, y } of prev) {
+        const nx = u.x, ny = u.y; u.x = x; u.y = y; u.sync();
+        this.tweens.add({ targets: u, x: nx, y: ny, duration: 320, ease: 'Cubic.out', onUpdate: () => u.sync() });
+      }
+    } else {
+      us.forEach((u) => u.sync());
+    }
   }
 
   buildHud() {
@@ -463,6 +487,8 @@ export class BattleScene extends Phaser.Scene {
 
   startBattle() {
     this.phase = 'battle';
+    if (this.startBtn) this.startBtn.setVisible(false); // (Phase 5) hide skip button
+    if (this.startBtnTxt) this.startBtnTxt.setVisible(false);
     sfx.play('battle_start'); // (Polish Phase 2)
     this.countdown.setScale(1);
     this.countdown.setText('');
