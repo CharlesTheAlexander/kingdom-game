@@ -52,6 +52,7 @@ export class Diplomacy {
     if (this.treaties[key]) { this.treaties[key].alliance = false; this.treaties[key].trade = false; }
     const k = this.scene.kingdoms.find((x) => x.cfg.key === key);
     if (k) k.startDay = Math.min(k.startDay, this.scene.gameDay);
+    if (this.scene.leaders) this.scene.leaders.say(key, 'war'); // (V2 P1)
     this.scene.refreshPanel();
   }
 
@@ -72,6 +73,7 @@ export class Diplomacy {
     const accept = recentlyBeaten || weak || !(theirArmies > 0 && castleLow);
     if (!accept) { this.scene.showToast(`${this.kname(key)} refuses the ceasefire`); return; }
     this.rel[key] = -20; this.nap[key] = false;
+    if (this.scene.leaders) this.scene.leaders.say(key, 'ceasefire'); // (V2 P1)
     this._warCooldown = this._warCooldown || {}; this._warCooldown[key] = this.scene.gameDay + 5;
     if (this.scene.recallFactionArmies) this.scene.recallFactionArmies(key); // turn their armies home
     this.scene.logEvent && this.scene.logEvent(`Ceasefire with ${this.kname(key)}`, 'green');
@@ -100,6 +102,7 @@ export class Diplomacy {
   proposeTrade(key) {
     if (this.get(key) < 30) { this.scene.showToast('Need +30 relations'); return; }
     this.tr(key).trade = true;
+    if (this.scene.leaders) { this.scene.leaders.say(key, 'trade'); this.scene.leaders.onTrade(key); } // (V2 P1)
     this.scene.logEvent && this.scene.logEvent(`Trade agreement with ${this.kname(key)}`, 'green');
     this.scene.refreshPanel();
   }

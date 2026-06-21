@@ -58,6 +58,7 @@ import * as AssetGenerator from '../systems/AssetGenerator.js';
 import { Banking } from '../systems/Banking.js';
 import { GreatCouncil } from '../systems/GreatCouncil.js';
 import { Roads } from '../systems/Roads.js';
+import { FactionLeaders } from '../systems/FactionLeaders.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -286,6 +287,7 @@ export class IsometricScene extends GameScene {
     this.kingdoms = [this.ai, new AIKingdom(this, FACTIONS.purple), new AIKingdom(this, FACTIONS.yellow)];
     this.DAY_SECONDS = DAY_MS / 1000;
     this.diplomacy = new Diplomacy(this); // Phase 7: relationships with kingdoms
+    this.leaders = new FactionLeaders(this); // (V2 Phase 1) named AI rulers
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -2668,6 +2670,22 @@ export class IsometricScene extends GameScene {
     if (this.population) this.population.happiness = Math.min(100, this.population.happiness + 30);
     this._lastTributeDay = this.gameDay; this.showToast('Wealth distributed — happiness +30'); this.updatePopulationHud && this.updatePopulationHud(); this.refreshPanel();
   }
+  // (V2 Phase 1) A leader speaks — portrait + speech bubble, bottom-left.
+  showLeaderSpeech(faction, text) {
+    if (this._leaderSpeech) { this._leaderSpeech.forEach((o) => o.destroy()); this._leaderSpeech = null; }
+    const L = this.leaders; if (!L) return;
+    const fix = (o) => o.setScrollFactor(0).setDepth(96);
+    const px = 16, py = GAME_H - PANEL_H - 120, els = [];
+    const pk = L.portraitKey(faction);
+    if (this.textures.exists(pk)) els.push(fix(this.add.image(px, py, pk).setOrigin(0, 0).setDisplaySize(72, 72)));
+    els.push(fix(this.add.rectangle(px + 80, py + 6, 360, 60, 0x141019, 0.97).setOrigin(0, 0).setStrokeStyle(2, (L.def(faction) && L.def(faction).color) || 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(px + 90, py + 12, L.name(faction), { fontFamily: 'monospace', fontSize: '12px', color: '#ffe9b0', fontStyle: 'bold' })));
+    els.push(fix(this.add.text(px + 90, py + 30, text, { fontFamily: 'monospace', fontSize: '13px', color: '#f0e6d0', wordWrap: { width: 340 }, fontStyle: 'italic' })));
+    this._leaderSpeech = els;
+    if (this.routeCameras) this.routeCameras();
+    this.time.delayedCall(5200, () => { if (this._leaderSpeech === els) { els.forEach((o) => o.destroy()); this._leaderSpeech = null; } });
+  }
+
   // (Completion Phase 11) One-time intro card the first time a system appears.
   introCard(key, title, body) {
     let seen = {};
@@ -3350,13 +3368,17 @@ export class IsometricScene extends GameScene {
     this.kingdoms.forEach((k, idx) => {
       const key = k.cfg.key;
       const y = base + idx * rowH;
-      // Identity — kingdom name 16px bold white (Bug 7).
-      this.panel.add(this.add.rectangle(16, y + 8, 16, 16, k.cfg.color).setOrigin(0, 0).setStrokeStyle(1, 0x000000, 0.6).setScrollFactor(0));
-      this.panelText(40, y + 1, k.cfg.name, { bold: true, color: '#ffffff', size: '16px' });
+      // Identity — leader portrait + kingdom name (V2 P1). Leader name + army
+      // strength share line 2 (set just below, replacing the old army line).
+      const pk = this.leaders ? this.leaders.portraitKey(key) : null;
+      if (pk && this.textures.exists(pk)) this.panel.add(this.add.image(16, y + 2, pk).setOrigin(0, 0).setDisplaySize(30, 30).setScrollFactor(0));
+      else this.panel.add(this.add.rectangle(16, y + 8, 16, 16, k.cfg.color).setOrigin(0, 0).setStrokeStyle(1, 0x000000, 0.6).setScrollFactor(0));
+      this.panelText(50, y + 1, k.cfg.name, { bold: true, color: '#ffffff', size: '15px' });
       const n = k.estimatedArmy();
       const spied = k._spyUntil && (this.gameDay || 0) < k._spyUntil; // (Completion Phase 8)
       const army = k.castleAlive ? `${scouted || spied ? '' : '~'}${n} ${n === 1 ? 'Warrior' : 'Warriors'}` : 'defeated';
-      this.panelText(40, y + 20, army, { color: spied ? '#9af0a0' : '#b9c6d6', size: '11px' });
+      const leaderNm = this.leaders ? this.leaders.name(key) : '';
+      this.panelText(50, y + 19, `${leaderNm}${leaderNm ? ' · ' : ''}${army}`, { color: spied ? '#9af0a0' : '#b9c6d6', size: '10px' }); // (V2 P1) leader + strength
       // Status label — 14px bold, coloured (Bug 7).
       const rel = this.diplomacy ? this.diplomacy.get(key) : 0;
       const relStatus = this.diplomacy ? this.diplomacy.status(key) : 'Neutral';

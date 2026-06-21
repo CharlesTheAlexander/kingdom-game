@@ -631,8 +631,50 @@ export function installFallback(scene: any) {
   });
 }
 
+// ---- V2: leader portraits (80x80) ------------------------------------------
+// Three distinct drawn faces, keyed portrait_<faction>, for the diplomacy panel,
+// council hall, battle header and messenger letters.
+export function generatePortraits(scene: any) {
+  const face = (key: string, draw: (ctx: any) => void) => objSheet(scene, key, 1, 80, 80, (ctx) => {
+    ctx.fillStyle = '#1a1f28'; ctx.fillRect(0, 0, 80, 80);
+    ctx.fillStyle = '#2a3242'; ctx.fillRect(2, 2, 76, 76);
+    draw(ctx);
+    ctx.strokeStyle = '#c9a14a'; ctx.lineWidth = 2; ctx.strokeRect(2, 2, 76, 76);
+  });
+  // Valdris — scarred, gray beard, heavy helm, stern.
+  face('portrait_red', (ctx) => {
+    ctx.fillStyle = '#d8b48c'; ctx.beginPath(); ctx.arc(40, 42, 22, 0, Math.PI * 2); ctx.fill(); // face
+    ctx.fillStyle = '#9aa0a6'; ctx.fillRect(16, 14, 48, 14); ctx.beginPath(); ctx.arc(40, 20, 24, Math.PI, 0); ctx.fill(); // helm
+    ctx.fillStyle = '#7a8088'; ctx.fillRect(38, 14, 4, 20); // nasal guard
+    ctx.fillStyle = '#cfcfcf'; ctx.fillRect(24, 52, 32, 14); ctx.beginPath(); ctx.arc(40, 52, 16, 0, Math.PI); ctx.fill(); // beard
+    ctx.strokeStyle = '#b04a3a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(50, 30); ctx.lineTo(56, 46); ctx.stroke(); // scar
+    ctx.fillStyle = '#20140c'; ctx.fillRect(30, 40, 4, 3); ctx.fillRect(46, 40, 4, 3); // eyes (stern)
+    ctx.fillStyle = '#7a8088'; ctx.fillRect(12, 64, 56, 16); // armored shoulders
+  });
+  // Elowen — sharp features, elegant, knowing smile.
+  face('portrait_purple', (ctx) => {
+    ctx.fillStyle = '#e6c2a0'; ctx.beginPath(); ctx.arc(40, 40, 21, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5a2a6a'; ctx.beginPath(); ctx.arc(40, 30, 24, Math.PI, 0); ctx.fill(); ctx.fillRect(16, 30, 12, 30); ctx.fillRect(52, 30, 12, 30); // hair
+    ctx.fillStyle = '#20140c'; ctx.beginPath(); ctx.ellipse(31, 40, 3, 2, 0, 0, 7); ctx.fill(); ctx.beginPath(); ctx.ellipse(49, 40, 3, 2, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#a06050'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(40, 46, 8, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke(); // smile
+    ctx.fillStyle = '#8e44ad'; ctx.fillRect(10, 64, 60, 16); ctx.fillStyle = '#c9a14a'; ctx.fillRect(36, 60, 8, 8); // gown + jewel
+  });
+  // Krag — huge frame, crude helm, broken nose, wild eyes.
+  face('portrait_yellow', (ctx) => {
+    ctx.fillStyle = '#cdbf8a'; ctx.beginPath(); ctx.arc(40, 42, 25, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6a5a30'; ctx.fillRect(12, 10, 56, 16); // crude iron band
+    ctx.fillStyle = '#fff'; ctx.fillRect(28, 38, 6, 5); ctx.fillRect(46, 38, 6, 5); // wild wide eyes
+    ctx.fillStyle = '#c0392b'; ctx.fillRect(30, 39, 2, 2); ctx.fillRect(48, 39, 2, 2);
+    ctx.fillStyle = '#a07050'; ctx.beginPath(); ctx.moveTo(40, 44); ctx.lineTo(36, 52); ctx.lineTo(44, 52); ctx.closePath(); ctx.fill(); // broken nose
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(28, 58, 24, 8); // jaw/teeth grimace
+    ctx.fillStyle = '#fff'; for (let x = 30; x < 50; x += 5) ctx.fillRect(x, 58, 2, 4);
+    ctx.fillStyle = '#6a5a30'; ctx.fillRect(8, 66, 64, 14);
+  });
+}
+
 // Master entry — generates the entire game's art. Call once at scene create().
 export function generateAll(scene: any) {
+  generatePortraits(scene);
   generateTerrain(scene);
   generateBuildings(scene);
   generateAIBuildings(scene);

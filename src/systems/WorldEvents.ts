@@ -183,6 +183,13 @@ export class WorldEvents {
         ] },
       { id: 'comet', type: 'news', effect: () => { const good = Math.random() < 0.5; if (s.population) s.population.addTempMod(good ? 'Auspicious comet' : 'Ill omen', good ? 12 : -10, 3); },
         text: () => 'A comet streaks across the night sky. The people whisper of omens.' },
+      // (V2 Phase 1) leader-flavoured news
+      { id: 'valdris_threat', type: 'news', cond: () => (s.kingdoms || []).some((k) => k.cfg.key === 'red' && k.castleAlive),
+        text: () => 'General Valdris has been seen drilling his troops at the border. "Soon," he says.' },
+      { id: 'elowen_spies', type: 'news', cond: () => (s.kingdoms || []).some((k) => k.cfg.key === 'purple' && k.castleAlive),
+        effect: () => { const e = (s.kingdoms || []).find((k) => k.cfg.key === 'purple'); if (e) e._warned = true; }, text: () => "Countess Elowen's spies were spotted near your border. She misses nothing." },
+      { id: 'krag_boast', type: 'news', cond: () => (s.kingdoms || []).some((k) => k.cfg.key === 'yellow' && k.castleAlive),
+        text: () => 'Warlord Krag has declared you his "worthy enemy." Whatever that means, he seems pleased.' },
       { id: 'royal_betrothal', type: 'choice', title: 'A Royal Betrothal', cond: () => (s.kingdoms || []).some((k) => k.castleAlive),
         body: () => `${this.rngKingdomName()} proposes a marriage alliance to bind your houses.`,
         choices: [

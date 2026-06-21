@@ -390,6 +390,9 @@ export class BattleScene extends Phaser.Scene {
   buildHud() {
     // --- Morale bars: enemy top-left, player top-right (Phase 3) -------------
     this.enemyBar = this.makeMoraleBar(20, 18, false, FACTION_COLOR[this.faction] || 0xd64a4a, `Enemy · ${FACTION_LABEL[this.faction] || this.faction}`, 'skull');
+    // (V2 Phase 1) Enemy leader portrait beside their morale bar.
+    const pk = 'portrait_' + this.faction;
+    if (this.textures.exists(pk)) this.add.image(248, 14, pk).setOrigin(0, 0).setDisplaySize(40, 40).setDepth(42);
     this.playerBar = this.makeMoraleBar(GAME_W - 20, 18, true, 0x4ad66b, 'Your Army', 'shield');
 
     // --- Pre-battle headline -------------------------------------------------

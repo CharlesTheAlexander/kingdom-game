@@ -367,7 +367,7 @@ export class AIKingdom {
 
     // Want to attack? Only if it's my time, the lock is free and off cooldown,
     // and diplomacy permits it (a non-aggression pact / alliance stops attacks).
-    const diploOk = !this.scene.diplomacy || this.scene.diplomacy.attackModifier(this) > 0;
+    const diploOk = (!this.scene.diplomacy || this.scene.diplomacy.attackModifier(this) > 0) && !(this.scene.leaders && this.scene.leaders.inChaos(this.cfg.key)); // (V2 P1) leader-chaos halts attacks
     this.waveTimer -= dt;
     if (this.waveTimer <= 0 && this.scene.gameDay >= this.startDay && diploOk && coord && coord.holder === null && coord.cooldown <= 0) {
       coord.holder = this;
