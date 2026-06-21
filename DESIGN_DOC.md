@@ -720,3 +720,49 @@ Barracks L4 trains Elites (+50%), Barracks L5 unlocks the Champion (1 max).
 **Deferred (documented):** Planks/Cut-Stone manufacturing (priority #4) — would add
 the new resource types that Lumberyard-L4 planks / Farm-L4 meat depend on; left for
 a future session rather than half-implemented. Per-loop notes in LOOP_REPORT_*.md.
+
+---
+
+## SECTION: TYPESCRIPT MIGRATION ✅
+
+The entire `src/` codebase was migrated from JavaScript to TypeScript in one
+dedicated session. **36 files** now compile as `.ts` (all 27 originally planned
+modules + 8 additional systems that existed beyond the plan list — AIKingdom,
+Discovery, GoblinCamps, KingdomStats, Pathfinding, Settlements, Waves, Ruins — plus
+a shared `src/types.ts`). The only remaining `.js` is the dead, never-imported
+duplicate `src/scenes/BattleScene 2.js` (a Finder copy artifact flagged for manual
+deletion in Section 14).
+
+**Toolchain:**
+- `typescript`, `@types/node`, `vite-plugin-checker` added as dev deps.
+- `tsconfig.json` with `strict: false`, `allowJs: true`, `checkJs: false` (lenient
+  to start), `skipLibCheck`, `moduleResolution: bundler`, plus `ignoreDeprecations:
+  "6.0"` for the TS-7-era `baseUrl` deprecation.
+- `vite.config.ts` wires `vite-plugin-checker({ typescript: true })` so type errors
+  appear in the dev overlay AND fail `npm run build`.
+- `index.html` entry repointed to `/src/main.ts`.
+
+**Approach (one file at a time, build green after each):**
+- Imports keep their `.js` specifiers — Vite + the bundler resolver map `./X.js`
+  → `X.ts` automatically, so no import churn was needed.
+- Each class declares its constructor-set fields with real types plus a permissive
+  `[key: string]: any` index signature, so the many scene-coupled dynamic fields
+  never trip "property does not exist" without forcing a full rewrite. With
+  `target: ES2020`, esbuild keeps `useDefineForClassFields` off, so these
+  declarations are **erased** at transform time — zero runtime behaviour change
+  (verified against the served transform output).
+- Heterogeneous data tables typed `Record<string, any>` / `any[]`.
+- Shared interfaces (ResourceState, BuildingType, ArmyData, GameState, …) live in
+  `src/types.ts`.
+
+**Notable type fixes:** modern TS infers `unknown` (not `any`) when an `any` value
+flows through a generic — `Phaser.Utils.Array.GetRandom(<any>)` and
+`Object.values/entries(<any>)` returned `unknown`, fixed with localized `: any`
+annotations / `as` casts at the consuming site. Scene method overrides
+(`drawWall`, `commandUnits`) needed their extra params made optional for Liskov
+compatibility with `GameScene`. `CanvasTexture` casts for `getContext()/refresh()`.
+
+**Verification:** `tsc --noEmit` exits 0 (zero type errors); `npm run build` passes;
+headless Chrome boots clean (0 console errors), runs the per-frame loops, places
+buildings, runs 10 `onNewDay` cycles, and opens/closes both ContinentScene and
+BattleScene — all with zero console errors. Committed incrementally by batch.
