@@ -182,6 +182,31 @@ export class ContinentScene extends Phaser.Scene {
       g.fillStyle(0x8a7a52, 0.9);
       for (const k of iso.roads.tiles) { const [c, r] = k.split(',').map(Number); const p = this.toScreen(c, r); g.fillCircle(p.x, p.y, 1.4); }
     }
+    // (Completion Phase 9) Caravan routes — a line + a dot moving by real progress.
+    this._caravanDots = [];
+    if (iso.caravans && iso.caravans.routes) {
+      for (const rt of iso.caravans.routes) {
+        if (!rt.from || !rt.to || rt.from.col == null || rt.to.col == null) continue;
+        const a = this.toScreen(rt.from.col, rt.from.row), b = this.toScreen(rt.to.col, rt.to.row);
+        g.lineStyle(1, 0x8a7a52, 0.35); g.lineBetween(a.x, a.y, b.x, b.y);
+        const t = Phaser.Math.Clamp((rt.progress || 0) / (rt.days || 1), 0, 1);
+        const x = Phaser.Math.Linear(a.x, b.x, t), y = Phaser.Math.Linear(a.y, b.y, t);
+        g.fillStyle(0x8b5e3c, 1).fillCircle(x, y, 3); g.lineStyle(1, 0xffffff, 0.7).strokeCircle(x, y, 3);
+        this._caravanDots.push({ x, y, txt: `Caravan: ${rt.resource} · ${rt.from.name}→${rt.to.name} · ~${Math.max(0, Math.round((rt.days || 1) - (rt.progress || 0)))}d` });
+      }
+    }
+    // (Completion Phase 9) Expedition parties — compass dots drifting out from the castle.
+    if (iso.expeditions && iso.expeditions.state && iso.buildings.castle) {
+      const cc = this.toScreen(iso.buildings.castle.col, iso.buildings.castle.row); let ei = 0;
+      for (const key of Object.keys(iso.expeditions.state)) for (const slot of iso.expeditions.state[key]) {
+        const total = (iso.expeditions.defs[key] && iso.expeditions.defs[key].days ? iso.expeditions.defs[key].days : 1) * 300;
+        const frac = 1 - Phaser.Math.Clamp((slot.timeLeft || 0) / total, 0, 1);
+        const ang = ei * 1.27, dist = 12 + frac * 46;
+        const x = cc.x + Math.cos(ang) * dist, y = cc.y + Math.sin(ang) * dist;
+        g.fillStyle(0xdfe6ee, 1).fillCircle(x, y, 2.4); g.lineStyle(1, 0x3a4656, 0.9).strokeCircle(x, y, 2.4);
+        g.lineStyle(1, 0x3a4656, 0.9); g.lineBetween(x - 2, y, x + 2, y); g.lineBetween(x, y - 2, x, y + 2); ei++;
+      }
+    }
     // (Phase 4 Decision 4) AI castles — faction-coloured circle (8px).
     for (const k of iso.kingdoms || []) {
       if (!k.castleAlive) continue;
@@ -291,6 +316,8 @@ export class ContinentScene extends Phaser.Scene {
       const sp = this.toScreen(s.col, s.row);
       if (Phaser.Math.Distance.Between(p.x, p.y, sp.x, sp.y) < 8) { hit = { x: sp.x, y: sp.y, txt: `${s.name} — ${s.owner === 'player' ? 'Yours' : 'Neutral'} · ${s.note}` }; break; }
     }
+    // (Completion Phase 9) Caravan dot tooltips.
+    if (!hit && this._caravanDots) for (const d of this._caravanDots) { if (Phaser.Math.Distance.Between(p.x, p.y, d.x, d.y) < 7) { hit = d; break; } }
     if (hit) this.tip.setText(hit.txt).setPosition(hit.x, hit.y - 10).setVisible(true);
     else this.tip.setVisible(false);
   }
