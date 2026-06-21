@@ -813,3 +813,56 @@ the game is functionally robust. Improvements made:
 
 All changes verified headless with a clean `npm run build`, `tsc --noEmit` at 0
 errors, and zero console errors/warnings. See FINAL_STATE_REPORT.md.
+
+---
+
+## SECTION: V2 ASSETS + POLISH + DEPLOYMENT SESSION ✅
+
+A 5-phase autonomous session built on top of the V2 core-feature work.
+
+**Phase 1 — V2 building & unit assets.** Added procedural sprites (matching the
+existing `AssetGenerator` style) for the 7 V2 buildings (Mason's Lodge, Spy Guild,
+Guildhall, Manor, Levee, plus enhanced Hall of Heroes & Grand Hall) and the new
+units/wildlife: Cavalry (mounted lancer), Spearman (pike + buckler), Goblin Shaman
+(staff + purple magic), Goblin Warlord (horned, cleaver), Deer, and a Dragon
+sprite that now appears over the kingdom during the disaster. New building types
+(`guildhall`, `manor`, `levee`) were added and wired: Guildhall → craftsmen class,
+Manor → noble class, Levee → flood protection. Warlords now lead larger goblin
+raids; all sprites animate via `Animations.ts` / `ANIM_SET`.
+
+**Phase 2 — CouncilScene visual depth.** Checkered marble floor, vaulted ceiling
+with arcs, a swaying glowing chandelier, light shafts; framed leader portraits
+seated symmetrically with table place-markers; dramatic voting (portrait swell,
+green-approve / red-shake-deny glows, a 2-second pause before a deciding close
+vote, a unanimous gold flourish); a full High-King coronation (kneeling leaders,
+gold-particle rain, camera zoom-out, proclamation). Post-council the **continent
+view** shows the outcome: golden trade routes, a red X on a common enemy, a peace
+dove, or gold rings around every faction for a High King.
+
+**Phase 3 — Balance.** Headless economic simulation (`BALANCE_V2_REPORT.md`).
+Population growth now scales with happiness (the old flat rate could never reach
+the Legacy pop-50 target); cavalry charge `×3 → ×2`; spearmen now hard-counter a
+charge (pike wall negates it entirely); goblin camps escalate every 20 days (was
+25) with a 5-day-early warning; winter food upkeep `+30% → +20%`. The 4th win
+path is the ruin-fragment "restore the empire" ritual (documented decision).
+
+**Phase 4 — Autonomous improvement loop (3 iterations).** (1) Procedural sound
+for the new systems (council chord, hero fanfare/dirge, dragon roar, fire crackle,
+cavalry hooves, battle cry, spy sting) + BattleScene atmosphere (in-battle
+weather, cavalry dust trails, victory weapon-raise). (2) Minimap markers (goblin
+escalation tier colours, building fires, hero stars) + a Statistics-panel
+"Legends" section (heroes, spies, fires, dragons, marriages, defections). (3)
+Expanded faction-leader dialogue (war/peace/winning/losing pools) and narrative
+beats (5 per path). Reports: `LOOP_REPORT_V2_1..3.md`.
+
+**Phase 5 — GitHub Pages deployment.** `vite.config.ts` `base: '/kingdom-game/'`
++ `.github/workflows/deploy.yml` (build → publish `dist` via actions-gh-pages).
+`npm run build` produces a clean `dist/` whose `index.html` references the correct
+base path; the production bundle was served via `vite preview` and boots to the
+main menu with zero console errors. The dead `BattleScene 2.ts` Finder-copy was
+removed.
+
+**Verification:** `tsc --noEmit` 0 errors · `npm run build` clean · 30-day
+headless playthrough + a snow battle (veteran cavalry, spearmen, commander) ran
+at ~34 FPS with **zero console errors/warnings**. Live URL after push:
+https://charlesalexander.github.io/kingdom-game/
