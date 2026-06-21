@@ -2641,6 +2641,17 @@ export class IsometricScene extends GameScene {
     const x = GAME_W - 128, w = 120;
     this.diploButton(x, this.PANEL_Y + 10, w, 28, 'Move', 'free', 0x1f5b3a, 0x2e7d50, true, () => this.startMoveBuilding(b));
     this.diploButton(x, this.PANEL_Y + 42, w, 28, 'Demolish', '+50% refund', 0x5c1a1a, 0x8a2a2a, true, () => this.confirmDemolish(b));
+    // (Completion Phase 6) Mines near an iron deposit can toggle Stone/Iron.
+    if (b.typeKey === 'mine' && this.ironNodeNear(b)) {
+      const lbl = b._mineIron ? 'Mining: Iron' : 'Mining: Stone';
+      this.diploButton(x - 132, this.PANEL_Y + 10, w, 28, lbl, 'tap to switch', 0x4a4030, 0x6a5a40, true, () => { b._mineIron = !b._mineIron; this.showToast && this.showToast(b._mineIron ? 'Now mining Iron' : 'Now mining Stone'); this.refreshPanel(); });
+    }
+  }
+
+  // (Completion Phase 6) Nearest live iron deposit within 8 tiles of a building.
+  ironNodeNear(b) {
+    if (!this.nodes || !this.nodes.nearestAnyNode) return null;
+    return this.nodes.nearestAnyNode(b.x, b.y, 8 * this.TILE, ['iron']);
   }
 
   confirmDemolish(b) {

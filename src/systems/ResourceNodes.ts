@@ -12,6 +12,8 @@ const NODE_DEFS: Record<string, any> = {
   gold: { count: 30, label: 'Gold', textures: ['gold_stone'], scale: 0.42, oy: 0.7, labelDY: 34 },
   stone: { count: 30, label: 'Stone', textures: ['rock1', 'rock2'], scale: 0.78, oy: 0.6, labelDY: 30 },
   food: { count: 20, label: 'Food', textures: ['sheep_idle'], scale: 0.42, oy: 0.72, anim: 'sheep_idle', labelDY: 34 },
+  // (Completion Phase 6) Iron deposits in the eastern mountains.
+  iron: { count: 30, label: 'Iron', textures: ['iron_node'], scale: 0.55, oy: 0.7, labelDY: 32 },
 };
 const RESPAWN_MS = 120000; // nodes respawn 120s after depletion
 
@@ -182,8 +184,9 @@ export class ResourceNodeManager {
     };
     inBiome('wood', 18, 'forest');     // abundant wood in the deep forest
     inBiome('wood', 6, 'wildlands');
-    inBiome('stone', 9, 'mountains');  // stone + gold in the highlands
+    inBiome('stone', 9, 'mountains');  // stone + gold + iron in the highlands
     inBiome('gold', 7, 'mountains');
+    inBiome('iron', 6, 'mountains');   // (Completion Phase 6) iron deposits
     inBiome('stone', 4, 'wildlands');
     inBiome('food', 11, 'delta');      // sheep + fish on the river plains
     inBiome('food', 5, 'middle');

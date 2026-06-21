@@ -150,6 +150,16 @@ export class Building {
     if (scene && this.typeKey === 'castle' && this.type.produces === 'gold' && scene._goldTaxMult) rate *= scene._goldTaxMult;
     // (Loop 3, Feature #3) Level 5 perks on the producers.
     if (this.typeKey === 'lumberyard' && this.level >= 5) rate *= 1.25; // L5: surplus output
+    // (Completion Phase 6) A Mine toggled to "Mine Iron" near an iron deposit
+    // produces iron (at a reduced rate) instead of stone, slowly depleting it.
+    if (this.typeKey === 'mine' && this._mineIron && scene && scene.ironNodeNear) {
+      const node = scene.ironNodeNear(this);
+      if (node) {
+        resources.add('iron', Math.max(1, Math.round(rate * 0.5)));
+        if (Math.random() < 0.2 && node.harvest) node.harvest();
+        return;
+      }
+    }
     if (rate > 0) resources.add(this.type.produces, rate);
     // (Feature #3) Mine L4+: occasionally finds iron ore without an expedition.
     if (scene && this.typeKey === 'mine' && this.level >= 4 && this.workers > 0 && Math.random() < 0.10) {
