@@ -1113,6 +1113,14 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  // (Improvement) Upgrade-button label incl. refined-goods cost, so manufacturing
+  // requirements are visible (not a silently-disabled button).
+  upgradeSub(b, suffix) {
+    const e = b.extraUpgradeCost ? b.extraUpgradeCost() : {};
+    const extra = Object.entries(e).map(([r, v]) => `${v} ${r === 'cutStone' ? 'cut stone' : r}`).join(' + ');
+    return `${b.nextUpgradeCost()}G${extra ? ' + ' + extra : ''} · ${suffix}`;
+  }
+
   renderSelectedPanel(b) {
     const t = b.type;
     this.panel.add(
@@ -1160,9 +1168,8 @@ export class GameScene extends Phaser.Scene {
 
       // Upgrade + Close (bottom row).
       if (b.level < MAX_LEVEL) {
-        const cost = b.nextUpgradeCost();
-        const afford = this.resources.gold >= cost;
-        this.spriteButton(456, this.PANEL_Y + 66, 234, 52, `Upgrade to Lv ${b.level + 1}`, `${cost}G · +1 slot, unlock unit`, afford, () => {
+        const afford = b.canUpgrade(this.resources);
+        this.spriteButton(456, this.PANEL_Y + 66, 234, 52, `Upgrade to Lv ${b.level + 1}`, this.upgradeSub(b, '+1 slot, unlock unit'), afford, () => {
           if (b.upgrade(this.resources)) {
             this.showSelection(b);
             this.refreshPanel();
@@ -1190,9 +1197,8 @@ export class GameScene extends Phaser.Scene {
 
       const by2 = this.PANEL_Y + 34;
       if (b.level < MAX_LEVEL) {
-        const cost = b.nextUpgradeCost();
-        const afford = this.resources.gold >= cost;
-        this.spriteButton(632, by2, 170, 60, 'Upgrade', `${cost}G · x2 output`, afford, () => {
+        const afford = b.canUpgrade(this.resources);
+        this.spriteButton(632, by2, 170, 60, 'Upgrade', this.upgradeSub(b, 'more output'), afford, () => {
           if (b.upgrade(this.resources)) {
             this.showSelection(b);
             this.refreshPanel();
@@ -1212,9 +1218,8 @@ export class GameScene extends Phaser.Scene {
     const closeBtn = () => closeBtnAt(GAME_W - 128, by, 110, 64);
 
     if (b.level < MAX_LEVEL) {
-      const cost = b.nextUpgradeCost();
-      const afford = this.resources.gold >= cost;
-      this.spriteButton(GAME_W - 320, by, 180, 64, 'Upgrade', `${cost}G · x2 output`, afford, () => {
+      const afford = b.canUpgrade(this.resources);
+      this.spriteButton(GAME_W - 320, by, 180, 64, 'Upgrade', this.upgradeSub(b, 'more output'), afford, () => {
         if (b.upgrade(this.resources)) {
           this.showSelection(b);
           this.refreshPanel();
