@@ -7,7 +7,7 @@ import Phaser from 'phaser';
 // `labelDY` = pixels above the node's anchor to place the count label so it
 // sits just over the visible art (the sprite frames have transparent padding,
 // so a raw displayHeight offset looks detached).
-const NODE_DEFS = {
+const NODE_DEFS: Record<string, any> = {
   wood: { count: 40, label: 'Wood', textures: ['tree1', 'tree2'], scale: 0.3, oy: 0.82, labelDY: 56 },
   gold: { count: 30, label: 'Gold', textures: ['gold_stone'], scale: 0.42, oy: 0.7, labelDY: 34 },
   stone: { count: 30, label: 'Stone', textures: ['rock1', 'rock2'], scale: 0.78, oy: 0.6, labelDY: 30 },
@@ -16,7 +16,22 @@ const NODE_DEFS = {
 const RESPAWN_MS = 120000; // nodes respawn 120s after depletion
 
 class ResourceNode {
-  constructor(scene, type, x, y) {
+  scene: any;
+  type: string;
+  x: number;
+  y: number;
+  def: any;
+  maxCount: number;
+  count: number;
+  alive: boolean;
+  respawnTimer: number;
+  texKey: string;
+  spr: any;
+  label: any;
+  _hover?: boolean;
+  [key: string]: any;
+
+  constructor(scene: any, type: string, x: number, y: number) {
     this.scene = scene;
     this.type = type;
     this.x = x;
@@ -83,7 +98,11 @@ class ResourceNode {
 }
 
 export class ResourceNodeManager {
-  constructor(scene) {
+  scene: any;
+  nodes: ResourceNode[];
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.nodes = [];
   }

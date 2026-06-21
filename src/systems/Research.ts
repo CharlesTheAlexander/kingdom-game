@@ -3,7 +3,7 @@ import { GAME_W, GAME_H } from '../scenes/GameScene.js';
 // Research.js — (Expansion Phase 5) a 9-tech tree across 3 branches, unlocked by
 // building a Library. `once` effects are saved via buffs/troops; `flag` effects
 // are idempotent and re-applied on load.
-const TECHS = [
+const TECHS: any[] = [
   { id: 'iron_weapons', branch: 0, row: 0, name: 'Iron Weapons', desc: 'Warriors +20% damage', prereq: null, once: (s) => { s.buffs.warriorDamage *= 1.2; } },
   { id: 'heavy_armor', branch: 0, row: 1, name: 'Heavy Armor', desc: 'Warriors +30 HP', prereq: 'iron_weapons', once: (s) => { for (const w of s.troops.warriors) { w.maxHp += 30; w.hp += 30; } } },
   { id: 'battle_tactics', branch: 0, row: 2, name: 'Battle Tactics', desc: 'Formations +15% dmg', prereq: 'heavy_armor', flag: (s) => { s._researchBattleTactics = true; } },
@@ -17,7 +17,14 @@ const TECHS = [
 const BRANCH_COL = [0xc0392b, 0x2ecc71, 0x3498db];
 
 export class Research {
-  constructor(scene) { this.scene = scene; this.completed = new Set(); this.current = null; this.progress = 0; this._usedFree = false; }
+  scene: any;
+  completed: Set<string>;
+  current: string | null;
+  progress: number;
+  _usedFree: boolean;
+  [key: string]: any;
+
+  constructor(scene: any) { this.scene = scene; this.completed = new Set<string>(); this.current = null; this.progress = 0; this._usedFree = false; }
   techs() { return TECHS; }
   hasLibrary() { return this.scene.buildings.countOfType('library') > 0; }
   library() { return this.scene.buildings.buildings.find((b) => b.typeKey === 'library' && b.alive); }
@@ -84,7 +91,7 @@ export class Research {
   }
 
   serialize() { return { completed: [...this.completed], current: this.current, progress: this.progress, usedFree: this._usedFree }; }
-  restore(d) {
+  restore(d: any) {
     if (!d) return;
     this.completed = new Set(d.completed || []); this.current = d.current || null; this.progress = d.progress || 0; this._usedFree = !!d.usedFree;
     // Re-apply only idempotent flag effects (buff/troop effects persist via the save).

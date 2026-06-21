@@ -12,7 +12,14 @@ const TRIBE_SPEED = 0.5 / HOUR;   // 0.5 tile / game-hour
 const PILGRIM_SPEED = 0.8 / HOUR;
 
 export class WanderingFactions {
-  constructor(scene) {
+  scene: any;
+  caravans: any[];
+  tribes: any[];
+  pilgrim: any;
+  _pilgrimDay: number;
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.caravans = [];
     this.tribes = [];
@@ -54,7 +61,7 @@ export class WanderingFactions {
     const rep = s.reputation ? s.reputation.scores.merchant : 0;
     const castle = s.buildings.castle;
     if (rep >= 50 && castle) { c.target = { col: castle.col + Phaser.Math.Between(-8, 8), row: castle.row + Phaser.Math.Between(-8, 8) }; return; }
-    if (sites.length) { const t = Phaser.Utils.Array.GetRandom(sites); c.target = { col: t.col != null ? t.col : 100, row: t.row != null ? t.row : 100 }; return; }
+    if (sites.length) { const t: any = Phaser.Utils.Array.GetRandom(sites); c.target = { col: t.col != null ? t.col : 100, row: t.row != null ? t.row : 100 }; return; }
     c.target = { col: Phaser.Math.Between(40, 160), row: Phaser.Math.Between(40, 160) };
   }
 
@@ -203,7 +210,7 @@ export class WanderingFactions {
     s.routeCameras && s.routeCameras();
   }
 
-  caravanTrades(c) {
+  caravanTrades(c): any[] {
     const s = this.scene;
     const bonus = (s.reputation && s.reputation.scores.merchant >= 25) ? 1.15 : 1;
     return [
@@ -313,7 +320,7 @@ export class WanderingFactions {
 
   // --- continent dots ------------------------------------------------------
   continentDots() {
-    const out = [];
+    const out: any[] = [];
     for (const c of this.caravans) if (c.state !== 'gone') out.push({ col: c.col, row: c.row, color: 0x8a5a2a });
     for (const t of this.tribes) out.push({ col: t.col, row: t.row, color: 0xe08a2a });
     if (this.pilgrim) out.push({ col: this.pilgrim.col, row: this.pilgrim.row, color: 0xffffff });
@@ -328,7 +335,7 @@ export class WanderingFactions {
       pilgrimDay: this._pilgrimDay,
     };
   }
-  restore(d) {
+  restore(d: any) {
     if (!d) return;
     if (d.caravans) d.caravans.forEach((cd, i) => { const c = this.caravans[i]; if (!c) return; Object.assign(c, { col: cd.col, row: cd.row, state: cd.state, respawnDay: cd.respawnDay, traded: cd.traded }); const p = this.scene.tileCenter(cd.col, cd.row); c.x = p.x; c.y = p.y; c.sprite.setPosition(p.x, p.y).setVisible(cd.state !== 'gone'); });
     if (d.tribes) d.tribes.forEach((td) => { const t = this.tribes.find((x) => x.biome === td.biome); if (!t) return; Object.assign(t, { col: td.col, row: td.row, relation: td.relation, revealed: td.revealed, hostileUntil: td.hostileUntil }); const p = this.scene.tileCenter(td.col, td.row); t.x = p.x; t.y = p.y; t.sprite.setPosition(p.x, p.y); if (td.revealed && !t.label) t.label = this.scene.add.text(p.x, p.y - 26, t.name, { fontFamily: 'monospace', fontSize: '12px', color: '#ffd27f', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(9000); });

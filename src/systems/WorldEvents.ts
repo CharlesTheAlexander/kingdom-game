@@ -6,7 +6,18 @@ import { GAME_W, GAME_H } from '../scenes/GameScene.js';
 // News events show a top banner; choice events queue at the messenger icon.
 
 export class WorldEvents {
-  constructor(scene) {
+  scene: any;
+  queue: any[];
+  lastFired: Record<string, number>;
+  lastEventDay: number;
+  lastSeason: any;
+  defs: any[];
+  msgBtn: any;
+  badge: any;
+  _panel: any;
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.queue = [];          // pending choice-events {def}
     this.lastFired = {};      // id -> day
@@ -23,7 +34,7 @@ export class WorldEvents {
   }
   rngKingdomName() {
     const k = (this.scene.kingdoms || []).filter((x) => x.castleAlive);
-    return (k.length ? Phaser.Utils.Array.GetRandom(k).cfg : { name: 'a rival kingdom' }).name;
+    return (k.length ? (Phaser.Utils.Array.GetRandom(k) as any).cfg : { name: 'a rival kingdom' }).name;
   }
 
   // ---- event table --------------------------------------------------------
@@ -88,7 +99,7 @@ export class WorldEvents {
         effect: () => { s._eventFarmMult = 0.85; s._eventFarmUntil = s.gameDay + 3; }, text: () => 'A great drought grips the southern plains. Farms suffer.' },
       { id: 'iron_find', type: 'news', cond: () => s.gameDay >= 15,
         effect: () => { s._ironBonusUntil = s.gameDay + 5; }, text: () => 'Iron deposits discovered in the eastern mountains. Iron expeditions yield double!' },
-      { id: 'renown', type: 'news', cond: () => s.reputation && Object.values(s.reputation.scores).some((v) => v >= 50),
+      { id: 'renown', type: 'news', cond: () => s.reputation && Object.values(s.reputation.scores).some((v: any) => v >= 50),
         effect: () => { if (s.population) s.population.addTempMod('Renown', 5, 3); }, text: () => "Your kingdom's reputation spreads across the continent." },
 
       // -- player choice events --
@@ -148,7 +159,7 @@ export class WorldEvents {
     const s = this.scene;
     const list = (s.settlements && s.settlements.list) || [];
     const hidden = list.filter((st) => st.col != null && s.territory && !s.territory.explored[st.row] || (st.col != null && s.territory && s.territory.explored[st.row] && !s.territory.explored[st.row][st.col]));
-    const pick = (hidden.length ? Phaser.Utils.Array.GetRandom(hidden) : (list.length ? Phaser.Utils.Array.GetRandom(list) : null));
+    const pick: any = (hidden.length ? Phaser.Utils.Array.GetRandom(hidden) : (list.length ? Phaser.Utils.Array.GetRandom(list) : null));
     if (pick && pick.col != null && s.revealAround) { s.revealAround(pick.col, pick.row, 8); s.logEvent && s.logEvent(`A forgotten settlement was revealed: ${pick.name}`, 'yellow'); }
     else this.revealRandomFog();
   }
@@ -160,7 +171,7 @@ export class WorldEvents {
     const owned = s.artifacts || [];
     const pool = (s.ARTIFACT_DEFS || []).filter((a) => !owned.includes(a.key));
     if (!pool.length) { s.resources.add('gold', 100); return; }
-    const a = Phaser.Utils.Array.GetRandom(pool);
+    const a: any = Phaser.Utils.Array.GetRandom(pool);
     s.artifacts.push(a.key); a.apply(s);
     s.showToast && s.showToast(`Gained artifact: ${a.name}`);
     s.logEvent && s.logEvent(`Artifact acquired: ${a.name}`, 'green');
@@ -289,7 +300,7 @@ export class WorldEvents {
   }
 
   serialize() { return { lastFired: this.lastFired, lastEventDay: this.lastEventDay, lastSeason: this.lastSeason, queueIds: this.queue.map((d) => d.id) }; }
-  restore(d) {
+  restore(d: any) {
     if (!d) return;
     this.lastFired = d.lastFired || {}; this.lastEventDay = d.lastEventDay || 0; this.lastSeason = d.lastSeason || this.lastSeason;
     this.queue = (d.queueIds || []).map((id) => this.defs.find((x) => x.id === id)).filter(Boolean);

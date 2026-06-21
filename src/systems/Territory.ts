@@ -32,7 +32,19 @@ const T_EXPLORED = 0x5c6470; // explored but far from territory — dim but visi
 const T_DARK = 0x232c3c;   // unexplored fog — deep dark blue-gray (Phase 7)
 
 export class Territory {
-  constructor(scene) {
+  scene: any;
+  N: number;
+  bonus: number;
+  explored: boolean[][];
+  border: any;
+  _revealAcc: number;
+  _tileCount: number;
+  _contested: number;
+  _lastRegion: any;
+  _borderPulse: any;
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.N = scene.COLS;
     this.bonus = 0;
