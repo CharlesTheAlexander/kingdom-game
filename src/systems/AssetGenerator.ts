@@ -385,269 +385,558 @@ export function generateTerrain(scene: any) {
 // bottom-centre (≈ x32, y60), because the scene anchors building sprites at
 // origin (0.5, 1.0) on the tile's south corner and scales them by footprint
 // (×1 / ×1.5 / ×2). Matching the originals' 64px size keeps placement identical.
-const STONE = 0x8a8a82, STONE_M = 0x6f6f68, STONE_D = 0x52524c;
-const WOOD = 0x9a6a44, BEAM = 0x5c3a1e, DOOR = 0x4a3018;
-const THATCH = 0xc2a45a, ROOF = 0x46464e, GLOW = 0xffcf5a;
+// Warm Northgard stone/timber palette (not gray — stone leans warm #8a7a6a).
+const STONE = 0x8f7f6c, STONE_M = 0x73654f, STONE_D = 0x564a39;
+const WOOD = 0x9a6a44, BEAM = 0x4f3018, DOOR = 0x3c2814;
+const THATCH = 0xc2a45a, ROOF = 0x6a4a36, GLOW = 0xffcf5a;
+// Per-skin override (set by makeBuilding for AI factions). Building draw fns read
+// the *_C constants so a single accent can battle-worn / ornate / crude the stone.
+let STONE_C = STONE, STONE_MC = STONE_M, STONE_DC = STONE_D, ROOF_C = ROOF, WOOD_C = WOOD;
 
-// Pseudo-3D box: flat front + darker right edge + lighter top lip.
+// Pseudo-3D box: lit top lip + flat front (warm vertical gradient) + dark right
+// edge + a faint AO foot where it meets the ground. The Northgard "block".
 function box(g: any, x: number, y: number, w: number, h: number, base: number) {
+  // body with a top-to-bottom warm shade so walls feel rounded/lit from above
   g.fillStyle(base, 1); g.fillRect(x, y, w, h);
-  g.fillStyle(darken(base, 0.24), 1); g.fillRect(x + w - 3, y, 3, h);
-  g.fillStyle(lighten(base, 0.16), 1); g.fillRect(x, y, w, 2);
+  g.fillStyle(mix(base, WARM_SHADOW, 0.22), 0.5); g.fillRect(x, y + h * 0.55, w, h * 0.45);
+  g.fillStyle(darken(base, 0.3), 1); g.fillRect(x + w - 3, y, 3, h);              // right shadow face
+  g.fillStyle(mix(lighten(base, 0.22), WARM_LIGHT, 0.3), 1); g.fillRect(x, y, w, 2); // lit top lip
+  g.fillStyle(mix(WARM_SHADOW, base, 0.4), 0.3); g.fillRect(x, y + h - 2, w, 2);  // base AO
 }
-// Crenellations along the top edge of a tower/wall.
+// Mortar courses + a couple of cracks across a wall rect — stone texture.
+function masonry(g: any, x: number, y: number, w: number, h: number, base: number, step = 5) {
+  g.lineStyle(1, darken(base, 0.34), 0.55);
+  let row = 0;
+  for (let cy = y + step; cy < y + h - 1; cy += step) { g.beginPath(); g.moveTo(x, cy); g.lineTo(x + w - 3, cy); g.strokePath(); row++; }
+  // staggered vertical seams
+  g.lineStyle(1, darken(base, 0.3), 0.4);
+  row = 0;
+  for (let cy = y; cy < y + h - 2; cy += step) {
+    const off = (row % 2) * (step * 0.9);
+    for (let cx = x + 2 + off; cx < x + w - 3; cx += step * 1.8) { g.beginPath(); g.moveTo(cx, cy + 1); g.lineTo(cx, Math.min(y + h - 1, cy + step)); g.strokePath(); }
+    row++;
+  }
+  // a faint lit highlight on a few stones (top-left light)
+  g.fillStyle(mix(lighten(base, 0.2), WARM_LIGHT, 0.4), 0.18); g.fillRect(x + 1, y + 1, w * 0.4, step * 0.7);
+}
+// Wood-grain streaks + a knot on a timber rect.
+function grain(g: any, x: number, y: number, w: number, h: number, base: number) {
+  g.lineStyle(1, darken(base, 0.28), 0.4);
+  for (let cy = y + 2; cy < y + h - 1; cy += 3) { g.beginPath(); g.moveTo(x + 1, cy); g.lineTo(x + w - 4, cy + (((cy / 3) | 0) % 2 ? 0.6 : -0.6)); g.strokePath(); }
+  g.fillStyle(darken(base, 0.4), 0.6); g.fillCircle(x + w * 0.6, y + h * 0.45, 1); // knot
+}
+// A pitched gable roof (filled triangle) with a lit left slope, shaded right
+// slope, ridge line and an eave shadow under it. apexY above baseY.
+function gableRoof(g: any, lx: number, rx: number, baseY: number, apexX: number, apexY: number, base: number) {
+  g.fillStyle(base, 1); g.fillTriangle(lx, baseY, rx, baseY, apexX, apexY);
+  g.fillStyle(lighten(base, 0.2), 1); g.fillTriangle(lx, baseY, apexX, apexY, apexX, baseY); // lit left
+  g.fillStyle(darken(base, 0.26), 1); g.fillTriangle(rx, baseY, apexX, apexY, apexX, baseY); // shaded right
+  g.lineStyle(1, lighten(base, 0.35), 0.7); g.beginPath(); g.moveTo(apexX, apexY); g.lineTo((lx + apexX) / 2, (baseY + apexY) / 2); g.strokePath(); // ridge highlight
+  g.fillStyle(WARM_SHADOW, 0.3); g.fillRect(lx, baseY, rx - lx, 1.5); // eave shadow
+}
+// Overlapping thatch roof: warm straw triangle, then rows of darker scalloped
+// strokes for the bundled-reed texture, plus a lit top edge.
+function thatchRoof(g: any, lx: number, rx: number, baseY: number, apexX: number, apexY: number) {
+  g.fillStyle(THATCH, 1); g.fillTriangle(lx, baseY, rx, baseY, apexX, apexY);
+  g.fillStyle(lighten(THATCH, 0.16), 1); g.fillTriangle(lx, baseY, apexX, apexY, apexX, baseY);
+  g.fillStyle(darken(THATCH, 0.22), 1); g.fillTriangle(rx, baseY, apexX, apexY, apexX, baseY);
+  const rows = 4;
+  for (let i = 1; i <= rows; i++) {
+    const t = i / (rows + 1), yy = apexY + (baseY - apexY) * t;
+    const halfw = (rx - lx) * 0.5 * t;
+    g.lineStyle(1.4, darken(THATCH, 0.18 + 0.04 * i), 0.6);
+    g.beginPath();
+    for (let sx = apexX - halfw; sx < apexX + halfw; sx += 4) { g.moveTo(sx, yy); g.lineTo(sx + 2, yy + 1.6); }
+    g.strokePath();
+  }
+  g.lineStyle(1.2, mix(lighten(THATCH, 0.3), WARM_LIGHT, 0.4), 0.8); // lit ridge
+  g.beginPath(); g.moveTo(apexX, apexY); g.lineTo(apexX - (apexX - lx) * 0.4, apexY + (baseY - apexY) * 0.4); g.strokePath();
+}
+// A lit leaded window: dark glass, warm inner glow, muntin cross, stone lintel.
+function window2(g: any, x: number, y: number, w: number, h: number, lit = true) {
+  g.fillStyle(0x1a1622, 1); g.fillRect(x, y, w, h);
+  if (lit) { g.fillStyle(GLOW, 0.85); g.fillRect(x + 1, y + 1, w - 2, h - 2); g.fillStyle(lighten(GLOW, 0.2), 0.6); g.fillRect(x + 1, y + 1, w - 2, (h - 2) * 0.45); }
+  g.lineStyle(1, mix(0x2a2030, BEAM, 0.5), 0.9);
+  g.beginPath(); g.moveTo(x + w / 2, y); g.lineTo(x + w / 2, y + h); g.moveTo(x, y + h / 2); g.lineTo(x + w, y + h / 2); g.strokePath(); // muntins
+  g.fillStyle(STONE_C, 1); g.fillRect(x - 1, y - 1.5, w + 2, 1.5); // lintel
+}
+// An arched (round-top) window with optional warm glow.
+function archWindow(g: any, x: number, y: number, w: number, h: number, lit = true) {
+  const cx = x + w / 2, r = w / 2;
+  g.fillStyle(0x18141f, 1); g.fillRect(x, y, w, h); g.fillCircle(cx, y, r);
+  if (lit) { g.fillStyle(GLOW, 0.7); g.fillRect(x + 1, y + 1, w - 2, h - 2); g.fillCircle(cx, y, r - 1); g.fillStyle(lighten(GLOW, 0.25), 0.5); g.fillRect(x + 1, y, w - 2, h * 0.4); }
+  g.lineStyle(1, mix(STONE_DC, BEAM, 0.4), 0.8); g.beginPath(); g.moveTo(cx, y - r + 1); g.lineTo(cx, y + h); g.strokePath();
+}
+// Crenellations along the top edge of a tower/wall, each merlon shaded for depth.
 function merlons(g: any, x: number, y: number, w: number, color: number) {
-  g.fillStyle(color, 1);
-  for (let cx = x; cx < x + w - 2; cx += 6) g.fillRect(cx, y, 4, 4);
+  for (let cx = x; cx < x + w - 2; cx += 6) {
+    g.fillStyle(color, 1); g.fillRect(cx, y, 4, 4);
+    g.fillStyle(lighten(color, 0.18), 1); g.fillRect(cx, y, 4, 1.2);
+    g.fillStyle(darken(color, 0.3), 1); g.fillRect(cx + 3, y, 1, 4);
+  }
 }
+// A heraldic banner hanging from a crossbar: pole, finial, cloth with a fold
+// highlight, a swallow-tail notch and a centre device.
+function banner(g: any, x: number, y: number, h: number, accent: number) {
+  g.fillStyle(0x5a3a1e, 1); g.fillRect(x - 0.5, y - 2, 1.5, h + 4);              // pole
+  g.fillStyle(0xc9a84c, 1); g.fillCircle(x + 0.2, y - 3, 1.4);                  // gold finial
+  g.fillStyle(accent, 1); g.fillRect(x - 3, y, 7, h);                          // cloth
+  g.fillStyle(lighten(accent, 0.22), 1); g.fillRect(x - 3, y, 2, h);           // lit fold
+  g.fillStyle(darken(accent, 0.3), 1); g.fillRect(x + 2, y, 2, h);             // shaded fold
+  g.fillStyle(mix(WARM_SHADOW, accent, 0.3), 1); g.fillTriangle(x - 3, y + h, x + 4, y + h, x + 0.5, y + h - 4); // swallow tail
+  g.fillStyle(0xe8d28a, 0.9); g.fillCircle(x + 0.5, y + h * 0.4, 1.3);         // device
+}
+// A small triangular pennant flag on a pole (simpler than a banner).
 function flag(g: any, x: number, y: number, h: number, accent: number) {
-  g.fillStyle(0x6b4a28, 1); g.fillRect(x, y, 1.5, h);                 // pole
-  g.fillStyle(accent, 1); g.fillTriangle(x + 1.5, y, x + 1.5, y + 7, x + 13, y + 3.5); // pennant
+  g.fillStyle(0x5a3a1e, 1); g.fillRect(x, y, 1.5, h + 2);                       // pole
+  g.fillStyle(0xc9a84c, 1); g.fillCircle(x + 0.7, y - 0.5, 1.2);               // finial
+  g.fillStyle(accent, 1); g.fillTriangle(x + 1.5, y, x + 1.5, y + 7, x + 13, y + 3.5);
+  g.fillStyle(lighten(accent, 0.2), 1); g.fillTriangle(x + 1.5, y, x + 1.5, y + 3, x + 8, y + 2); // lit
 }
-function shadow(g: any, cx = 32, cy = 60, rw = 24) { g.fillStyle(0x000000, 0.25); g.fillEllipse(cx, cy, rw, 8); }
-// (Assets V2) A small five-point star (Graphics) for prestige emblems.
+// Ground contact shadow (soft warm-dark ellipse the building sits in).
+function shadow(g: any, cx = 32, cy = 60, rw = 24) {
+  g.fillStyle(0x000000, 0.22); g.fillEllipse(cx, cy, rw, 8);
+  g.fillStyle(0x000000, 0.16); g.fillEllipse(cx, cy - 1, rw * 0.7, 5);
+}
+// Ambient-occlusion foot: a feathered warm-dark band where a wall meets ground.
+function aoFoot(g: any, x: number, y: number, w: number) {
+  g.fillStyle(WARM_SHADOW, 0.28); g.fillEllipse(x + w / 2, y, w * 0.55, 3.5);
+}
+// A five-point star (Graphics) for prestige emblems.
 function star(g: any, cx: number, cy: number, r: number, color = 0xc9a84c) {
   g.fillStyle(color, 1); g.beginPath();
   for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + k * 4 * Math.PI / 5; (k === 0 ? g.moveTo : g.lineTo).call(g, cx + Math.cos(a) * r, cy + Math.sin(a) * r); }
   g.closePath(); g.fill();
 }
+// Soft warm glow halo (baked lived-in light spilling from a window/forge).
+function glowHalo(g: any, cx: number, cy: number, r: number, color = GLOW, a = 0.22) {
+  g.fillStyle(color, a); g.fillCircle(cx, cy, r);
+  g.fillStyle(color, a * 0.7); g.fillCircle(cx, cy, r * 0.6);
+}
 
-// Draw one building texture (accent-coloured) under `key`.
-function makeBuilding(scene: any, key: string, draw: (g: any, A: number) => void, accent = 0x1a3a8b) {
+// Draw one building texture (accent-coloured) under `key`. opt.skin selects an
+// AI faction stone/wood/roof treatment so the same shapes read distinctly.
+type Skin = { stone: number; stoneM: number; stoneD: number; roof: number; wood: number };
+function makeBuilding(scene: any, key: string, draw: (g: any, A: number) => void, accent = 0x2a4a9b, skin?: Skin) {
   if (scene.textures.exists(key)) return;
+  // install per-skin palette (default = player warm stone)
+  STONE_C = skin ? skin.stone : STONE; STONE_MC = skin ? skin.stoneM : STONE_M;
+  STONE_DC = skin ? skin.stoneD : STONE_D; ROOF_C = skin ? skin.roof : ROOF; WOOD_C = skin ? skin.wood : WOOD;
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
   shadow(g);
   draw(g, accent);
   g.generateTexture(key, 64, 64);
   g.destroy();
+  STONE_C = STONE; STONE_MC = STONE_M; STONE_DC = STONE_D; ROOF_C = ROOF; WOOD_C = WOOD; // reset
 }
 
-// Each draw fn (g, A=accent). Base sits near y60, centred on x32.
+// Each draw fn (g, A=accent). Base sits near y60, centred on x32. Draw fns read
+// STONE_C/STONE_MC/STONE_DC/ROOF_C/WOOD_C so AI factions get distinct stone.
 const BUILD: Record<string, (g: any, A: number) => void> = {
+  // Half-timbered cottage: stone footing, timber-framed plaster wall, steep
+  // thatch roof, leaded lit window, plank door, smoking-stub chimney.
   house: (g, A) => {
-    box(g, 22, 44, 20, 14, STONE);                       // stone foundation
-    box(g, 23, 30, 18, 16, WOOD);                        // timber wall
-    g.fillStyle(BEAM, 1); for (const bx of [26, 32, 38]) g.fillRect(bx, 30, 1.5, 16); // beams
-    g.fillStyle(THATCH, 1); g.fillTriangle(20, 30, 44, 30, 32, 15);   // thatch roof
-    g.fillStyle(darken(THATCH, 0.2), 1); g.fillTriangle(32, 15, 44, 30, 38, 30);
-    g.fillStyle(DOOR, 1); g.fillRect(29, 40, 6, 8);                   // door
-    g.fillStyle(0x2a2a30, 1); g.fillRect(24, 34, 3, 3); g.fillRect(37, 34, 3, 3); // windows
-    g.fillStyle(STONE_D, 1); g.fillRect(36, 12, 4, 7);               // chimney
+    aoFoot(g, 22, 58, 20);
+    box(g, 22, 44, 20, 14, STONE_C); masonry(g, 22, 44, 20, 14, STONE_C, 4); // stone footing
+    box(g, 23, 30, 18, 16, 0xd8c7a4);                                  // plaster wall
+    g.fillStyle(BEAM, 1);                                              // timber frame (posts/braces)
+    g.fillRect(23, 30, 1.5, 16); g.fillRect(39.5, 30, 1.5, 16); g.fillRect(31, 30, 1.5, 16);
+    g.fillRect(23, 30, 18, 1.5); g.fillRect(23, 37, 18, 1.2);
+    g.lineStyle(1.4, BEAM, 1); g.beginPath(); g.moveTo(24, 37); g.lineTo(30, 31); g.moveTo(41, 37); g.lineTo(33, 31); g.strokePath(); // diagonal braces
+    thatchRoof(g, 18, 46, 31, 32, 14);                                // overhanging thatch
+    g.fillStyle(DOOR, 1); g.fillRect(33, 39, 6, 7); g.fillStyle(lighten(DOOR, 0.2), 1); g.fillRect(33, 39, 1.2, 7); g.fillStyle(GLOW, 1); g.fillCircle(38, 42.5, 0.7); // door + handle
+    window2(g, 24.5, 33, 5, 5, true);                                 // leaded lit window
+    box(g, 35, 11, 4, 8, STONE_DC); g.fillStyle(darken(STONE_DC, 0.3), 1); g.fillRect(35, 11, 4, 1.5); // chimney
+    glowHalo(g, 27, 35.5, 6, GLOW, 0.14);
   },
+  // Open A-frame logging shed: rough timber posts + ridge, sloped shake roof,
+  // a stacked log pile with visible end-grain rings, a saw blade and chips.
   lumberyard: (g, A) => {
-    g.fillStyle(BEAM, 1); for (const bx of [20, 42]) g.fillRect(bx, 26, 2, 32);   // corner posts
-    g.fillStyle(BEAM, 1); g.fillRect(20, 24, 24, 2);                              // top beam
-    g.fillStyle(darken(WOOD, 0.1), 1); g.fillTriangle(16, 24, 48, 24, 32, 14);   // sloped roof
-    for (let i = 0; i < 3; i++) { g.fillStyle(0x8b5e3c, 1); g.fillEllipse(26, 52 - i * 5, 16, 5); g.fillStyle(0xc89a5a, 1); g.fillCircle(18, 52 - i * 5, 2.2); } // log pile
-    g.fillStyle(0xbfbfb2, 1); g.fillCircle(42, 46, 5); g.fillStyle(STONE_D, 1); g.fillCircle(42, 46, 2); // saw blade
+    aoFoot(g, 16, 58, 36);
+    g.fillStyle(BEAM, 1); for (const bx of [18, 44]) { g.fillRect(bx, 26, 2.5, 32); g.fillStyle(darken(BEAM, 0.3), 1); g.fillRect(bx + 1.8, 26, 0.7, 32); g.fillStyle(BEAM, 1); } // corner posts
+    gableRoof(g, 14, 50, 26, 32, 14, darken(WOOD_C, 0.12));           // shake roof
+    g.fillStyle(BEAM, 1); g.fillRect(20, 48, 24, 2);                  // cross brace
+    // log pile with end-grain
+    for (let i = 0; i < 3; i++) {
+      const ly = 54 - i * 5, off = (i % 2) * 3;
+      g.fillStyle(0x8b5e3c, 1); g.fillEllipse(28 + off, ly, 17, 5);
+      g.fillStyle(0xcaa066, 1); g.fillCircle(20 + off, ly, 2.4); g.fillStyle(0x9a7038, 1); g.fillCircle(20 + off, ly, 1.4); g.fillCircle(20 + off, ly, 0.5); // rings
+      g.fillStyle(0xcaa066, 1); g.fillCircle(36 + off, ly, 2.4); g.fillStyle(0x9a7038, 1); g.fillCircle(36 + off, ly, 1.3);
+    }
+    g.fillStyle(0xc8ccd2, 1); g.fillCircle(45, 44, 5); g.fillStyle(0xe6e9ee, 1); g.fillCircle(43.5, 42.5, 1.6); // saw blade + glint
+    g.lineStyle(1, STONE_DC, 1); for (let k = 0; k < 8; k++) { const a = k / 8 * 6.28; g.beginPath(); g.moveTo(45, 44); g.lineTo(45 + Math.cos(a) * 5, 44 + Math.sin(a) * 5); g.strokePath(); } // teeth
+    g.fillStyle(STONE_D, 1); g.fillCircle(45, 44, 1.6);
+    g.fillStyle(0xe8d8b8, 0.7); for (const [x, y] of [[40, 56], [50, 55], [22, 57]]) { g.fillRect(x, y, 2, 1); } // wood chips
   },
+  // Mine: stone portal arch into pitch-black tunnel, hewn support timbers, ore
+  // cart on rails, a glint of ore inside, scattered rubble + pick leaning.
   mine: (g, A) => {
-    box(g, 18, 32, 28, 26, STONE_M);                     // stone entrance block
-    g.fillStyle(0x0a0a0c, 1); g.fillRect(26, 40, 12, 18); g.fillStyle(0x0a0a0c, 1); g.fillTriangle(26, 40, 38, 40, 32, 33); // tunnel
-    g.fillStyle(BEAM, 1); g.fillRect(24, 36, 2, 22); g.fillRect(38, 36, 2, 22);  // support timbers
-    g.fillStyle(0x6f6f68, 1); g.fillRect(40, 52, 8, 5); g.fillStyle(STONE_D, 1); g.fillCircle(41, 57, 1.5); g.fillCircle(47, 57, 1.5); // cart
-    g.fillStyle(STONE_D, 0.8); for (const [x, y] of [[16, 56], [50, 55], [20, 57]]) g.fillCircle(x, y, 1.6); // rubble
+    aoFoot(g, 18, 58, 28);
+    box(g, 18, 32, 28, 26, STONE_MC); masonry(g, 18, 32, 28, 26, STONE_MC, 5); // entrance block
+    g.fillStyle(STONE_C, 1); g.fillTriangle(22, 36, 42, 36, 32, 28); g.fillStyle(lighten(STONE_C, 0.18), 1); g.fillTriangle(22, 36, 32, 28, 32, 36); // arch keystone face
+    g.fillStyle(0x070709, 1); g.fillRect(25, 40, 14, 18); g.fillTriangle(25, 40, 39, 40, 32, 33);  // tunnel void
+    g.fillStyle(0x161018, 0.8); g.fillEllipse(32, 50, 6, 9);          // depth gradient
+    g.fillStyle(BEAM, 1); g.fillRect(23.5, 36, 2.5, 22); g.fillRect(38, 36, 2.5, 22); g.fillRect(23.5, 35, 17, 2.5); // support frame
+    g.fillStyle(darken(BEAM, 0.3), 1); g.fillRect(25.2, 36, 0.8, 22);
+    g.fillStyle(GLOW, 0.6); g.fillCircle(30, 44, 1.4);               // faint lantern in shaft
+    // ore cart on rails
+    g.fillStyle(STONE_DC, 1); g.fillRect(40, 50, 9, 6); g.fillStyle(darken(STONE_DC, 0.3), 1); g.fillRect(40, 54, 9, 2);
+    g.fillStyle(0x7a8a9a, 1); g.fillCircle(43, 54, 1); g.fillCircle(47, 54, 1); g.fillRect(42, 50, 5, 1.5); // ore lumps + wheels
+    g.fillStyle(0x55504a, 1); g.fillRect(38, 57, 16, 1); // rail
+    g.fillStyle(darken(STONE_C, 0.2), 0.85); for (const [x, y, r] of [[16, 56, 1.6], [52, 55, 1.4], [20, 57, 1.2]] as any[]) g.fillCircle(x, y, r); // rubble
   },
+  // Windmill farm: tapered round stone tower on a base, conical cap, four
+  // lattice sails crossing the face, grain sacks + a tilled furrow at the foot.
   farm: (g, A) => {
-    box(g, 22, 42, 20, 16, STONE);                       // stone base
-    const hx = 32, hy = 30;
-    g.lineStyle(3, 0xeae0c8, 1);                         // 4 windmill sails
-    for (const a of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) { g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx + Math.cos(a) * 16, hy + Math.sin(a) * 16); g.strokePath(); }
-    g.fillStyle(STONE_D, 1); g.fillCircle(hx, hy, 3);    // hub
-    g.fillStyle(0xc9a86a, 1); g.fillRect(24, 52, 5, 5); g.fillRect(35, 52, 5, 5); // grain sacks
+    aoFoot(g, 22, 58, 22);
+    g.fillStyle(0x9a7a4a, 1); g.fillRect(26, 53, 14, 5); g.lineStyle(1, darken(0x9a7a4a, 0.3), 0.7); for (let fx = 27; fx < 40; fx += 3) { g.beginPath(); g.moveTo(fx, 53); g.lineTo(fx, 58); g.strokePath(); } // tilled furrows
+    // tapered tower
+    g.fillStyle(STONE_C, 1); g.fillPoints([{ x: 24, y: 54 }, { x: 40, y: 54 }, { x: 37, y: 24 }, { x: 27, y: 24 }], true);
+    g.fillStyle(mix(STONE_C, WARM_SHADOW, 0.28), 0.5); g.fillPoints([{ x: 35, y: 54 }, { x: 40, y: 54 }, { x: 37, y: 24 }], true); // shaded right
+    g.fillStyle(mix(lighten(STONE_C, 0.2), WARM_LIGHT, 0.3), 0.5); g.fillPoints([{ x: 24, y: 54 }, { x: 28, y: 54 }, { x: 27, y: 24 }], true); // lit left
+    masonry(g, 27, 26, 10, 28, STONE_C, 5);
+    g.fillStyle(ROOF_C, 1); g.fillTriangle(25, 24, 39, 24, 32, 13); g.fillStyle(lighten(ROOF_C, 0.18), 1); g.fillTriangle(25, 24, 32, 13, 32, 24); // conical cap
+    window2(g, 30, 38, 4, 5, true);                                   // small lit window
+    const hx = 32, hy = 28;
+    g.lineStyle(2.4, 0x6b4a28, 1); g.fillStyle(0xeae0c8, 1);
+    for (const a of [-0.4, Math.PI / 2 - 0.4, Math.PI - 0.4, -Math.PI / 2 - 0.4]) { // four lattice sails
+      const ex = hx + Math.cos(a) * 15, ey = hy + Math.sin(a) * 15;
+      g.beginPath(); g.moveTo(hx, hy); g.lineTo(ex, ey); g.strokePath();
+      const px = Math.cos(a + Math.PI / 2), py = Math.sin(a + Math.PI / 2);
+      g.fillStyle(0xeae0c8, 1); g.fillTriangle(hx + Math.cos(a) * 5, hy + Math.sin(a) * 5, ex + px * 2.5, ey + py * 2.5, ex - px * 0.5, ey - py * 0.5); // canvas vane
+    }
+    g.fillStyle(STONE_DC, 1); g.fillCircle(hx, hy, 2.6); g.fillStyle(lighten(STONE_DC, 0.2), 1); g.fillCircle(hx - 0.6, hy - 0.6, 1); // hub
+    g.fillStyle(0xc9a86a, 1); g.fillEllipse(22, 55, 4, 4); g.fillEllipse(43, 55, 3.6, 4); g.fillStyle(darken(0xc9a86a, 0.2), 1); g.fillEllipse(22, 56.5, 4, 1.5); // grain sacks
   },
+  // Fortified war hall: long stone keep with battlements + corner watchtower,
+  // banded reinforced door, shield + crossed-swords trophy, weapon rack, banner.
   barracks: (g, A) => {
-    box(g, 16, 32, 32, 26, STONE_M);                     // big stone hall
-    g.fillStyle(ROOF, 1); g.fillTriangle(14, 32, 50, 32, 32, 20);    // roof
-    g.fillStyle(DOOR, 1); g.fillRect(27, 46, 10, 12);    // double door
-    g.fillStyle(BEAM, 1); g.fillRect(32, 46, 1, 12);
-    box(g, 44, 24, 9, 34, STONE_D);                      // corner watchtower
-    merlons(g, 44, 22, 9, STONE);
-    g.lineStyle(1.5, 0xcfcfcf, 1); g.beginPath(); g.moveTo(20, 38); g.lineTo(26, 44); g.moveTo(26, 38); g.lineTo(20, 44); g.strokePath(); // crossed swords
-    flag(g, 31, 12, 8, A);                               // faction banner
+    aoFoot(g, 16, 58, 38);
+    box(g, 16, 30, 30, 28, STONE_MC); masonry(g, 16, 30, 30, 28, STONE_MC, 5); // hall
+    merlons(g, 16, 26, 30, STONE_C);
+    box(g, 44, 22, 11, 36, STONE_DC); masonry(g, 44, 22, 11, 36, STONE_DC, 5); merlons(g, 44, 18, 11, STONE_MC); // corner watchtower
+    g.fillStyle(0x161018, 1); g.fillRect(48, 30, 2, 6); g.fillRect(48, 40, 2, 6); // tower slits
+    g.fillStyle(DOOR, 1); g.fillRect(26, 44, 11, 14); g.fillTriangle(26, 44, 37, 44, 31.5, 39); // arched double door
+    g.fillStyle(0x6b6b64, 1); g.fillRect(26, 48, 11, 1.5); g.fillRect(26, 53, 11, 1.5); g.fillStyle(BEAM, 1); g.fillRect(31, 44, 1, 14); // iron bands + seam
+    window2(g, 19, 35, 4, 5, true); window2(g, 38, 35, 4, 5, true);   // lit windows
+    g.fillStyle(A, 1); g.beginPath(); g.moveTo(28, 30); g.lineTo(34, 30); g.lineTo(34, 35); g.lineTo(31, 38); g.lineTo(28, 35); g.closePath(); g.fill(); // crest shield
+    g.lineStyle(1.4, 0xd2d6dc, 1); g.beginPath(); g.moveTo(29, 31.5); g.lineTo(33, 35.5); g.moveTo(33, 31.5); g.lineTo(29, 35.5); g.strokePath(); // crossed swords
+    banner(g, 21, 14, 12, A);
   },
+  // Round defensive tower: tapered masonry shaft, battlemented crown, arrow
+  // slits, a lit window slot and a pennant.
   tower: (g, A) => {
-    g.fillStyle(STONE_M, 1); g.fillTriangle(18, 56, 46, 56, 40, 24); g.fillTriangle(18, 56, 40, 24, 24, 24); // tapered body
-    box(g, 24, 22, 16, 10, STONE);
-    merlons(g, 23, 18, 18, STONE_D);
-    g.fillStyle(0x2a2a30, 1); g.fillRect(30, 34, 4, 8); g.fillRect(31, 46, 2, 6); // arrow slits
-    flag(g, 32, 6, 8, A);
+    aoFoot(g, 20, 58, 24);
+    g.fillStyle(STONE_MC, 1); g.fillPoints([{ x: 20, y: 56 }, { x: 44, y: 56 }, { x: 40, y: 22 }, { x: 24, y: 22 }], true); // tapered body
+    g.fillStyle(mix(STONE_MC, WARM_SHADOW, 0.3), 0.5); g.fillPoints([{ x: 38, y: 56 }, { x: 44, y: 56 }, { x: 40, y: 22 }], true); // shaded
+    g.fillStyle(mix(lighten(STONE_MC, 0.22), WARM_LIGHT, 0.3), 0.5); g.fillPoints([{ x: 20, y: 56 }, { x: 26, y: 56 }, { x: 24, y: 22 }], true); // lit
+    masonry(g, 24, 24, 16, 32, STONE_MC, 5);
+    box(g, 22, 18, 20, 6, STONE_C);                                   // overhanging parapet
+    merlons(g, 21, 14, 22, STONE_DC);
+    g.fillStyle(0x161018, 1); g.fillRect(30, 30, 4, 9); g.fillTriangle(30, 30, 34, 30, 32, 27); // arrow slit (arched)
+    window2(g, 29, 42, 5, 5, true);                                   // lit window
+    glowHalo(g, 31.5, 44.5, 5, GLOW, 0.12);
+    flag(g, 32, 4, 8, A);
   },
+  // Tall slender watchtower: stone shaft, timber lookout deck w/ railing, peaked
+  // roof, a beacon brazier glowing and a spotter slit. (Eye icon floats above.)
   watchtower: (g, A) => {
-    g.fillStyle(STONE_M, 1); g.fillTriangle(22, 58, 42, 58, 38, 20); g.fillTriangle(22, 58, 38, 20, 26, 20); // tall thin tower
-    box(g, 20, 14, 24, 8, BEAM);                         // platform
-    g.lineStyle(1.5, 0x6b4a28, 1); g.strokeRect(20, 10, 24, 6);      // railing
-    g.fillStyle(STONE_D, 1); g.fillRect(33, 4, 12, 3);  // telescope
-    g.fillStyle(GLOW, 1); g.fillCircle(21, 12, 1.6); g.fillCircle(43, 12, 1.6); // torches
+    aoFoot(g, 24, 58, 20);
+    g.fillStyle(STONE_MC, 1); g.fillPoints([{ x: 25, y: 58 }, { x: 39, y: 58 }, { x: 37, y: 22 }, { x: 27, y: 22 }], true);
+    g.fillStyle(mix(STONE_MC, WARM_SHADOW, 0.3), 0.5); g.fillPoints([{ x: 34, y: 58 }, { x: 39, y: 58 }, { x: 37, y: 22 }], true);
+    masonry(g, 27, 24, 10, 34, STONE_MC, 5);
+    g.fillStyle(0x161018, 1); g.fillRect(31, 38, 2, 7); g.fillRect(30, 48, 4, 3); // slit + window
+    g.fillStyle(BEAM, 1); g.fillRect(21, 18, 22, 5); g.fillStyle(darken(BEAM, 0.25), 1); g.fillRect(21, 21.5, 22, 1.5); // platform + underside
+    g.lineStyle(1.5, 0x6b4a28, 1); g.strokeRect(22, 13, 20, 6); for (const rx of [27, 32, 37]) { g.beginPath(); g.moveTo(rx, 13); g.lineTo(rx, 18); g.strokePath(); } // railing posts
+    gableRoof(g, 20, 44, 13, 32, 4, darken(WOOD_C, 0.1));             // peaked lookout roof
+    g.fillStyle(0xff8a2a, 1); g.fillCircle(24, 14, 2.4); g.fillStyle(0xffd24a, 1); g.fillCircle(24, 13.5, 1.3); glowHalo(g, 24, 14, 5, 0xffa030, 0.2); // beacon brazier
+    g.fillStyle(0x3a2a1a, 1); g.fillRect(22.5, 14, 3, 5);
   },
+  // Forge: stone smithy with a wide-open glowing forge mouth, anvil with hammer,
+  // a tall chimney with baked smoke, quench barrel and tongs. Warm fire spill.
   blacksmith: (g, A) => {
-    box(g, 18, 34, 28, 24, STONE_M);
-    g.fillStyle(0x14100c, 1); g.fillRect(22, 42, 16, 16);            // open front
-    g.fillStyle(0xff7a1a, 0.9); g.fillCircle(30, 52, 5); g.fillStyle(0xffd24a, 0.9); g.fillCircle(30, 52, 2.5); // forge glow
-    g.fillStyle(STONE_D, 1); g.fillRect(36, 50, 6, 2); g.fillRect(38, 50, 2, 6);     // anvil
-    box(g, 40, 26, 6, 10, STONE_D);                      // chimney
-    g.fillStyle(0xb0b0b0, 0.5); g.fillCircle(43, 22, 3); g.fillCircle(46, 17, 2.4);  // smoke
+    aoFoot(g, 16, 58, 30);
+    box(g, 16, 32, 28, 26, STONE_MC); masonry(g, 16, 32, 28, 26, STONE_MC, 5);
+    gableRoof(g, 13, 47, 32, 30, 23, ROOF_C);
+    g.fillStyle(0x0e0a08, 1); g.fillRect(20, 40, 18, 18); g.fillTriangle(20, 40, 38, 40, 29, 35); // forge opening (arched)
+    glowHalo(g, 28, 50, 12, 0xff8a1a, 0.3);                           // fire spill into room
+    g.fillStyle(0xff7a1a, 1); g.fillCircle(26, 51, 6); g.fillStyle(0xffb13a, 1); g.fillCircle(26, 51, 3.6); g.fillStyle(0xffe6a0, 1); g.fillCircle(25, 50, 1.6); // forge coals
+    g.fillStyle(0x2a2a2e, 1); g.fillRect(31, 50, 8, 2.5); g.fillRect(33.5, 50, 2.5, 7); g.fillStyle(lighten(0x2a2a2e, 0.3), 1); g.fillRect(31, 50, 8, 0.8); // anvil
+    g.fillStyle(BEAM, 1); g.fillRect(36, 46, 1, 5); g.fillStyle(0x6b6b64, 1); g.fillRect(35, 45, 3, 2); // hammer on anvil
+    box(g, 38, 22, 7, 14, STONE_DC); g.fillStyle(darken(STONE_DC, 0.3), 1); g.fillRect(38, 22, 7, 2); g.fillStyle(0xff6a1a, 0.5); g.fillRect(40, 23, 3, 2); // chimney + ember mouth
+    g.fillStyle(0x9a948c, 0.45); g.fillCircle(42, 18, 3.4); g.fillCircle(45, 13, 2.8); g.fillStyle(0xb4aea4, 0.35); g.fillCircle(40, 14, 2.4); // baked smoke
+    g.fillStyle(0x6b4a28, 1); g.fillEllipse(50, 53, 6, 6); g.fillStyle(0x3a6a8a, 1); g.fillEllipse(50, 51, 4.5, 2.2); // quench barrel w/ water
   },
+  // Market: timber stall under a striped awning, a goods-laden counter (bread,
+  // fruit, pots), hanging scales, barrels. (Coin icon floats above.)
   market: (g, A) => {
-    g.fillStyle(0x8b5e3c, 1); g.fillRect(18, 40, 28, 18);            // counter/stall
-    for (let i = 0; i < 6; i++) { g.fillStyle(i % 2 ? 0xf0f0f0 : A, 1); g.fillRect(16 + i * 5.5, 24, 5.5, 8); } // striped awning
-    g.fillStyle(BEAM, 1); g.fillRect(18, 32, 2, 26); g.fillRect(44, 32, 2, 26);      // posts
-    g.fillStyle(0x8b5e3c, 1); g.fillEllipse(24, 44, 7, 5); g.fillStyle(0xc9a86a, 1); g.fillRect(33, 40, 5, 5); // goods
-    g.fillStyle(GLOW, 1); g.fillCircle(38, 46, 2.4); g.fillStyle(STONE_D, 1); g.fillRect(37.4, 44, 1.2, 5);    // coin sign
+    aoFoot(g, 16, 58, 32);
+    g.fillStyle(BEAM, 1); g.fillRect(17, 30, 2.5, 28); g.fillRect(44, 30, 2.5, 28); // posts
+    g.fillStyle(0x8b5e3c, 1); g.fillRect(18, 40, 27, 18); g.fillStyle(lighten(0x8b5e3c, 0.18), 1); g.fillRect(18, 40, 27, 2); g.fillStyle(darken(0x8b5e3c, 0.25), 1); g.fillRect(18, 56, 27, 2); // counter
+    g.lineStyle(1, darken(0x8b5e3c, 0.3), 0.5); for (let px = 21; px < 45; px += 5) { g.beginPath(); g.moveTo(px, 42); g.lineTo(px, 56); g.strokePath(); } // planks
+    // scalloped striped awning
+    for (let i = 0; i < 6; i++) { g.fillStyle(i % 2 ? 0xf2ece0 : A, 1); g.fillRect(15 + i * 5.6, 30, 5.6, 9); g.fillStyle(i % 2 ? 0xf2ece0 : A, 1); g.fillTriangle(15 + i * 5.6, 39, 15 + (i + 1) * 5.6, 39, 15 + i * 5.6 + 2.8, 42); }
+    g.fillStyle(mix(A, WARM_SHADOW, 0.3), 0.4); g.fillRect(15, 36, 33.6, 3); // awning underside shade
+    // goods on counter
+    g.fillStyle(0xc98a4a, 1); g.fillEllipse(23, 44, 3.5, 2.2); g.fillEllipse(27, 44, 3, 2); // bread loaves
+    g.fillStyle(0xc0402a, 1); g.fillCircle(33, 43, 1.6); g.fillCircle(36, 43, 1.6); g.fillStyle(0x6aaa3a, 1); g.fillCircle(34.5, 45, 1.5); // fruit
+    g.fillStyle(0x7a5a3a, 1); g.fillEllipse(41, 44, 3, 3); g.fillStyle(darken(0x7a5a3a, 0.2), 1); g.fillEllipse(41, 45, 3, 1.4); // pot
+    g.lineStyle(1, 0xc9a84c, 1); g.beginPath(); g.moveTo(38, 30); g.lineTo(38, 36); g.strokePath(); g.fillStyle(0xc9a84c, 1); g.fillEllipse(36, 37, 2.2, 1); g.fillEllipse(40, 37, 2.2, 1); // hanging scales
   },
+  // Library: tall stone scriptorium, three arched windows w/ warm candlelight,
+  // shelved book spines visible, a rose/oculus window, stepped entrance.
   library: (g, A) => {
-    box(g, 18, 30, 28, 28, STONE);
-    g.fillStyle(0x2a2436, 1); g.fillRect(24, 36, 16, 16); g.fillTriangle(24, 36, 40, 36, 32, 28);  // arched window
-    for (let i = 0; i < 4; i++) { g.fillStyle([0x9a3a3a, 0x3a7a9a, 0xc9a84c, 0x6a9a4a][i], 1); g.fillRect(26 + i * 3.4, 38, 3, 12); } // book spines
-    g.fillStyle(GLOW, 0.8); g.fillCircle(36, 46, 2);                 // candle glow
-    g.fillStyle(DOOR, 1); g.fillRect(29, 50, 6, 8);
-    g.fillStyle(STONE_M, 1); g.fillRect(24, 56, 16, 2);             // steps
-    flag(g, 31, 14, 7, A);
+    aoFoot(g, 16, 58, 32);
+    box(g, 16, 28, 30, 30, STONE_C); masonry(g, 16, 28, 30, 30, STONE_C, 5);
+    g.fillStyle(ROOF_C, 1); g.fillRect(14, 24, 34, 5); g.fillStyle(lighten(ROOF_C, 0.15), 1); g.fillRect(14, 24, 34, 1.5); // cornice
+    archWindow(g, 19, 36, 6, 9, true); archWindow(g, 37, 36, 6, 9, true); // tall arched windows lit
+    // central shelf alcove with book spines
+    g.fillStyle(0x241c2c, 1); g.fillRect(28, 34, 8, 14); g.fillTriangle(28, 34, 36, 34, 32, 30);
+    for (let i = 0; i < 4; i++) { g.fillStyle([0x9a3a3a, 0x3a7a9a, 0xc9a84c, 0x6a9a4a][i], 1); g.fillRect(28.5 + i * 1.9, 38, 1.6, 9); }
+    g.fillStyle(GLOW, 0.8); g.fillCircle(32, 46, 1.6); glowHalo(g, 32, 42, 7, GLOW, 0.12); // candle glow
+    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 22, 3); g.fillStyle(0x241c2c, 1); g.fillCircle(32, 22, 1.6); g.lineStyle(0.8, 0xc9a84c, 1); for (let k = 0; k < 6; k++) { const a = k / 6 * 6.28; g.beginPath(); g.moveTo(32, 22); g.lineTo(32 + Math.cos(a) * 3, 22 + Math.sin(a) * 3); g.strokePath(); } // oculus
+    g.fillStyle(DOOR, 1); g.fillRect(29, 50, 6, 8); g.lineStyle(1, 0xc9a84c, 0.8); g.strokeRect(29, 50, 6, 8);
+    g.fillStyle(STONE_MC, 1); g.fillRect(26, 56, 12, 1.5); g.fillRect(24, 58, 16, 1.5); // steps
+    flag(g, 21, 16, 7, A);
   },
+  // Tavern: warm timber inn, jettied upper storey, glowing windows + door,
+  // overhanging eaves, a hanging mug sign, ale barrels stacked outside.
   tavern: (g, A) => {
-    box(g, 16, 34, 32, 24, WOOD);
-    g.fillStyle(ROOF, 1); g.fillTriangle(14, 34, 50, 34, 32, 22);
-    g.fillStyle(GLOW, 0.9); g.fillRect(20, 40, 6, 6); g.fillRect(38, 40, 6, 6);      // warm windows
-    g.fillStyle(DOOR, 1); g.fillRect(29, 46, 6, 12);
-    g.fillStyle(0x8b5e3c, 1); g.fillEllipse(50, 52, 8, 6); g.fillEllipse(50, 46, 7, 5); // barrels
-    g.fillStyle(0xd8b06a, 1); g.fillCircle(40, 28, 3); g.lineStyle(1, 0xd8b06a, 1); g.strokeRect(43, 26, 2, 4); // mug sign
+    aoFoot(g, 14, 58, 36);
+    box(g, 16, 40, 30, 18, WOOD_C); grain(g, 16, 40, 30, 18, WOOD_C);  // ground storey
+    box(g, 14, 30, 34, 12, lighten(WOOD_C, 0.08));                     // jettied upper storey (overhang)
+    g.fillStyle(darken(WOOD_C, 0.3), 0.5); g.fillRect(16, 40, 30, 1.5); // jetty underside shadow
+    g.fillStyle(BEAM, 1); for (const bx of [16, 30, 44]) g.fillRect(bx, 30, 1.5, 12); g.fillRect(14, 30, 34, 1.5);
+    gableRoof(g, 11, 51, 30, 32, 21, ROOF_C);
+    window2(g, 19, 44, 6, 6, true); window2(g, 37, 44, 6, 6, true);    // glowing windows
+    window2(g, 18, 33, 5, 5, true); window2(g, 41, 33, 5, 5, true);    // upper windows
+    g.fillStyle(DOOR, 1); g.fillRect(28, 47, 7, 11); g.fillStyle(GLOW, 0.5); g.fillRect(28.5, 47, 6, 2); g.fillStyle(lighten(DOOR, 0.2), 1); g.fillRect(28, 47, 1, 11); // half-open glowing door
+    glowHalo(g, 22, 47, 8, GLOW, 0.16); glowHalo(g, 40, 47, 8, GLOW, 0.16);
+    // hanging mug sign on a bracket
+    g.fillStyle(BEAM, 1); g.fillRect(46, 36, 6, 1.4); g.fillRect(50.5, 36, 1.2, 4);
+    g.fillStyle(0xd8b06a, 1); g.fillRect(48.5, 40, 4.5, 5); g.fillStyle(lighten(0xd8b06a, 0.2), 1); g.fillRect(53, 40.5, 1.5, 3.5); g.fillStyle(0xf2ece0, 1); g.fillRect(48.5, 40, 4.5, 1.2); // mug + foam
+    g.fillStyle(0x7a5a3a, 1); g.fillEllipse(49, 54, 5, 5); g.fillEllipse(53, 52, 4, 4); g.lineStyle(1, darken(0x7a5a3a, 0.3), 0.7); g.strokeCircle(49, 54, 4.4); // barrels
   },
+  // Defensive wall segment: battlemented stone curtain wall with banded courses,
+  // arrow loops and an AO foot. (Infrastructure — no banner.)
   wall: (g, A) => {
-    box(g, 14, 38, 36, 18, STONE_M);
-    merlons(g, 14, 34, 36, STONE);
-    g.lineStyle(1, STONE_D, 0.8); g.beginPath(); g.moveTo(14, 46); g.lineTo(50, 46); g.moveTo(26, 38); g.lineTo(26, 56); g.moveTo(38, 38); g.lineTo(38, 56); g.strokePath(); // block seams
+    aoFoot(g, 12, 56, 40);
+    box(g, 12, 36, 40, 20, STONE_MC); masonry(g, 12, 36, 40, 20, STONE_MC, 5);
+    merlons(g, 12, 32, 40, STONE_C);
+    g.fillStyle(0x161018, 1); g.fillRect(20, 42, 2, 6); g.fillRect(31, 42, 2, 6); g.fillRect(42, 42, 2, 6); // arrow loops
+    g.fillStyle(mix(lighten(STONE_MC, 0.2), WARM_LIGHT, 0.3), 0.3); g.fillRect(12, 36, 40, 2); // lit top band
   },
+  // Siege workshop: heavy timber-framed open shed, sloped shake roof, a built
+  // catapult (frame, throwing arm, wheels, stone payload), sawhorse, banner.
   siegeworkshop: (g, A) => {
-    box(g, 16, 36, 32, 22, WOOD);                        // open timber workshop
-    g.fillStyle(BEAM, 1); g.fillRect(16, 34, 32, 3);
-    g.fillStyle(darken(WOOD, 0.1), 1); g.fillTriangle(14, 34, 50, 34, 32, 24); // roof
-    // a catapult under the roof
-    g.fillStyle(0x6b4a28, 1); g.fillRect(24, 48, 16, 4); g.fillCircle(26, 54, 3); g.fillCircle(38, 54, 3);
-    g.lineStyle(3, 0x5c3a1e, 1); g.beginPath(); g.moveTo(26, 50); g.lineTo(38, 38); g.strokePath(); // arm
-    g.fillStyle(0x9aa0a6, 1); g.fillCircle(38, 37, 3); // payload
-    flag(g, 31, 16, 8, A);
+    aoFoot(g, 14, 58, 38);
+    g.fillStyle(BEAM, 1); for (const bx of [16, 46] as any[]) g.fillRect(bx, 34, 3, 24); // heavy posts
+    box(g, 18, 38, 28, 20, mix(WOOD_C, STONE_MC, 0.3)); grain(g, 18, 38, 28, 20, mix(WOOD_C, STONE_MC, 0.3)); // back wall
+    gableRoof(g, 12, 52, 34, 32, 23, darken(WOOD_C, 0.12));
+    g.fillStyle(BEAM, 1); g.fillRect(16, 32, 32, 2.5);               // ridge beam
+    // catapult
+    g.fillStyle(0x6b4a28, 1); g.fillRect(23, 49, 18, 4); g.fillStyle(darken(0x6b4a28, 0.3), 1); g.fillRect(23, 52, 18, 1.5); // base frame
+    g.fillStyle(0x3a2a1a, 1); g.fillCircle(26, 55, 3); g.fillStyle(0x55504a, 1); g.fillCircle(26, 55, 1); g.fillStyle(0x3a2a1a, 1); g.fillCircle(38, 55, 3); g.fillStyle(0x55504a, 1); g.fillCircle(38, 55, 1); // wheels
+    g.lineStyle(3.5, 0x5c3a1e, 1); g.beginPath(); g.moveTo(25, 51); g.lineTo(40, 38); g.strokePath(); // throwing arm
+    g.fillStyle(0x6b4a28, 1); g.fillTriangle(30, 49, 30, 44, 34, 49); // tension brace
+    g.fillStyle(0x9aa0a6, 1); g.fillCircle(40, 36, 3.2); g.fillStyle(darken(0x9aa0a6, 0.3), 1); g.fillCircle(41, 37, 1.6); // stone payload
+    banner(g, 19, 16, 11, A);
   },
-  // (Assets V2) Grand, prestigious memorial hall: pillars flank the door, a
-  // carved crossed-swords relief, blue banners, torches, steps and a gold star.
+  // Hall of Heroes: classical memorial temple — fluted pillars flank a gold
+  // pediment, crossed-swords relief over a niche with an eternal flame, broad
+  // steps, torches, twin honour banners, a gold star at the apex.
   hallofheroes: (g, A) => {
-    box(g, 12, 28, 40, 30, STONE);
-    g.fillStyle(ROOF, 1); g.fillRect(10, 22, 44, 7);                       // entablature
-    g.fillStyle(0xc9a84c, 1); g.fillTriangle(10, 22, 32, 12, 54, 22);      // gold pediment
-    for (const px of [20, 44]) { g.fillStyle(0xe8e2d2, 1); g.fillRect(px - 2, 30, 5, 26); g.fillStyle(0xcfc7b4, 1); g.fillRect(px + 1, 30, 1, 26); g.fillStyle(STONE, 1); g.fillRect(px - 3, 28, 7, 2); g.fillRect(px - 3, 56, 7, 2); } // pillars
-    g.lineStyle(1.5, 0x9aa0a6, 1); g.beginPath(); g.moveTo(28, 34); g.lineTo(36, 42); g.moveTo(36, 34); g.lineTo(28, 42); g.strokePath(); // crossed-swords relief
-    g.fillStyle(0x2a2436, 1); g.fillRect(30, 36, 4, 6);                    // memorial niche
-    g.fillStyle(DOOR, 1); g.fillRect(28, 46, 8, 12);                       // heavy doors
-    g.fillStyle(STONE_M, 1); g.fillRect(24, 56, 16, 2); g.fillRect(22, 58, 20, 2); // steps
-    g.fillStyle(GLOW, 1); g.fillCircle(16, 40, 2); g.fillCircle(48, 40, 2); // torches
-    flag(g, 12, 14, 8, 0x2a4a9b); flag(g, 50, 14, 8, 0x2a4a9b);            // blue banners
-    star(g, 32, 17, 5);
+    aoFoot(g, 12, 58, 40);
+    box(g, 12, 28, 40, 30, STONE_C); masonry(g, 14, 30, 36, 28, STONE_C, 5);
+    g.fillStyle(STONE_MC, 1); g.fillRect(10, 22, 44, 7); g.fillStyle(lighten(STONE_MC, 0.15), 1); g.fillRect(10, 22, 44, 1.5); // entablature
+    g.fillStyle(0xc9a84c, 1); g.fillTriangle(10, 22, 32, 11, 54, 22); g.fillStyle(lighten(0xc9a84c, 0.2), 1); g.fillTriangle(10, 22, 32, 11, 32, 22); g.fillStyle(darken(0xc9a84c, 0.2), 1); g.fillTriangle(54, 22, 32, 11, 32, 22); // gold pediment lit/shade
+    for (const px of [19, 45]) { // fluted pillars
+      g.fillStyle(0xe6dcc6, 1); g.fillRect(px - 2.5, 30, 6, 26);
+      g.lineStyle(0.8, darken(0xe6dcc6, 0.2), 0.6); for (const fx of [px - 1.5, px, px + 1.5]) { g.beginPath(); g.moveTo(fx, 31); g.lineTo(fx, 55); g.strokePath(); }
+      g.fillStyle(darken(0xe6dcc6, 0.22), 1); g.fillRect(px + 2.5, 30, 1, 26); // shaded edge
+      g.fillStyle(STONE_C, 1); g.fillRect(px - 3.5, 28, 8, 2.5); g.fillRect(px - 3.5, 55.5, 8, 2.5); // capital + base
+    }
+    g.fillStyle(0x18141f, 1); g.fillRect(28, 34, 8, 14); g.fillTriangle(28, 34, 36, 34, 32, 30); // niche
+    g.lineStyle(1.5, 0xd2d6dc, 1); g.beginPath(); g.moveTo(28, 33); g.lineTo(36, 41); g.moveTo(36, 33); g.lineTo(28, 41); g.strokePath(); // crossed-swords relief
+    g.fillStyle(0xff8a2a, 1); g.fillEllipse(32, 46, 2.4, 4); g.fillStyle(0xffd24a, 1); g.fillEllipse(32, 46, 1.3, 2.6); glowHalo(g, 32, 45, 6, 0xffa030, 0.22); // eternal flame
+    g.fillStyle(STONE_MC, 1); g.fillRect(24, 56, 16, 1.5); g.fillRect(21, 58, 22, 1.5); // steps
+    g.fillStyle(0xff8a2a, 1); g.fillCircle(15, 38, 2); g.fillCircle(49, 38, 2); g.fillStyle(0xffd24a, 1); g.fillCircle(15, 37.5, 1); g.fillCircle(49, 37.5, 1); // torches
+    banner(g, 13, 14, 9, A); banner(g, 51, 14, 9, A);
+    star(g, 32, 16, 4.5);
   },
-  // (Assets V2) The grandest building — cathedral-like with corner towers, three
-  // tall arched windows, a sun/crown relief, four banners and an ornate door.
+  // Grand Hall: cathedral-scale keep — twin battlemented corner towers w/ conical
+  // roofs, central nave w/ gold pediment, three tall lit arched windows, rose
+  // window/crown relief, ornate banded doors, four banners.
   grandhall: (g, A) => {
-    box(g, 8, 26, 8, 32, STONE_M); merlons(g, 8, 24, 8, STONE);           // corner towers
-    box(g, 48, 26, 8, 32, STONE_M); merlons(g, 48, 24, 8, STONE);
-    box(g, 14, 26, 36, 32, STONE);                                        // main hall
-    g.fillStyle(ROOF, 1); g.fillRect(12, 20, 40, 7);                      // entablature
-    g.fillStyle(0xc9a84c, 1); g.fillTriangle(12, 20, 32, 8, 52, 20);      // gold pediment
-    for (const wx of [19, 30, 41]) { g.fillStyle(0x2a2436, 1); g.fillRect(wx, 32, 5, 14); g.fillTriangle(wx, 32, wx + 5, 32, wx + 2.5, 27); g.fillStyle(GLOW, 0.5); g.fillRect(wx + 1, 40, 3, 5); } // three arched windows, lit
-    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 15, 3); for (let k = 0; k < 8; k++) { const a = k / 8 * 6.283; g.fillRect(32 + Math.cos(a) * 4 - 0.7, 15 + Math.sin(a) * 4 - 0.7, 1.4, 1.4); } // sun/crown relief
-    g.fillStyle(DOOR, 1); g.fillRect(28, 46, 8, 12);                      // ornate double door
-    g.lineStyle(1, 0xc9a84c, 1); g.strokeRect(28, 46, 8, 12); g.beginPath(); g.moveTo(32, 46); g.lineTo(32, 58); g.strokePath();
-    flag(g, 10, 12, 8, A); flag(g, 22, 8, 9, A); flag(g, 42, 8, 9, A); flag(g, 54, 12, 8, A); // four banners
+    aoFoot(g, 6, 58, 52);
+    box(g, 6, 24, 9, 34, STONE_MC); masonry(g, 6, 24, 9, 34, STONE_MC, 5); merlons(g, 6, 20, 9, STONE_C); // left tower
+    g.fillStyle(ROOF_C, 1); g.fillTriangle(5, 20, 16, 20, 10.5, 12); g.fillStyle(lighten(ROOF_C, 0.18), 1); g.fillTriangle(5, 20, 10.5, 12, 10.5, 20); // conical cap
+    box(g, 49, 24, 9, 34, STONE_MC); masonry(g, 49, 24, 9, 34, STONE_MC, 5); merlons(g, 49, 20, 9, STONE_C); // right tower
+    g.fillStyle(ROOF_C, 1); g.fillTriangle(48, 20, 59, 20, 53.5, 12); g.fillStyle(darken(ROOF_C, 0.2), 1); g.fillTriangle(59, 20, 53.5, 12, 53.5, 20);
+    box(g, 14, 24, 36, 34, STONE_C); masonry(g, 16, 26, 32, 30, STONE_C, 5); // nave
+    g.fillStyle(STONE_MC, 1); g.fillRect(12, 19, 40, 6); // entablature
+    g.fillStyle(0xc9a84c, 1); g.fillTriangle(12, 19, 32, 8, 52, 19); g.fillStyle(lighten(0xc9a84c, 0.2), 1); g.fillTriangle(12, 19, 32, 8, 32, 19); g.fillStyle(darken(0xc9a84c, 0.2), 1); g.fillTriangle(52, 19, 32, 8, 32, 19); // pediment
+    for (const wx of [18, 30, 42]) archWindow(g, wx, 32, 4.5, 12, true); // three tall lit windows
+    for (const wx of [18, 30, 42]) glowHalo(g, wx + 2.2, 38, 5, GLOW, 0.1);
+    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 14, 3); g.fillStyle(0x241c2c, 1); g.fillCircle(32, 14, 1.5); for (let k = 0; k < 8; k++) { const a = k / 8 * 6.28; g.fillStyle(0xc9a84c, 1); g.fillRect(32 + Math.cos(a) * 4 - 0.6, 14 + Math.sin(a) * 4 - 0.6, 1.2, 1.2); } // crown/rose relief
+    g.fillStyle(DOOR, 1); g.fillRect(27, 46, 10, 12); g.fillTriangle(27, 46, 37, 46, 32, 41); // ornate arched doors
+    g.fillStyle(0xc9a84c, 1); g.fillRect(31.4, 41, 1.2, 17); g.lineStyle(1, 0xc9a84c, 0.9); g.strokeRect(27, 46, 10, 12); g.fillStyle(0x6b6b64, 1); g.fillRect(27, 50, 10, 1); g.fillRect(27, 54, 10, 1); // bands
+    banner(g, 9, 13, 8, A); banner(g, 23, 9, 9, A); banner(g, 41, 9, 9, A); banner(g, 55, 13, 8, A);
   },
+  // Treasury: squat ironclad vault — heavy battlemented stone block, a riveted
+  // round vault door with spoked wheel, barred windows, a gold-coin crest.
   treasury: (g, A) => {
-    box(g, 16, 30, 32, 28, STONE);                       // heavy fortified block
-    merlons(g, 16, 26, 32, STONE_D);
-    g.fillStyle(0x3a3a40, 1); g.fillCircle(32, 46, 9);   // vault door
-    g.lineStyle(2, 0x9aa0a6, 1); g.strokeCircle(32, 46, 9);
-    g.fillStyle(0x9aa0a6, 1); for (let a = 0; a < 8; a++) g.fillCircle(32 + Math.cos(a / 8 * 6.28) * 6.5, 46 + Math.sin(a / 8 * 6.28) * 6.5, 1.1); // bolts
-    g.fillStyle(0x6f6f68, 1); g.fillRect(31, 38, 2, 16);
-    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 22, 3.2); g.fillStyle(STONE_D, 1); g.fillRect(31.3, 20.5, 1.4, 5); // gold coin sign
-    g.fillStyle(0x2a2a30, 1); g.fillRect(20, 36, 3, 6); g.fillRect(41, 36, 3, 6); // barred windows
-    g.lineStyle(1, 0x9aa0a6, 1); g.beginPath(); g.moveTo(21.5, 36); g.lineTo(21.5, 42); g.moveTo(42.5, 36); g.lineTo(42.5, 42); g.strokePath();
+    aoFoot(g, 16, 58, 32);
+    box(g, 16, 30, 32, 28, STONE_C); masonry(g, 16, 30, 32, 28, STONE_C, 5);
+    merlons(g, 16, 26, 32, STONE_DC);
+    g.fillStyle(0x2e2e34, 1); g.fillCircle(32, 46, 9.5); g.fillStyle(0x3c3c44, 1); g.fillCircle(32, 46, 8); // vault door
+    g.lineStyle(2, 0xb8bcc2, 1); g.strokeCircle(32, 46, 9.5);
+    g.fillStyle(0xb8bcc2, 1); for (let a = 0; a < 8; a++) g.fillCircle(32 + Math.cos(a / 8 * 6.28) * 6.8, 46 + Math.sin(a / 8 * 6.28) * 6.8, 1.1); // rivets
+    g.lineStyle(2, 0x8a8e94, 1); for (let a = 0; a < 6; a++) { g.beginPath(); g.moveTo(32, 46); g.lineTo(32 + Math.cos(a / 6 * 6.28) * 6, 46 + Math.sin(a / 6 * 6.28) * 6); g.strokePath(); } // spoked wheel
+    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 46, 1.8); // brass hub
+    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 21, 3.4); g.fillStyle(0xe8d28a, 1); g.fillCircle(31, 20, 1.4); g.fillStyle(STONE_DC, 1); g.fillRect(31.3, 23, 1.4, 4); // coin crest
+    g.fillStyle(0x161018, 1); g.fillRect(20, 35, 4, 7); g.fillRect(40, 35, 4, 7); // barred windows
+    g.lineStyle(1, 0x9aa0a6, 1); for (const wx of [20, 40]) { g.beginPath(); g.moveTo(wx + 1.3, 35); g.lineTo(wx + 1.3, 42); g.moveTo(wx + 2.7, 35); g.lineTo(wx + 2.7, 42); g.strokePath(); }
+    g.fillStyle(GLOW, 0.18); g.fillRect(20.5, 36, 3, 2); g.fillRect(40.5, 36, 3, 2);
   },
-  // (Assets V2) Mason's Lodge — open workshop: tool rack, worked stone block on a
-  // workbench, side scaffolding, and a hammer emblem.
+  // Mason's Lodge: open timber workshop — tool rack of chisels/hammers, a worked
+  // ashlar block on a workbench, a low stone wall under construction, scaffolding.
   masonslodge: (g, A) => {
-    box(g, 18, 38, 30, 20, WOOD);                                  // open workshop
-    g.fillStyle(BEAM, 1); g.fillRect(16, 36, 34, 3);
-    g.fillStyle(darken(WOOD, 0.12), 1); g.fillTriangle(14, 36, 50, 36, 32, 26); // roof
-    g.fillStyle(BEAM, 1); g.fillRect(20, 41, 16, 2);              // tool rack
-    g.fillStyle(0x9aa0a6, 1); for (const tx of [22, 26, 30]) g.fillRect(tx, 43, 1.5, 7); // hanging chisels
-    g.fillStyle(STONE_D, 1); g.fillRect(21.2, 49, 3.2, 2);        // a hammer head
-    g.fillStyle(BEAM, 1); g.fillRect(33, 51, 13, 3);             // workbench
-    box(g, 37, 45, 7, 7, STONE);                                  // stone block being worked
-    g.lineStyle(1.5, 0x6b4a28, 1); g.beginPath(); g.moveTo(48, 40); g.lineTo(54, 56); g.moveTo(54, 40); g.lineTo(48, 56); g.strokePath(); // scaffolding X
-    g.fillStyle(0x9aa0a6, 1); g.fillRect(30, 30, 5, 2); g.fillRect(31.5, 26, 2, 6); // hammer emblem
+    aoFoot(g, 16, 58, 34);
+    g.fillStyle(BEAM, 1); for (const bx of [18, 46] as any[]) g.fillRect(bx, 36, 2.5, 22); // posts
+    box(g, 20, 40, 24, 18, WOOD_C); grain(g, 20, 40, 24, 18, WOOD_C); // back wall
+    gableRoof(g, 14, 50, 36, 32, 26, darken(WOOD_C, 0.12));
+    g.fillStyle(BEAM, 1); g.fillRect(20, 40, 18, 2);                  // tool rack rail
+    g.fillStyle(0x9aa0a6, 1); for (const tx of [22, 26, 30, 34]) g.fillRect(tx, 42, 1.4, 6); g.fillStyle(BEAM, 1); for (const tx of [22, 26, 30, 34]) g.fillRect(tx - 0.3, 47, 2, 2); // chisels/hammer heads
+    g.fillStyle(BEAM, 1); g.fillRect(20, 52, 16, 3); g.fillStyle(darken(BEAM, 0.3), 1); g.fillRect(20, 54.5, 16, 1.5); // workbench
+    box(g, 24, 46, 8, 7, STONE_C); masonry(g, 24, 46, 8, 7, STONE_C, 3); // worked ashlar block
+    g.fillStyle(0xe8d8b8, 0.6); g.fillRect(22, 55, 12, 1); // stone dust
+    // low wall course under construction
+    g.fillStyle(STONE_MC, 1); for (let bx = 38; bx < 48; bx += 4) { g.fillRect(bx, 52, 3.4, 3); g.fillRect(bx + 2, 55, 3.4, 3); }
+    g.lineStyle(1.5, 0x6b4a28, 1); g.beginPath(); g.moveTo(46, 38); g.lineTo(52, 56); g.moveTo(52, 38); g.lineTo(46, 56); g.moveTo(46, 47); g.lineTo(52, 47); g.strokePath(); // scaffolding
+    g.fillStyle(0x9aa0a6, 1); g.fillRect(30, 32, 6, 2); g.fillRect(32, 28, 2, 6); // hammer emblem on gable
   },
-  // (Assets V2) Spy Guild — deliberately plain; black void windows, one candle,
-  // an off-centre shadowed door, and a raven perched on the roof.
+  // Spy Guild: deliberately plain dark stone house, shadowed roof, mostly black
+  // void windows with a single watchful lit one, an off-centre concealed door,
+  // a raven on the eave. Cold and secretive — no banner.
   intelligence: (g, A) => {
-    box(g, 18, 34, 28, 24, STONE_M);
-    g.fillStyle(darken(STONE_M, 0.22), 1); g.fillTriangle(16, 34, 48, 34, 32, 24); // plain roof
-    g.fillStyle(0x07070a, 1); g.fillRect(22, 40, 5, 6); g.fillRect(37, 40, 5, 6); // dark void windows
-    g.fillStyle(GLOW, 0.9); g.fillRect(38, 41, 2, 2);            // one candle
-    g.fillStyle(0x120f0b, 1); g.fillRect(30, 48, 6, 10);         // off-centre shadowed door
-    g.fillStyle(0x0e0e12, 1); g.fillEllipse(41, 24, 4, 2.2); g.fillTriangle(43, 24, 47, 22, 44, 25); g.fillRect(40, 21, 2, 3); // raven on roof
+    aoFoot(g, 18, 58, 28);
+    box(g, 18, 32, 28, 26, mix(STONE_MC, WARM_SHADOW, 0.25)); masonry(g, 18, 32, 28, 26, mix(STONE_MC, WARM_SHADOW, 0.25), 5);
+    gableRoof(g, 15, 49, 32, 32, 23, darken(ROOF_C, 0.3));
+    g.fillStyle(0x070709, 1); g.fillRect(22, 39, 5, 6); g.fillRect(31, 39, 5, 6); g.fillRect(40, 39, 4, 6); // dark void windows
+    g.fillStyle(GLOW, 0.85); g.fillRect(41, 40, 2, 2.5); glowHalo(g, 42, 41, 4, GLOW, 0.1); // one watchful candle
+    g.fillStyle(0x100c12, 1); g.fillRect(28, 48, 6, 10); g.fillStyle(GLOW, 0.25); g.fillRect(28.5, 48, 1, 9); // concealed door, sliver of light
+    // raven on the eave
+    g.fillStyle(0x0c0c10, 1); g.fillEllipse(42, 30, 4, 2.4); g.fillCircle(45, 29, 1.6); g.fillTriangle(46, 29, 49, 28, 46.5, 30); g.fillRect(41, 27, 2, 3); g.fillTriangle(38, 30, 42, 28, 42, 31); // body/head/beak/legs/wing
+    g.fillStyle(0xc0402a, 1); g.fillCircle(45.4, 28.6, 0.4); // red eye
   },
-  // (Assets V2) Guildhall — timber-framed, larger than a house; lit wide windows,
-  // two chimneys, and a hanging guild sign (shield + crossed tools).
+  // Guildhall: prosperous timber-framed civic hall — exposed framing, jettied
+  // upper floor, many warm lit windows, twin chimneys, a hanging guild shield.
   guildhall: (g, A) => {
-    box(g, 16, 36, 32, 22, WOOD);
-    g.fillStyle(BEAM, 1); for (const bx of [20, 28, 36, 44]) g.fillRect(bx, 36, 1.5, 22); // timber frame
-    g.fillStyle(ROOF, 1); g.fillTriangle(14, 36, 50, 36, 32, 24);
-    g.fillStyle(GLOW, 0.9); g.fillRect(20, 43, 7, 7); g.fillRect(37, 43, 7, 7); // busy lit windows
-    g.fillStyle(DOOR, 1); g.fillRect(29, 48, 6, 10);
-    box(g, 18, 22, 5, 12, STONE_D); box(g, 42, 22, 5, 12, STONE_D); // two chimneys
-    g.fillStyle(0x6b4a28, 1); g.fillRect(31.2, 32, 1.6, 4);       // sign hook
-    g.fillStyle(A, 1); g.beginPath(); g.moveTo(28, 36); g.lineTo(36, 36); g.lineTo(36, 41); g.lineTo(32, 44); g.lineTo(28, 41); g.closePath(); g.fill(); // shield
-    g.lineStyle(1, 0xcfcfcf, 1); g.beginPath(); g.moveTo(30, 37.5); g.lineTo(34, 41.5); g.moveTo(34, 37.5); g.lineTo(30, 41.5); g.strokePath(); // crossed tools
+    aoFoot(g, 14, 58, 36);
+    box(g, 16, 38, 32, 20, 0xcdb98e);                                  // ground plaster
+    g.fillStyle(BEAM, 1); for (const bx of [16, 26, 36, 46.5]) g.fillRect(bx, 38, 1.6, 20); g.fillRect(16, 38, 32, 1.6); g.fillRect(16, 47, 32, 1.4); // framing
+    box(g, 14, 30, 36, 9, 0xd6c39a); g.fillStyle(darken(0xcdb98e, 0.3), 0.5); g.fillRect(16, 38, 32, 1.5); // jettied upper floor
+    g.fillStyle(BEAM, 1); for (const bx of [14, 26, 38, 49]) g.fillRect(bx, 30, 1.6, 9); g.fillRect(14, 30, 36, 1.6);
+    gableRoof(g, 11, 53, 30, 32, 22, ROOF_C);
+    window2(g, 19, 41, 6, 6, true); window2(g, 38, 41, 6, 6, true);    // busy lit ground windows
+    window2(g, 18, 32, 5, 5, true); window2(g, 30, 32, 5, 5, true); window2(g, 41, 32, 5, 5, true); // upper windows
+    glowHalo(g, 22, 44, 7, GLOW, 0.12); glowHalo(g, 41, 44, 7, GLOW, 0.12);
+    g.fillStyle(DOOR, 1); g.fillRect(29, 49, 6, 9); g.fillStyle(lighten(DOOR, 0.2), 1); g.fillRect(29, 49, 1, 9);
+    box(g, 18, 22, 4.5, 10, STONE_DC); box(g, 41, 22, 4.5, 10, STONE_DC); g.fillStyle(darken(STONE_DC, 0.3), 1); g.fillRect(18, 22, 4.5, 1.5); g.fillRect(41, 22, 4.5, 1.5); // chimneys
+    // hanging guild shield
+    g.fillStyle(BEAM, 1); g.fillRect(31.2, 38, 1.6, 3);
+    g.fillStyle(A, 1); g.beginPath(); g.moveTo(28, 41); g.lineTo(36, 41); g.lineTo(36, 45); g.lineTo(32, 48); g.lineTo(28, 45); g.closePath(); g.fill();
+    g.fillStyle(lighten(A, 0.2), 1); g.fillTriangle(28, 41, 32, 41, 30, 45); // lit half
+    g.lineStyle(1, 0xe8d28a, 1); g.beginPath(); g.moveTo(30, 42.5); g.lineTo(34, 46); g.moveTo(34, 42.5); g.lineTo(30, 46); g.strokePath(); // crossed tools
   },
-  // (Assets V2) Manor — decorative noble stone house: pointed arched windows with
-  // purple/gold trim, a balcony railing, carved doorway, crown emblem, weather vane.
+  // Manor: refined noble residence — symmetrical stone facade, hipped slate
+  // roof w/ dormers, pointed arched windows with gold tracery, a balustrade,
+  // carved gold-framed doorway, crown finial, weather vane.
   manor: (g, A) => {
-    box(g, 16, 32, 32, 26, STONE);
-    g.fillStyle(ROOF, 1); g.fillTriangle(14, 32, 50, 32, 32, 20);
-    for (const wx of [22, 38]) { g.fillStyle(0x2a2436, 1); g.fillRect(wx, 41, 6, 9); g.fillTriangle(wx, 41, wx + 6, 41, wx + 3, 35); g.fillStyle(0x6a3aa0, 1); g.fillRect(wx - 1, 49, 8, 1.5); } // arched windows + purple sill
-    g.fillStyle(STONE_D, 1); g.fillRect(24, 39, 16, 1.5); for (let rx = 24; rx < 40; rx += 3) g.fillRect(rx, 37, 1, 3); // balcony railing
-    g.fillStyle(DOOR, 1); g.fillRect(29, 47, 7, 11); g.lineStyle(1, 0xc9a84c, 1); g.strokeRect(29, 47, 7, 11); // carved doorway
-    g.fillStyle(0xc9a84c, 1); g.fillRect(30, 25, 8, 2); g.fillTriangle(30, 25, 32, 21, 34, 25); g.fillTriangle(34, 25, 36, 21, 38, 25); // crown emblem
-    g.fillStyle(0x6b4a28, 1); g.fillRect(31.5, 12, 1, 8); g.fillStyle(0xc9a84c, 1); g.fillTriangle(32, 12, 38, 14, 32, 16); // weather vane
+    aoFoot(g, 14, 58, 36);
+    box(g, 16, 32, 32, 26, STONE_C); masonry(g, 18, 34, 28, 24, STONE_C, 5);
+    gableRoof(g, 13, 51, 32, 32, 19, ROOF_C);
+    g.fillStyle(ROOF_C, 1); g.fillTriangle(22, 27, 30, 27, 26, 22); g.fillTriangle(34, 27, 42, 27, 38, 22); // dormers
+    g.fillStyle(GLOW, 0.6); g.fillRect(24.5, 25, 3, 2); g.fillRect(36.5, 25, 3, 2);
+    for (const wx of [21, 37] as any[]) { archWindow(g, wx, 40, 6, 8, true); g.fillStyle(0xc9a84c, 1); g.fillRect(wx - 1, 48.5, 8, 1.4); } // arched windows + gold sill
+    g.fillStyle(STONE_DC, 1); g.fillRect(22, 38, 20, 1.4); for (let rx = 22; rx < 42; rx += 2.5) g.fillRect(rx, 36, 1, 3); // balustrade
+    g.fillStyle(DOOR, 1); g.fillRect(29, 47, 7, 11); g.fillTriangle(29, 47, 36, 47, 32.5, 43); g.lineStyle(1.2, 0xc9a84c, 1); g.strokeRect(29, 47, 7, 11); g.fillStyle(0xc9a84c, 1); g.fillRect(32, 43, 1, 15); // carved gold doorway
+    g.fillStyle(0xc9a84c, 1); g.fillRect(30, 25, 8, 2); g.fillTriangle(30, 25, 32, 20, 34, 25); g.fillTriangle(34, 25, 36, 20, 38, 25); g.fillStyle(0xe8d28a, 1); g.fillCircle(32, 21, 0.8); g.fillCircle(36, 21, 0.8); // crown finial
+    g.fillStyle(0x5a3a1e, 1); g.fillRect(31.5, 11, 1, 9); g.fillStyle(0xc9a84c, 1); g.fillTriangle(32, 11, 38, 13, 32, 15); g.fillCircle(32, 11, 1); // weather vane
   },
-  // (Assets V2) Levee — a wide low stone retaining wall: reinforced dark base,
-  // blue water-marks, iron brackets. Infrastructure, so no banner.
+  // Levee: wide low stone embankment — reinforced dark base, sloped batter face,
+  // blue water-marks, iron tie-brackets. Pure infrastructure (no banner).
   levee: (g, A) => {
-    box(g, 8, 44, 48, 12, STONE_M);                               // wide low wall
-    g.fillStyle(STONE_D, 1); g.fillRect(8, 52, 48, 4);            // reinforced base
-    g.lineStyle(1, 0x4a7bd5, 0.6); g.beginPath(); g.moveTo(8, 48); g.lineTo(56, 48); g.moveTo(8, 50.5); g.lineTo(56, 50.5); g.strokePath(); // water marks
-    g.fillStyle(0x6b7280, 1); for (const ix of [18, 32, 46]) g.fillRect(ix, 45, 2, 9); // iron brackets
+    aoFoot(g, 6, 56, 52);
+    g.fillStyle(STONE_MC, 1); g.fillPoints([{ x: 8, y: 44 }, { x: 56, y: 44 }, { x: 53, y: 56 }, { x: 11, y: 56 }], true); // battered face
+    masonry(g, 10, 44, 44, 11, STONE_MC, 4);
+    g.fillStyle(STONE_DC, 1); g.fillRect(8, 52, 48, 4); g.fillStyle(darken(STONE_DC, 0.25), 1); g.fillRect(8, 55, 48, 1); // reinforced base
+    g.lineStyle(1, 0x4a7bd5, 0.55); g.beginPath(); g.moveTo(9, 49); g.lineTo(55, 49); g.moveTo(9, 51.5); g.lineTo(55, 51.5); g.strokePath(); // water marks
+    g.fillStyle(0x5a8ad5, 0.18); g.fillRect(8, 51, 48, 5); // damp tideline
+    g.fillStyle(0x55585e, 1); for (const ix of [18, 32, 46]) { g.fillRect(ix, 45, 2, 10); g.fillStyle(0x6b7280, 1); g.fillRect(ix, 45, 0.8, 10); g.fillStyle(0x55585e, 1); } // iron tie-brackets
+    g.fillStyle(mix(lighten(STONE_MC, 0.2), WARM_LIGHT, 0.3), 0.3); g.fillRect(8, 44, 48, 1.5); // lit crest
   },
 };
 
-// Castle stages share a builder, growing with the tier.
+// Castle — three stages of a Northgard stronghold, grander each tier:
+//   1 (village)  : modest keep, two short flanking towers, one banner.
+//   2 (town)     : taller towers w/ conical roofs, wall wings, gatehouse arch,
+//                  guard window glow, two banners.
+//   3 (castle)   : massive keep + battlemented curtain, portcullis, gold-trimmed
+//                  great banner, lit windows, gilt details, four banners.
 function drawCastle(g: any, A: number, stage: 1 | 2 | 3) {
   const gold = 0xc9a84c;
-  // Towers (wider/taller as the castle grows).
-  const th = stage === 1 ? 30 : stage === 2 ? 34 : 38;
-  box(g, 10, 58 - th, 13, th, STONE_M); merlons(g, 10, 56 - th, 13, STONE);
-  box(g, 41, 58 - th, 13, th, STONE_M); merlons(g, 41, 56 - th, 13, STONE);
-  // Central gatehouse.
-  box(g, 22, 30, 20, 28, stage === 3 ? STONE : STONE_M);
-  merlons(g, 22, 26, 20, STONE_D);
-  // Gate / portcullis.
-  g.fillStyle(DOOR, 1); g.fillRect(28, 44, 8, 14); g.fillTriangle(28, 44, 36, 44, 32, 38);
-  if (stage >= 3) { g.lineStyle(1, gold, 0.9); for (const lx of [29.5, 32, 34.5]) { g.beginPath(); g.moveTo(lx, 40); g.lineTo(lx, 58); g.strokePath(); } } // portcullis bars
-  // Roof caps on towers.
-  g.fillStyle(ROOF, 1); g.fillTriangle(10, 58 - th, 23, 58 - th, 16.5, 50 - th); g.fillTriangle(41, 58 - th, 54, 58 - th, 47.5, 50 - th);
-  // Windows.
-  g.fillStyle(0x2a2a30, 1); g.fillRect(15, 44, 3, 5); g.fillRect(46, 44, 3, 5); g.fillRect(30, 34, 4, 5);
-  // Wall wings appear at town+, full stone at castle.
-  if (stage >= 2) { box(g, 4, 48, 8, 10, STONE_D); box(g, 52, 48, 8, 10, STONE_D); }
-  // Flags — one (village), two (town), gold-trimmed banner (castle).
-  flag(g, 16, 58 - th - 9, 8, A);
-  if (stage >= 2) flag(g, 47, 58 - th - 9, 8, A);
-  if (stage >= 3) { g.fillStyle(gold, 1); g.fillRect(30, 18, 4, 1); g.fillStyle(A, 1); g.fillRect(30, 19, 4, 7); g.fillStyle(gold, 1); g.fillRect(30, 26, 4, 1); }
+  aoFoot(g, 6, 58, 52);
+  const th = stage === 1 ? 30 : stage === 2 ? 35 : 40;        // flanking tower height
+  const ty = 58 - th;
+  // ---- Curtain wall wings (town+) behind the towers.
+  if (stage >= 2) {
+    box(g, 2, 46, 12, 12, STONE_DC); masonry(g, 2, 46, 12, 12, STONE_DC, 4); merlons(g, 2, 42, 12, STONE_MC);
+    box(g, 50, 46, 12, 12, STONE_DC); masonry(g, 50, 46, 12, 12, STONE_DC, 4); merlons(g, 50, 42, 12, STONE_MC);
+  }
+  // ---- Flanking towers.
+  for (const tx of [10, 41]) {
+    box(g, tx, ty, 13, th, STONE_MC); masonry(g, tx, ty, 13, th, STONE_MC, 5); merlons(g, tx, ty - 2, 13, STONE_C);
+    if (stage >= 2) { // conical roofs from town up
+      g.fillStyle(ROOF_C, 1); g.fillTriangle(tx - 1, ty - 1, tx + 14, ty - 1, tx + 6.5, ty - 11);
+      g.fillStyle(lighten(ROOF_C, 0.18), 1); g.fillTriangle(tx - 1, ty - 1, tx + 6.5, ty - 11, tx + 6.5, ty - 1);
+      g.fillStyle(darken(ROOF_C, 0.22), 1); g.fillTriangle(tx + 14, ty - 1, tx + 6.5, ty - 11, tx + 6.5, ty - 1);
+      g.fillStyle(gold, 1); g.fillCircle(tx + 6.5, ty - 11, 1.2); // finial
+    } else {
+      g.fillStyle(ROOF_C, 1); g.fillTriangle(tx - 1, ty, tx + 14, ty, tx + 6.5, ty - 7);
+    }
+    g.fillStyle(0x161018, 1); g.fillRect(tx + 5, ty + th * 0.45, 3, 6); // arrow slit
+  }
+  // Lit guard windows in towers (town+).
+  if (stage >= 2) { window2(g, 13, ty + 6, 4, 5, true); window2(g, 44, ty + 6, 4, 5, true); }
+  // ---- Central keep / gatehouse.
+  const kw = stage === 3 ? 24 : 20, kx = 32 - kw / 2;
+  box(g, kx, 28, kw, 30, stage === 3 ? STONE_C : STONE_MC); masonry(g, kx, 28, kw, 30, stage === 3 ? STONE_C : STONE_MC, 5);
+  merlons(g, kx, 24, kw, STONE_DC);
+  if (stage === 3) { // raised inner tower on the great keep
+    box(g, 27, 18, 10, 12, STONE_C); merlons(g, 27, 14, 10, STONE_DC);
+    g.fillStyle(ROOF_C, 1); g.fillTriangle(26, 14, 38, 14, 32, 6); g.fillStyle(lighten(ROOF_C, 0.18), 1); g.fillTriangle(26, 14, 32, 6, 32, 14);
+    window2(g, 30, 20, 4, 5, true);
+  }
+  // ---- Gatehouse arch + door / portcullis.
+  g.fillStyle(DOOR, 1); g.fillRect(28, 42, 8, 16); g.fillTriangle(28, 42, 36, 42, 32, 36);
+  g.fillStyle(STONE_C, 1); g.fillTriangle(28, 42, 36, 42, 32, 37); g.fillStyle(lighten(STONE_C, 0.18), 1); g.fillTriangle(28, 42, 32, 37, 32, 42); // arch voussoirs
+  g.fillStyle(DOOR, 1); g.fillRect(29, 43, 6, 15);
+  if (stage >= 3) { g.lineStyle(1, mix(gold, 0x8a8e94, 0.4), 0.95); for (const lx of [29.5, 32, 34.5]) { g.beginPath(); g.moveTo(lx, 40); g.lineTo(lx, 58); g.strokePath(); } g.beginPath(); g.moveTo(29, 46); g.lineTo(35, 46); g.moveTo(29, 51); g.lineTo(35, 51); g.strokePath(); } // portcullis grid
+  // ---- Keep windows.
+  if (stage >= 2) { window2(g, 25, 34, 4, 5, true); window2(g, 35, 34, 4, 5, true); }
+  else { g.fillStyle(0x161018, 1); g.fillRect(30, 34, 4, 6); }
+  // ---- Banners — one (village), two (town), four + gold great-banner (castle).
+  banner(g, 16, ty - 11, 8, A);
+  if (stage >= 2) banner(g, 47, ty - 11, 8, A);
+  if (stage >= 3) {
+    banner(g, 5, 42, 8, A); banner(g, 59, 42, 8, A);
+    // gold-trimmed great banner on the central spire
+    g.fillStyle(gold, 1); g.fillRect(29, 4, 6, 1.5);
+    g.fillStyle(A, 1); g.fillRect(29, 5.5, 6, 9); g.fillStyle(lighten(A, 0.2), 1); g.fillRect(29, 5.5, 2, 9);
+    g.fillStyle(gold, 1); g.fillRect(29, 14.5, 6, 1.5); star(g, 32, 10, 2.6, 0xe8d28a);
+  }
 }
 
 // ---- PHASE 2: player buildings ---------------------------------------------
@@ -659,19 +948,49 @@ export function generateBuildings(scene: any, accent = 0x1a3a8b) {
 }
 
 // ---- PHASE 3: AI faction buildings -----------------------------------------
-// Same shapes, faction-accented flags/banners (Red / Purple / Yellow). Reuses
-// the player builders so there are no full redraws.
+// Same silhouettes, but each faction gets a distinct stone/roof SKIN + accent so
+// they read instantly apart from the player and each other:
+//   RED    — darker, battle-worn cold stone; blood-red banners.
+//   PURPLE — pale ornate stone + violet roofs; a faint magical (violet) accent.
+//   YELLOW — cruder, mismatched sandy/brown stone; more, brighter flags.
+// A faint post-pass adds the per-faction flavour (magic glow / extra flags).
+const SKIN_RED: Skin = { stone: 0x6e5f54, stoneM: 0x554a40, stoneD: 0x3c352e, roof: 0x4a342a, wood: 0x7a5238 };
+const SKIN_PURPLE: Skin = { stone: 0x9a8fa0, stoneM: 0x7d7088, stoneD: 0x5c5168, roof: 0x4a3a64, wood: 0x8a6a64 };
+const SKIN_YELLOW: Skin = { stone: 0xa89a6a, stoneM: 0x8a7a48, stoneD: 0x665634, roof: 0x7a5a2a, wood: 0x9a7438 };
+
 const AI_FACTIONS = [
-  { accent: 0x8b1a1a, keys: { castle: 'enemy_castle', barracks: 'ai_barracks', tower: 'ai_tower', house: 'ai_house' } },
-  { accent: 0x4a1a8b, keys: { castle: 'purple_castle', barracks: 'purple_barracks', tower: 'purple_tower', house: 'purple_house' } },
-  { accent: 0x8b7a1a, keys: { castle: 'yellow_castle', barracks: 'yellow_barracks', tower: 'yellow_tower', house: 'yellow_house' } },
+  { accent: 0x9b1f1f, skin: SKIN_RED, flavour: 'red' as const, keys: { castle: 'enemy_castle', barracks: 'ai_barracks', tower: 'ai_tower', house: 'ai_house' } },
+  { accent: 0x6a3ac0, skin: SKIN_PURPLE, flavour: 'purple' as const, keys: { castle: 'purple_castle', barracks: 'purple_barracks', tower: 'purple_tower', house: 'purple_house' } },
+  { accent: 0xd4b020, skin: SKIN_YELLOW, flavour: 'yellow' as const, keys: { castle: 'yellow_castle', barracks: 'yellow_barracks', tower: 'yellow_tower', house: 'yellow_house' } },
 ];
+
+// Wrap a building draw fn with a faction flavour overlay drawn on top.
+function flavoured(draw: (g: any, A: number) => void, flavour: 'red' | 'purple' | 'yellow'): (g: any, A: number) => void {
+  return (g, A) => {
+    draw(g, A);
+    if (flavour === 'red') {
+      // soot / battle damage: dark smears + a scorch and a few cracks
+      g.fillStyle(0x1a140e, 0.22); g.fillEllipse(24, 40, 10, 7); g.fillEllipse(42, 46, 7, 5);
+      g.lineStyle(1, 0x1a140e, 0.5); g.beginPath(); g.moveTo(20, 36); g.lineTo(24, 44); g.lineTo(22, 50); g.strokePath();
+    } else if (flavour === 'purple') {
+      // faint arcane glow: violet rune wisps + sparkles
+      g.fillStyle(0xb070ff, 0.12); g.fillCircle(32, 40, 14);
+      g.fillStyle(0xc99aff, 0.85); for (const [x, y] of [[20, 30], [44, 28], [32, 22], [26, 44], [40, 46]] as any[]) g.fillCircle(x, y, 0.9);
+      g.lineStyle(1, 0xb070ff, 0.45); g.strokeCircle(32, 40, 6);
+    } else {
+      // crude/mismatched + an extra ragged flag
+      g.fillStyle(0x3a2c18, 0.18); g.fillRect(30, 34, 14, 22); // mud-patched wall
+      flag(g, 46, 22, 7, A); flag(g, 14, 26, 6, darken(A, 0.2));
+    }
+  };
+}
+
 export function generateAIBuildings(scene: any) {
   for (const f of AI_FACTIONS) {
-    makeBuilding(scene, f.keys.castle, (g, A) => drawCastle(g, A, 3), f.accent); // AI seats render as full castles
-    makeBuilding(scene, f.keys.barracks, BUILD.barracks, f.accent);
-    makeBuilding(scene, f.keys.tower, BUILD.tower, f.accent);
-    makeBuilding(scene, f.keys.house, BUILD.house, f.accent);
+    makeBuilding(scene, f.keys.castle, flavoured((g, A) => drawCastle(g, A, 3), f.flavour), f.accent, f.skin); // AI seats render as full castles
+    makeBuilding(scene, f.keys.barracks, flavoured(BUILD.barracks, f.flavour), f.accent, f.skin);
+    makeBuilding(scene, f.keys.tower, flavoured(BUILD.tower, f.flavour), f.accent, f.skin);
+    makeBuilding(scene, f.keys.house, flavoured(BUILD.house, f.flavour), f.accent, f.skin);
   }
 }
 
