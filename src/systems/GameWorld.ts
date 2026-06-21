@@ -32,6 +32,7 @@ import { Heroes } from './Heroes.js';
 import { Diplomacy } from './Diplomacy.js';
 import { FactionLeaders } from './FactionLeaders.js';
 import type { LeaderMemory } from './WorldDiplomacy.js';
+import { Reputation } from './Reputation.js';
 
 /** Supply state, surfaced as a coloured dot in the HUD/minimap. */
 export type SupplyState = 'green' | 'yellow' | 'red';
@@ -384,6 +385,32 @@ class GameWorldState {
   /** Monotonic counter for unique ferry-dock ids. */
   ferryCounter = 0;
 
+  // --- Phase 10 (Win consequences — reputation re-homed to the world) -------
+  // Reputation (conqueror / merchant / protector / destroyer) was neutered inside
+  // the now-per-settlement IsometricScene. Here it is a REAL Reputation instance
+  // whose "scene" is a tiny world-level adapter (repHost) so the existing add /
+  // highest / title / serialize logic keeps working at the CONTINENT level — the
+  // same re-homing pattern Phases 6/7 used for heroes/diplomacy. The four scores
+  // shape the ENDING variant the player earns (see WinConsequences). The player's
+  // chosen start TRAIT stays accessible at world level via `king.trait`.
+  // Serialization-friendly: `reputation.serialize()` is plain {conqueror,…}.
+  reputation: Reputation = new Reputation(this.repHost());
+
+  /** (Phase 10) True once a win has been resolved + the end screen shown, so the
+   *  per-day check never re-triggers (mirrors WinConditions.triggered). The won
+   *  PATH ('Conquest'|'Diplomacy'|'Legacy'|'Empire') is recorded for the ending.
+   *  Plain JSON for Phase 12. */
+  winTriggered = false;
+  wonPath: string | null = null;
+
+  /** (Phase 10) Consecutive game-days the home settlement has held happiness ≥ 80
+   *  — the sustained-happiness gate for the LEGACY win. JSON-friendly. */
+  legacyHappyDays = 0;
+
+  /** (Phase 10) One-shot guards for the ongoing world-reaction effects (so e.g. a
+   *  given neutral settlement only joins once for high Protector). Plain JSON. */
+  reactionFlags: Record<string, any> = {};
+
   gold = 500;
 
   /** Continuous day counter (fractional during a day; floor() for display). */
@@ -514,6 +541,41 @@ class GameWorldState {
     if (this.diplomacy) this.diplomacy.scene = host;
     if (this.leaders) this.leaders.scene = host;
   }
+
+  // --------------------------------------------------------------------------
+  // Phase 10 — Reputation host adapter
+  // --------------------------------------------------------------------------
+  /** The `Reputation` class was written against the per-settlement IsometricScene
+   *  and touches `logEvent` (milestone toast) plus, in its own `onNewDay`, the
+   *  scene's diplomacy/kingdoms/resources/goblin-truce. At the WORLD level we drive
+   *  reputation EFFECTS ourselves (see WinConsequences ongoing reactions), so we
+   *  only need the milestone log here; the rest are harmless. Routing logEvent into
+   *  the shared notification queue surfaces "Reputation milestone: protector 50+"
+   *  banners on the continent. The same re-homing pattern as heroHost/diploHost. */
+  private repHost(): any {
+    const gw = this;
+    return {
+      logEvent: (text: string, _color?: string) => { gw.notify(text, 0xd6c04a); },
+      // Absent/empty so the class's own onNewDay short-circuits safely if ever
+      // called directly (WinConsequences owns the world-level reactions instead).
+      diplomacy: null,
+      kingdoms: [],
+      resources: { add: (_k: string, _n: number) => {} },
+    };
+  }
+
+  /** Re-bind the reputation tracker to a fresh host (new campaign / restore). */
+  rebindReputation(): void { this.reputation.scene = this.repHost(); }
+
+  /** Add to a reputation track from a WORLD event (the single entry point so call
+   *  sites stay readable + future-proof). type ∈ conqueror|merchant|protector|
+   *  destroyer. Clamped 0..100 inside Reputation.add. */
+  addReputation(type: string, n: number): void { this.reputation.add(type, n); }
+
+  /** The player's chosen start TRAIT id (warlord/merchant/builder/diplomat/
+   *  explorer/scholar) or null — kept accessible at world level for the ending
+   *  variants (e.g. Legacy + Scholar / Builder). */
+  trait(): string | null { return this.king.trait || null; }
 
   // --------------------------------------------------------------------------
   // Derived helpers
@@ -794,8 +856,10 @@ class GameWorldState {
       home.happiness = Math.min(100, (home.happiness || 70) + 30);
       home.tempHappy = { value: 30, untilDay: this.displayDay() + 5 };
     }
-    // 4) +10 Protector reputation (stored on lateGameFlags so it serializes and
-    //    later phases can read it without a Reputation instance at world level).
+    // 4) +10 Protector reputation. (Phase 10 re-homed Reputation to the world, so
+    //    this now feeds the real tracker that shapes the ending; the legacy
+    //    lateGameFlags.protectorRep mirror is kept for back-compat readers.)
+    this.addReputation('protector', 10);
     this.lateGameFlags.protectorRep = (this.lateGameFlags.protectorRep || 0) + 10;
     this.notify('The Tournament ends in glory! A champion joins your host; all realms honour you.', 0xd6c04a);
     this.recordChronicle('The Grand Tournament ends in triumph. A renowned champion pledges their blade to the kingdom.');
@@ -1019,6 +1083,38 @@ class GameWorldState {
     return { ok: true, reactions };
   }
 
+  // ==========================================================================
+  // Phase 10 — RESTORE THE EMPIRE (the secret FOURTH win condition)
+  // ==========================================================================
+  /** Cost of the empire-restoration ritual (a deliberately large gold sink so the
+   *  4th win is a momentous, earned act — paid out of the campaign purse). */
+  static readonly EMPIRE_RESTORE_COST = 5000;
+
+  /** Can the empire-restoration ritual be performed? The hidden `fourthWinCondition`
+   *  flag must be set (revealed via Tomas / the ancient ruins quest in Phase 6),
+   *  not already won, and the player must afford the ritual's huge cost. */
+  canRestoreEmpire(): { ok: boolean; reason?: string } {
+    if (!this.heroFlags.fourthWinCondition) return { ok: false, reason: 'The path to the Empire has not been revealed.' };
+    if (this.wonPath === 'Empire') return { ok: false, reason: 'The Empire is already restored.' };
+    if (this.gold < GameWorldState.EMPIRE_RESTORE_COST) return { ok: false, reason: `The ritual demands ${GameWorldState.EMPIRE_RESTORE_COST} gold.` };
+    return { ok: true };
+  }
+
+  /** Perform the restore-the-empire ritual: spend the large sum, mark the unique
+   *  EMPIRE win path, and unlock the imperial ending. The actual end screen is shown
+   *  by ContinentScene's win check (which sees wonPath === 'Empire'). Returns
+   *  {ok, reason}. Idempotent against a double-call (canRestoreEmpire guards). */
+  restoreEmpire(): { ok: boolean; reason?: string } {
+    const c = this.canRestoreEmpire();
+    if (!c.ok) return c;
+    this.gold -= GameWorldState.EMPIRE_RESTORE_COST;
+    this.wonPath = 'Empire';
+    this.imperialEndingUnlocked = true; // the unique imperial ending is now granted
+    this.notify('The vault is open. The Old Empire stirs back to life beneath your hand.', 0xffe08a);
+    this.recordChronicle(`${this.king.ruler} completes the ancient ritual. The vault opens; the Empire of old is reborn.`);
+    return { ok: true };
+  }
+
   /** Integer day for display. */
   displayDay(): number { return Math.max(1, Math.floor(this.day)); }
 
@@ -1141,6 +1237,12 @@ class GameWorldState {
     this.bridgeState = {};
     this.ferryDocks = [];
     this.ferryCounter = 0;
+    // --- Phase 10 reset (reputation re-homed + win consequences; all JSON) ---
+    this.reputation = new Reputation(this.repHost());
+    this.winTriggered = false;
+    this.wonPath = null;
+    this.legacyHappyDays = 0;
+    this.reactionFlags = {};
     this.spawnAIParties();
     this.spawnMercenaryCamps();
     this.started = true;
@@ -1304,6 +1406,15 @@ class GameWorldState {
       bridgeState: this.bridgeState,
       ferryDocks: this.ferryDocks,
       ferryCounter: this.ferryCounter,
+      // (Phase 10) Win-consequence layer — reputation scores (Reputation.serialize)
+      // + the resolved win path / trigger guard + the legacy happiness streak +
+      // ongoing-reaction one-shot guards. All plain JSON; Phase 12 rebuilds the
+      // Reputation instance on a fresh host then restore()s the scores.
+      reputation: this.reputation.serialize(),
+      winTriggered: this.winTriggered,
+      wonPath: this.wonPath,
+      legacyHappyDays: this.legacyHappyDays,
+      reactionFlags: this.reactionFlags,
       started: this.started,
     };
   }

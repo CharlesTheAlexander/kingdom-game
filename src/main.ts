@@ -85,4 +85,11 @@ if (import.meta.env.DEV) {
   import('./systems/LateGame.js').then((lg) => {
     (window as any).__LateGame = lg.LateGame;
   });
+  // (Phase 10) Expose the WinConsequences system so the headless audit can drive
+  // the world-level win checks, ending-variant resolution, the reputation profile,
+  // and the ongoing reputation reactions. The win actions (restoreEmpire,
+  // addReputation) live on GameWorld (__gw).
+  import('./systems/WinConsequences.js').then((wc) => {
+    (window as any).__WinConsequences = wc.WinConsequences;
+  });
 }

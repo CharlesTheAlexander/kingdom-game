@@ -295,6 +295,33 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       VERIFY: tsc clean, build clean, headless 36/36 asserts pass, 0 console errors/warnings, FPS ~43. Shots: p9_fog_none/
       _lifted/_full/_basic/_mira, p9_river_battle, p9_continent_river. Deferred (per spec): full enemy-blocking river-control
       AI (flag only), ferry toll gold tick (stored hook), P10 endings / P11 economy / P12 save rewrite.
-- [ ] P10 — Win consequence system (reputation endings)
+- [x] P10 — Win consequence system (reputation endings)
+      A — REPUTATION RE-HOMED: `GameWorld.reputation` is a real Reputation instance driven by a tiny world host
+      adapter (repHost — milestone log → notify; effects owned by WinConsequences). `addReputation()` is the single
+      world entry point; the start TRAIT stays accessible via `GameWorld.trait()`/king.trait. The Grand Tournament's
+      old lateGameFlags.protectorRep now also feeds the real tracker; a field-battle win adds conqueror rep, and
+      wiping a faction's last party marks its castle fallen (reactionFlags.fallenCastles) + a bigger conqueror bump.
+      Serializable() carries reputation/winTriggered/wonPath/legacyHappyDays/reactionFlags; reset on new campaign;
+      rebindReputation() on continent (re)entry. Legacy WinConditions.ts retained for the per-settlement IsometricScene.
+      B — WORLD-LEVEL WIN CHECKS (WinConsequences.ts, stateless static like LateGame/WorldDiplomacy, run from
+      ContinentScene.onNewDay): CONQUEST = player-controlled ÷ ownable holds (player_castle+ai_castle+neutral, fallen
+      AI castles counted) ≥ 70%; DIPLOMACY = every surviving AI faction allied / ≥80 relations; LEGACY = home stage ≥9
+      + population ≥40 + research ≥5 + happiness ≥80 sustained 5 days; EMPIRE (4th) = heroFlags.fourthWinCondition +
+      `GameWorld.restoreEmpire()` (spends 5000 gold → wonPath='Empire'). Win shows the end screen ONCE.
+      C — ENDING VARIANTS (endingData, won path × dominant rep / trait): Conquest+Destroyer = dark "Conquered Through
+      Fear and Fire" + rebellion hook; Conquest+Conqueror = "Proven in Honest Battle"; Conquest+Protector = unique best
+      "A Conqueror Who Remembered You Were Also Human"; Diplomacy+Merchant = "You Bought the Peace"; Diplomacy+Protector
+      = "Peace Through Trust"; Legacy+Scholar = "A New Age of Learning"; Legacy+Builder = "What You Built Will Be
+      Studied"; Empire = single unique "The Old Empire Reborn" regardless of reputation.
+      D — WIN SCREEN (ContinentScene.showWinScreen): VICTORY banner + variant title + prose, "You were known as
+      [Title]. Here is why:" + full reputation profile bars (highest flagged) + 3–4 SPECIFIC deeds pulled from
+      GameWorld.chronicle (fallback: notifications), Continue/Main Menu. Dark scorched theme for the destroyer variant.
+      E — ONGOING WORLD REACTION (tickReputationReaction, ~6-day cooldown, by highest track): Protector → a neutral
+      settlement JOINS peacefully (faction→player, counts toward conquest); Destroyer → neutral surrender plea + rare
+      goblin acknowledgement; Conqueror → weakest faction sends pre-emptive tribute (+120g, +rel); Merchant → caravan
+      toll (+60g) + mercenary discount flag.
+      VERIFY: tsc clean, build clean, headless 0 console errors/0 warnings, FPS 50–53. Shots: p10_win_destroyer,
+      p10_win_protector, p10_win_empire (+protector_detail). All 4 win paths + 7 ending variants asserted; protector-join
+      & conqueror-tribute reactions fired. Deferred (per spec): P11 economy/prestige/monuments, P12 save rewrite.
 - [ ] P11 — Economy mid-game reinvestment (equipment, prestige, monuments)
 - [ ] P12 — Full integration + save system update

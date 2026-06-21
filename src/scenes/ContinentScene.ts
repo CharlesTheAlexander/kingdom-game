@@ -15,6 +15,7 @@ import { HeroWorld } from '../systems/HeroWorld.js';
 import { WorldDiplomacy } from '../systems/WorldDiplomacy.js';
 import type { LeaderLine } from '../systems/WorldDiplomacy.js';
 import { LateGame } from '../systems/LateGame.js';
+import { WinConsequences } from '../systems/WinConsequences.js';
 import type { EmissaryParty } from '../systems/GameWorld.js';
 import { generateHeroPortraits, generatePortraits } from '../systems/AssetGenerator.js';
 
@@ -158,6 +159,14 @@ export class ContinentScene extends Phaser.Scene {
     GameWorld._leaderSpeechHook = (faction: string, line: string) =>
       this.showLeaderSpeech({ faction, name: WorldDiplomacy.leaderName(faction), portrait: 'portrait_' + faction, text: line });
     GameWorld._diploPanelHook = () => { if (this._diploPanel) this.openDiplomacyPanel(); };
+
+    // (Phase 10) Re-bind the re-homed Reputation tracker to a fresh world host so
+    // its milestone log routes through the continent and never points at a stale
+    // per-settlement scene. The four scores shape the ending (WinConsequences).
+    GameWorld.rebindReputation();
+    // If a win was already resolved (e.g. an Empire ritual mid-session), show the
+    // end screen on (re)entry so the player can't slip past it.
+    if (GameWorld.winTriggered && GameWorld.wonPath) this.showWinScreen(GameWorld.wonPath);
 
     // --- Fog of war overlay (screen space image) --------------------------
     this.initFog();
@@ -546,6 +555,14 @@ export class ContinentScene extends Phaser.Scene {
       this.popStage9LeaderSpeech();
     }
     if (this._realmPanel) this.openRealmPanel(); // refresh an open Realm/Chronicle panel
+
+    // --- (Phase 10) WIN CONSEQUENCES daily tick --------------------------
+    // Accrue the legacy happiness streak, run the ongoing reputation reaction
+    // (a tangible living-world effect for the dominant track), and check the four
+    // world-level win conditions. When a win fires the first time, show the
+    // reputation-shaped end screen (once).
+    const wonPath = WinConsequences.onNewDay();
+    if (wonPath) this.showWinScreen(wonPath);
   }
 
   // =========================================================================
@@ -2055,6 +2072,20 @@ export class ContinentScene extends Phaser.Scene {
       // (Phase 7) Record the win into leader memory → escalating dialogue + memory
       // events (Valdris/Krag warrior/artifact gifts) surfaced via a leader popup.
       this.recordFactionBattle(ai.factionKey, true);
+      // (Phase 10) A field victory builds CONQUEROR reputation (honest battle). If
+      // that faction now has no parties left on the map, treat their castle as
+      // fallen → it counts toward the Conquest win + a bigger conqueror bump.
+      GameWorld.addReputation('conqueror', 8);
+      const remaining = GameWorld.aiParties.some(p => p.factionKey === ai.factionKey);
+      if (!remaining) {
+        const castle = this.world.settlements.find((s: any) => s.kind === 'ai_castle' && s.faction === ai.factionKey);
+        if (castle) {
+          GameWorld.reactionFlags.fallenCastles = GameWorld.reactionFlags.fallenCastles || {};
+          GameWorld.reactionFlags.fallenCastles[GameWorld.settlementId(castle)] = true;
+          GameWorld.addReputation('conqueror', 12);
+          GameWorld.recordChronicle(`The last host of ${castle.name} is shattered; the hold falls to ${GameWorld.king.kingdom}.`);
+        }
+      }
     } else {
       // Push the player back home-ward a little on defeat.
       this.flashBanner('Your army was defeated.', 0x8c2b2b);
@@ -2587,6 +2618,84 @@ export class ContinentScene extends Phaser.Scene {
     });
   }
 
+  // =========================================================================
+  // (Phase 10) WIN SCREEN — a reputation-shaped victory ending. Rendered from the
+  // data WinConsequences.endingData() builds: the variant title + prose (chosen by
+  // won path × dominant reputation / start trait), the "You were known as [Title]"
+  // line, the full reputation profile (bars), and 3–4 SPECIFIC events from THIS
+  // playthrough pulled from the Chronicle / notifications. Shown ONCE.
+  // =========================================================================
+  showWinScreen(_path: string) {
+    if (this._winScreenEls) return; // already showing
+    if (this._modal) { try { this._modal(); } catch (e) { /* ignore */ } }
+    const data = WinConsequences.endingData();
+    const dark = data.path === 'Conquest' && data.topRep === 'destroyer';
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 60);
+    const els: any[] = [];
+    // Dim + parchment panel (gold for a triumphant ending, scorched for the dark one).
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, dark ? 0x140606 : 0x06140a, 0.86).setOrigin(0, 0).setInteractive()));
+    const W = 700, H = 540, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    const panelBg = dark ? 0x1a0e08 : 0x1a1410;
+    const border = dark ? 0x8a2a2a : 0xc9a14a;
+    els.push(fix(this.add.rectangle(x, y, W, H, panelBg, 0.99).setOrigin(0, 0).setStrokeStyle(3, border, 0.95)));
+    els.push(fix(this.add.rectangle(x + 8, y + 8, W - 16, H - 16, panelBg, 0).setOrigin(0, 0).setStrokeStyle(1, dark ? 0xff7a4a : 0xffe9a8, 0.55)));
+
+    // VICTORY banner + the variant title.
+    els.push(fix(this.add.text(GAME_W / 2, y + 22, 'VICTORY', { fontFamily: 'Georgia, serif', fontSize: '42px', color: dark ? '#e74c3c' : '#e9c46a', fontStyle: 'bold', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 76, data.title, { fontFamily: 'Georgia, serif', fontSize: '20px', color: dark ? '#ffb0a8' : '#ffe9b0', fontStyle: 'bold italic', align: 'center', wordWrap: { width: W - 80 } }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 108, `The Kingdom of ${GameWorld.king.kingdom} under ${GameWorld.king.ruler}`, { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#cfc1a6' }).setOrigin(0.5, 0)));
+
+    // Ending prose.
+    els.push(fix(this.add.text(GAME_W / 2, y + 132, data.prose, { fontFamily: 'Georgia, serif', fontSize: '13px', color: dark ? '#e0c0b0' : '#e6d8b8', fontStyle: 'italic', align: 'center', wordWrap: { width: W - 80 }, lineSpacing: 3 }).setOrigin(0.5, 0)));
+
+    // "You were known as [Title]. Here is why:" + the reputation profile bars.
+    let ry = y + 248;
+    els.push(fix(this.add.text(x + 30, ry, `You were known as ${data.repTitle}. Here is why:`, { fontFamily: 'Georgia, serif', fontSize: '14px', color: dark ? '#ffd0c0' : '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+    ry += 26;
+    // Reputation bars (highest first; dominant track highlighted).
+    const REP_COL: Record<string, number> = { conqueror: 0xc0392b, merchant: 0xf1c40f, protector: 0x3498db, destroyer: 0x8a2a2a };
+    const REP_LABEL: Record<string, string> = { conqueror: 'Conqueror', merchant: 'Merchant', protector: 'Protector', destroyer: 'Destroyer' };
+    const barX = x + 30, barW = 200;
+    for (const r of data.repProfile) {
+      els.push(fix(this.add.text(barX, ry, REP_LABEL[r.key] + (r.top ? '  ★' : ''), { fontFamily: 'Georgia, serif', fontSize: '11px', color: r.top ? '#fff' : '#cfc1a6', fontStyle: r.top ? 'bold' : 'normal' }).setOrigin(0, 0)));
+      els.push(fix(this.add.rectangle(barX + 120, ry + 2, barW, 10, 0x000000, 0.4).setOrigin(0, 0)));
+      els.push(fix(this.add.rectangle(barX + 120, ry + 2, barW * Phaser.Math.Clamp(r.score / 100, 0, 1), 10, REP_COL[r.key], 0.95).setOrigin(0, 0)));
+      els.push(fix(this.add.text(barX + 120 + barW + 8, ry, String(Math.round(r.score)), { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#e6d8b8' }).setOrigin(0, 0)));
+      ry += 18;
+    }
+
+    // The 3–4 SPECIFIC events from THIS playthrough.
+    ry += 6;
+    let ey = y + 248;
+    const evX = x + W - 320;
+    els.push(fix(this.add.text(evX, ey, 'Deeds remembered:', { fontFamily: 'Georgia, serif', fontSize: '12px', color: dark ? '#ffd0c0' : '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+    ey += 22;
+    for (const ev of data.events) {
+      els.push(fix(this.add.text(evX, ey, '• ' + ev, { fontFamily: 'Georgia, serif', fontSize: '10.5px', color: '#d8cca8', wordWrap: { width: 290 } }).setOrigin(0, 0)));
+      ey += 34;
+    }
+    if (data.rebellionHook) {
+      els.push(fix(this.add.text(evX, ey + 2, '⚔ Whispers of rebellion stir in the conquered lands…', { fontFamily: 'Georgia, serif', fontSize: '10.5px', color: '#ff8a7a', fontStyle: 'italic', wordWrap: { width: 290 } }).setOrigin(0, 0)));
+    }
+
+    // Buttons: Continue Playing + Main Menu.
+    const mkBtn = (cx: number, label: string, bg: number, onClick: () => void) => {
+      const bw = 200, bh = 40, bx = cx - bw / 2, by = y + H - 52;
+      const b = fix(this.add.rectangle(bx, by, bw, bh, bg).setOrigin(0, 0).setStrokeStyle(2, 0xf0e6c8, 0.9).setInteractive({ useHandCursor: true }));
+      els.push(b, fix(this.add.text(bx + bw / 2, by + bh / 2, label, { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+      b.on('pointerdown', () => { this._uiClick = true; });
+      b.on('pointerup', () => { this._uiClick = true; onClick(); });
+    };
+    mkBtn(GAME_W / 2 - 110, 'Continue Playing', 0x1f5b3a, () => this.dismissWinScreen());
+    mkBtn(GAME_W / 2 + 110, 'Main Menu', 0x5c1a1a, () => { this.dismissWinScreen(); this.toMainMenu(); });
+
+    this._winScreenEls = els;
+  }
+
+  dismissWinScreen() {
+    if (this._winScreenEls) { this._winScreenEls.forEach((o: any) => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._winScreenEls = null; }
+  }
+
   toMainMenu() {
     if (this._closing) return;
     this._closing = true;
@@ -2629,6 +2738,8 @@ export class ContinentScene extends Phaser.Scene {
     if (this._leaderSpeech) { try { this._leaderSpeech.forEach((o: any) => o.destroy()); } catch (e) { /* ignore */ } this._leaderSpeech = null; }
     // (Phase 8) Tear down the Realm/Chronicle panel.
     if (this._realmPanel) { try { this.closeRealmPanel(); } catch (e) { /* ignore */ } }
+    // (Phase 10) Tear down the win screen.
+    if (this._winScreenEls) { try { this.dismissWinScreen(); } catch (e) { /* ignore */ } }
     GameWorld._leaderSpeechHook = null;
     GameWorld._diploPanelHook = null;
   }

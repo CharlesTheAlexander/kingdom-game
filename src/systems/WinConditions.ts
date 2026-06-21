@@ -1,5 +1,12 @@
 // WinConditions.js — (Audit FIX 2) victory resolution.
 //
+// (Phase 10 note) This checker was written for the single-world IsometricScene and
+// is RETAINED there unchanged. Its logic has been RE-HOMED to the WORLD level in
+// WinConsequences.ts (which computes the same Conquest/Diplomacy/Legacy/Empire
+// paths from GameWorld state for the primary ContinentScene loop, and adds the
+// reputation-shaped endings + ongoing world reactions). New work should use
+// WinConsequences; this file remains only for the legacy per-settlement view.
+//
 // Three win paths from the expansion doc §8, checked once per game-day:
 //   1. Conquest  — control 75% of all settlements (incl. fallen AI castles).
 //   2. Diplomacy — Alliance status (+80 relations) with every surviving kingdom.
