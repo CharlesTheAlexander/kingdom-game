@@ -246,6 +246,15 @@ const BUILD: Record<string, (g: any, A: number) => void> = {
     merlons(g, 14, 34, 36, STONE);
     g.lineStyle(1, STONE_D, 0.8); g.beginPath(); g.moveTo(14, 46); g.lineTo(50, 46); g.moveTo(26, 38); g.lineTo(26, 56); g.moveTo(38, 38); g.lineTo(38, 56); g.strokePath(); // block seams
   },
+  grandhall: (g, A) => {
+    box(g, 12, 28, 40, 30, STONE);                       // grand wide hall
+    g.fillStyle(ROOF, 1); g.fillRect(10, 22, 44, 8);     // entablature
+    for (const cx of [16, 24, 32, 40, 48]) { g.fillStyle(0xe8e2d2, 1); g.fillRect(cx, 30, 4, 28); g.fillStyle(0xcfc7b4, 1); g.fillRect(cx + 3, 30, 1, 28); } // columns
+    g.fillStyle(0xc9a84c, 1); g.beginPath(); g.moveTo(10, 22); g.lineTo(32, 10); g.lineTo(54, 22); g.closePath(); g.fill(); // gold pediment
+    g.fillStyle(DOOR, 1); g.fillRect(28, 44, 8, 14);     // central door
+    flag(g, 14, 6, 9, A); flag(g, 32, 2, 10, A); flag(g, 50, 6, 9, A); // three banners
+    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 16, 2.4); // crown jewel
+  },
   treasury: (g, A) => {
     box(g, 16, 30, 32, 28, STONE);                       // heavy fortified block
     merlons(g, 16, 26, 32, STONE_D);

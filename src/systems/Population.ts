@@ -55,6 +55,8 @@ export class Population {
     else if (this.count < cap - 4) mods.push({ label: 'Roomy housing', value: 3 });
     // (Phase 5) Tax happiness effect, set by the tax slider.
     if (s._taxHappiness) mods.push({ label: 'Taxes', value: s._taxHappiness });
+    // (Completion Phase 4) Grand Hall — a permanent civic happiness boost.
+    if (s.greatCouncil && s.greatCouncil.hasGrandHall && s.greatCouncil.hasGrandHall()) mods.push({ label: 'Grand Hall', value: 20 });
     // (Session-1) Timed event modifiers — keep only the unexpired ones.
     this.tempMods = this.tempMods.filter((m) => m.untilDay > day);
     for (const m of this.tempMods) mods.push({ label: m.label, value: m.value });

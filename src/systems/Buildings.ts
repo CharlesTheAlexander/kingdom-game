@@ -135,6 +135,8 @@ export class Building {
     let rate = this.currentOutput();
     // (Expansion Phase 5) happiness scales worker output (+10% happy / -20% / strike).
     if (scene && scene.population && this.type.maxWorkers > 0) rate *= scene.population.prodMult;
+    // (Completion Phase 4) Continental Peace production bonus.
+    if (scene && scene._councilProdMult && this.type.maxWorkers > 0) rate *= scene._councilProdMult;
     // (Expansion Phase 3) seasonal farm modifier (autumn +25%, summer -10%).
     if (scene && this.typeKey === 'farm' && scene._seasonFarmMult) rate *= scene._seasonFarmMult;
     // (Expansion Phase 5) research: Advanced Farming / Mining Techniques.

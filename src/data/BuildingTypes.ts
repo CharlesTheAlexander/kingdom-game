@@ -91,6 +91,12 @@ export const BuildingTypes: Record<string, BuildingType> = {
     produces: 'cutStone', refineFrom: 'stone', production: true, placeable: true, stageUnlock: 2, tex: 'mine',
     desc: 'Cuts Stone into Cut Stone. 1 worker: 1/2 stone/day. 2: 1/1 stone/day.',
   },
+  // (Completion Phase 4) Grand Hall — unlocked by hosting the Great Council.
+  grandhall: {
+    key: 'grandhall', name: 'Grand Hall', cost: { gold: 400, planks: 100, cutStone: 100 }, maxWorkers: 0, hp: 200,
+    footprint: 2, placeable: true, councilUnlock: true,
+    desc: '+20 happiness, +5 relations/day with council partners. Requires the Great Council.',
+  },
   // (Completion Phase 3) Treasury — unlocks banking (reserves + loans).
   treasury: {
     key: 'treasury', name: 'Treasury', cost: { gold: 200, stone: 100, cutStone: 50 }, maxWorkers: 1, hp: 160,
@@ -107,7 +113,7 @@ export const BuildingTypes: Record<string, BuildingType> = {
 // Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now
 // grow automatically by settlement tier. The wall type def is kept above only so
 // old saves containing a placed Wall still load without error.
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'library', 'sawmill', 'stonecutter', 'treasury'];
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'library', 'sawmill', 'stonecutter', 'treasury', 'grandhall'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 // (Loop 3, Feature #3) Buildings upgrade through 5 levels. Output scales on a

@@ -56,6 +56,7 @@ import { GameScene, GAME_W, GAME_H } from './GameScene.js';
 import { Resources } from '../systems/Resources.js';
 import * as AssetGenerator from '../systems/AssetGenerator.js';
 import { Banking } from '../systems/Banking.js';
+import { GreatCouncil } from '../systems/GreatCouncil.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -285,6 +286,7 @@ export class IsometricScene extends GameScene {
     this.DAY_SECONDS = DAY_MS / 1000;
     this.diplomacy = new Diplomacy(this); // Phase 7: relationships with kingdoms
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
+    this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.caravans = new Caravans(this); // Phase 5: trade routes between settlements
     this.settlements = new SettlementManager(this); // Phase B: neutral settlements
     this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
@@ -652,7 +654,10 @@ export class IsometricScene extends GameScene {
 
   buildingUnlocked(key) {
     const def = BuildingTypes[key];
-    return !!def && (!def.stageUnlock || this.currentStage() >= def.stageUnlock);
+    if (!def) return false;
+    // (Completion Phase 4) Grand Hall only after the Great Council is hosted.
+    if (def.councilUnlock && !(this.greatCouncil && this.greatCouncil.held)) return false;
+    return !def.stageUnlock || this.currentStage() >= def.stageUnlock;
   }
 
   hasTavern() { return this.buildings.buildings.some((b) => b.typeKey === 'tavern' && b.alive); }
@@ -2393,7 +2398,7 @@ export class IsometricScene extends GameScene {
     // (Phase 3) K&C category panels.
     else if (this.panelMode === 'cat_castle') this.renderCastlePanel();
     else if (this.panelMode === 'cat_food') this.renderCategoryBuild('FOOD', ['farm', 'tavern', 'house']);
-    else if (this.panelMode === 'cat_industry') this.renderCategoryBuild('INDUSTRY', ['lumberyard', 'mine', 'blacksmith', 'market', 'library', 'watchtower']);
+    else if (this.panelMode === 'cat_industry') this.renderCategoryBuild('INDUSTRY', ['lumberyard', 'mine', 'sawmill', 'stonecutter', 'blacksmith', 'market', 'library', 'watchtower', 'treasury', 'grandhall']);
     else if (this.panelMode === 'cat_military') this.renderMilitaryPanel();
     else if (this.panelMode === 'build') this.renderDefaultPanel();
     // (Phase 3) 'none' → no panel (just the category bar). Map filled the screen.
@@ -3162,6 +3167,14 @@ export class IsometricScene extends GameScene {
       this.panel.add(this.add.text(bx + 36, this.PANEL_Y + 12, t.name.length > 8 ? 'Extort.' : t.name, { fontFamily: 'monospace', fontSize: '9px', color: on ? '#fff' : '#aeb9c6', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0));
       b.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.setTax(i); });
     });
+    // (Completion Phase 4) Call the Great Council when +60 with 2+ kingdoms.
+    if (this.greatCouncil && this.greatCouncil.canCall()) {
+      const cx = 834, cw = 200;
+      const cb = this.add.rectangle(cx, this.PANEL_Y + 4, cw, 16, 0x6a4aa0, 0.98).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(1, 0xffe23f, 0.95).setInteractive({ useHandCursor: true });
+      this.panel.add(cb);
+      this.panel.add(this.add.text(cx + cw / 2, this.PANEL_Y + 12, '★ Call Great Council (300g)', { fontFamily: 'monospace', fontSize: '10px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0));
+      cb.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.greatCouncil.call(); });
+    }
     // (Audit FIX 5) Reputation moved out of the header into a collapsible section
     // so the bars no longer overlap the first kingdom row. Collapsed by default;
     // when expanded it floats in a clean box above the panel.
@@ -3517,6 +3530,7 @@ export class IsometricScene extends GameScene {
     if (this.reputation) { this.reputation.onNewDay(); this.updateKingdomTitle(); } // (Phase 4)
     if (this.research) this.research.onNewDay(); // (Phase 5) research progress
     if (this.banking) this.banking.onNewDay(); // (Completion Phase 3) interest + loan handling
+    if (this.greatCouncil) this.greatCouncil.onNewDay(); // (Completion Phase 4) council effects
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
     if (this.factions) this.factions.onNewDay(); // (Session-1 Phase 2) wandering factions daily
     this.checkTaxRevolt(); // (Session-1 Phase 5) tax revolt check

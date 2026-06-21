@@ -42,6 +42,7 @@ export interface BuildingType {
   attack?: boolean;
   footprint?: number;
   stageUnlock?: number;
+  councilUnlock?: boolean;
   revealRadius?: number;
   tex?: string;
   wall?: boolean;
