@@ -158,17 +158,19 @@ export class ArmyManager {
   stopMarch(army) { army.marchTargetCol = null; army.marchTargetRow = null; army.state = 'idle'; army.attackTarget = null; if (army._path) { army._path.clear(); } if (army._eta) army._eta.setVisible(false); }
 
   speedAt(col: number, row: number) {
+    const w = this.scene._weatherMoveMult != null ? this.scene._weatherMoveMult : 1; // (V2 P12) winter slow / storm halt
     // (Completion Phase 5) Roads are the fastest path across any terrain.
-    if (this.scene.roads && this.scene.roads.has(col, row)) return 4;
+    if (this.scene.roads && this.scene.roads.has(col, row)) return 4 * w;
     let b = 'plains';
     try { b = this.scene.biomeAt(Math.round(col), Math.round(row)) || 'plains'; } catch (e) {}
-    return MARCH_SPEED[b] || 2;
+    return (MARCH_SPEED[b] || 2) * w;
   }
 
   etaDays(army) {
     if (army.marchTargetCol == null) return 0;
     const d = Phaser.Math.Distance.Between(army.col, army.row, army.marchTargetCol, army.marchTargetRow);
     const sp = this.speedAt(army.col, army.row);
+    if (sp <= 0) return 99; // (V2 P12) storm pins the army — show a long ETA, not Infinity
     return d / sp / 24; // hours→days
   }
 

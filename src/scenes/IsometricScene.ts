@@ -65,6 +65,7 @@ import { RoyalCourt } from '../systems/RoyalCourt.js';
 import { Succession } from '../systems/Succession.js';
 import { Espionage, MISSIONS } from '../systems/Espionage.js';
 import { Narrative } from '../systems/Narrative.js';
+import { Weather } from '../systems/Weather.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -301,6 +302,7 @@ export class IsometricScene extends GameScene {
     this.succession = new Succession(this); // (V2 Phase 8) heir, marriage, succession
     this.espionage = new Espionage(this); // (V2 Phase 9) spy network
     this.narrative = new Narrative(this); // (V2 Phase 11) story arc + 4th win path
+    this.weatherSys = new Weather(this); // (V2 Phase 12) weather gameplay effects
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -3053,7 +3055,7 @@ export class IsometricScene extends GameScene {
       // (Gameplay change 1) No daily limit — trade as long as resources allow.
       const can = b.workers > 0 && this.resources.canAfford(give);
       // (Phase 4) Merchant trait + reputation improve what you receive.
-      const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0) + ((this._researchMarketMult || 1) - 1) + ((this._heroMarket || 1) - 1); // (V2 P3) Caelan
+      const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0) + ((this._researchMarketMult || 1) - 1) + ((this._heroMarket || 1) - 1) + ((this._weatherTradeMult || 1) - 1); // (V2 P3) Caelan; (V2 P12) drought scarcity
       this.spriteButton(x, this.PANEL_Y + 30, 132, 40, label.split(' → ')[0] + '→', label.split(' → ')[1], can, () => {
         this.resources.spend(give); for (const [r, v] of Object.entries(get) as [string, number][]) this.resources.add(r, Math.round(v * mult)); if (this.reputation) this.reputation.add('merchant', 3); if (this.stats) this.stats.note('marketTrades'); this.refreshPanel();
       });
@@ -3902,7 +3904,7 @@ export class IsometricScene extends GameScene {
       this.gameDay += 1;
       // (Loop 3, Feature #3) Farm L5 auto-feeds the army from its stockpile → halves upkeep.
       const autoFeed = this.buildings.buildings.some((b) => b.typeKey === 'farm' && b.alive && b.level >= 5) ? 0.5 : 1;
-      const eat = Math.round(this.troops.dailyUpkeep() * (this._seasonFoodUpkeepMult || 1) * (this.traitBonuses ? this.traitBonuses.foodMult : 1) * autoFeed); // (Phase 3 season + Phase 4 Warlord + Loop 3 farm L5)
+      const eat = Math.round(this.troops.dailyUpkeep() * (this._seasonFoodUpkeepMult || 1) * (this._weatherFoodMult || 1) * (this.traitBonuses ? this.traitBonuses.foodMult : 1) * autoFeed); // (Phase 3 season + Phase 4 Warlord + Loop 3 farm L5 + V2 P12 winter)
       this.resources.food = Math.max(0, this.resources.food - eat);
       this.onNewDay(eat);
     }
@@ -3954,6 +3956,7 @@ export class IsometricScene extends GameScene {
     sfx.play('day_start'); // (Polish Phase 2) dawn bell
     this.updateSeason();
     this.updateWeather(); // (Polish Phase 4) switch snow/rain on season change
+    if (this.weatherSys) this.weatherSys.onNewDay(); // (V2 Phase 12) weather gameplay effects
     if (this.population) { this.population.onNewDay(); this.updatePopulationHud(); } // (Phase 5)
     if (this.armyMgr) this.armyMgr.onNewDay(); // (Expansion) army supply/morale
     if (this.worldEvents) this.worldEvents.onNewDay(); // (Expansion Phase 3) world events
