@@ -538,6 +538,30 @@ export function generateWorldObjects(scene: any) {
   });
 }
 
+// ---- PHASE 7: UI elements --------------------------------------------------
+// The HUD panels/buttons/bars are already drawn as clean Phaser Graphics shapes,
+// so the only texture-based UI is the resource icons. We reskin those crisply.
+// (planks / cutStone icons added here too for the manufacturing chains.)
+export function generateUI(scene: any) {
+  reskinImage(scene, 'icon_wood', 32, 32, (ctx, w, h) => {
+    ctx.fillStyle = css(0x8b5e3c); ctx.fillRect(w * 0.15, h * 0.4, w * 0.7, h * 0.28);
+    ctx.fillStyle = css(0xc89a5a); ctx.beginPath(); ctx.ellipse(w * 0.85, h * 0.54, w * 0.09, h * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = css(0x6b4423); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(w * 0.85, h * 0.54, w * 0.05, 0, Math.PI * 2); ctx.stroke();
+  });
+  reskinImage(scene, 'icon_gold', 32, 32, (ctx, w, h) => {
+    disc(ctx, w / 2, h / 2, w * 0.4, 0xe8c84a); ctx.strokeStyle = css(0xb5912a); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(w / 2, h / 2, w * 0.4, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = css(0xfff2a8); ctx.fillRect(w * 0.42, h * 0.28, 3, h * 0.44);
+  });
+  reskinImage(scene, 'icon_food', 32, 32, (ctx, w, h) => {
+    disc(ctx, w / 2, h * 0.56, w * 0.34, 0xc0392b); disc(ctx, w * 0.62, h * 0.56, w * 0.28, 0xd14336);
+    ctx.fillStyle = css(0x3a7a2a); ctx.beginPath(); ctx.ellipse(w * 0.56, h * 0.26, w * 0.1, h * 0.06, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = css(0x5c3a18); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(w / 2, h * 0.3); ctx.lineTo(w / 2, h * 0.2); ctx.stroke();
+  });
+  // Manufacturing-chain icons (Completion Phase 2 uses these).
+  objSheet(scene, 'icon_planks', 1, 32, 32, (ctx) => { for (const y of [10, 16, 22]) { fillRect2(ctx, 5, y, 22, 4, 0xc89a5a); fillRect2(ctx, 5, y, 22, 1, 0xe0c088); } });
+  objSheet(scene, 'icon_cutstone', 1, 32, 32, (ctx) => { fillRect2(ctx, 6, 8, 20, 16, 0x9a9a90); fillRect2(ctx, 6, 8, 20, 3, 0xb6b6ac); ctx.strokeStyle = css(0x6f6f68); ctx.lineWidth = 1; ctx.strokeRect(6, 8, 20, 16); ctx.beginPath(); ctx.moveTo(16, 8); ctx.lineTo(16, 24); ctx.stroke(); });
+}
+
 // Master entry — phases are added here as they are built.
 export function generateAll(scene: any) {
   generateTerrain(scene);
@@ -546,4 +570,5 @@ export function generateAll(scene: any) {
   generateUnits(scene);
   generateEnemyUnits(scene);
   generateWorldObjects(scene);
+  generateUI(scene);
 }
