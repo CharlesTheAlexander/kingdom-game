@@ -343,7 +343,7 @@ export class IsometricScene extends GameScene {
     this.research = new Research(this); // (Expansion Phase 5) research tree
     this.winConditions = new WinConditions(this); // (Audit FIX 2) victory paths
     this._eventLog = this._eventLog || [];
-    this.panelMode = 'build';
+    this.panelMode = 'none'; // (Phase 3) K&C: no panel open by default — map fills the screen
 
     // (Phase 5) Expedition rewards: special resources + permanent artifact buffs.
     this.buffs = { warriorDamage: 1, troopSpeed: 1, monkHeal: 1, farmBonusPerDay: 0, mineBonusPerDay: 0 };
@@ -531,7 +531,7 @@ export class IsometricScene extends GameScene {
     const pct = Math.round((t.gold - 1) * 100);
     const txt = `Tax: ${pct > 0 ? '+' : ''}${pct}%`;
     const col = pct > 0 ? '#ffd24a' : pct < 0 ? '#9ad0ff' : '#cfc1a6';
-    if (!this._taxText) this._taxText = this.add.text(8, 40, '', { fontFamily: 'monospace', fontSize: '11px', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setScrollFactor(0).setDepth(60);
+    if (!this._taxText) this._taxText = this.add.text(204, 40, '', { fontFamily: 'monospace', fontSize: '11px', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setScrollFactor(0).setDepth(60);
     this._taxText.setText(txt).setColor(col);
   }
   checkTaxRevolt() {
@@ -1318,7 +1318,7 @@ export class IsometricScene extends GameScene {
 
   createPopulationHud() {
     const fix = (o) => o.setScrollFactor(0);
-    const w = 184, h = 24, x = (GAME_W - w) / 2, y = 60;
+    const w = 184, h = 22, x = 10, y = 34; // (Phase 3) top-left identity area
     const bg = fix(this.add.rectangle(x, y, w, h, 0x10141c, 0.85).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
     const popT = fix(this.add.text(x + 10, y + 6, 'Pop 10/14', { fontFamily: 'monospace', fontSize: '12px', color: '#dfe6ee', fontStyle: 'bold' }).setDepth(61));
     const faceG = fix(this.add.graphics().setDepth(61));
@@ -1365,16 +1365,22 @@ export class IsometricScene extends GameScene {
 
   createKingdomNameHud() {
     const fix = (o) => o.setScrollFactor(0);
-    this._kingName = fix(this.add.text(56, 8, this.kingdomName, { fontFamily: 'monospace', fontSize: '14px', color: '#ffe9b0', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setDepth(60));
-    this._kingTitle = fix(this.add.text(56, 26, '', { fontFamily: 'monospace', fontSize: '11px', color: '#c9a14a' }).setDepth(60));
+    // (Phase 3) Top-left kingdom identity panel — clickable to open Diplomacy/tax.
+    this._idBg = fix(this.add.rectangle(6, 1, 300, 56, 0x12101a, 0.55).setOrigin(0, 0).setDepth(59).setInteractive({ useHandCursor: true }));
+    this._idBg.on('pointerover', () => this._idBg.setFillStyle(0x1c2330, 0.7));
+    this._idBg.on('pointerout', () => this._idBg.setFillStyle(0x12101a, 0.55));
+    this._idBg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.panelMode = 'kingdoms'; this.refreshPanel(); });
+    this._kingName = fix(this.add.text(12, 3, this.kingdomName, { fontFamily: 'monospace', fontSize: '15px', color: '#c9a84c', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setDepth(60));
+    this._kingTitle = fix(this.add.text(12, 19, '', { fontFamily: 'monospace', fontSize: '10px', color: '#cfc1a6', fontStyle: 'italic' }).setDepth(60));
     this.updateKingdomTitle();
   }
 
   updateKingdomTitle() {
     if (!this._kingName) return;
     this._kingName.setText(this.kingdomName);
-    const title = this.reputation ? this.reputation.title(this.kingdomName) : null;
-    this._kingTitle.setText(title || (this.kingTrait && TRAITS[this.kingTrait] ? TRAITS[this.kingTrait].name : ''));
+    const title = (this.reputation && this.reputation.title(this.kingdomName)) || (this.kingTrait && TRAITS[this.kingTrait] ? TRAITS[this.kingTrait].name : '');
+    const stage = this.TIERS && this.TIERS[this.tierIndex] ? this.TIERS[this.tierIndex].name : '';
+    this._kingTitle.setText(`${this.rulerName}${title ? ' — ' + title : ''}${stage ? '  ·  ' + stage : ''}`);
   }
 
   // One-time kingdom creation screen (names + starting trait).
@@ -1440,10 +1446,11 @@ export class IsometricScene extends GameScene {
 
   createMenuButton() {
     const fix = (o) => o.setScrollFactor(0);
-    const bg = fix(this.add.rectangle(8, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
+    const mx = GAME_W - 46; // (Phase 3) top-right
+    const bg = fix(this.add.rectangle(mx, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
     const g = fix(this.add.graphics().setDepth(61));
     g.lineStyle(2.5, 0xdfe6ee, 1);
-    for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(17, 15 + i * 5); g.lineTo(35, 15 + i * 5); g.strokePath(); }
+    for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(mx + 9, 15 + i * 5); g.lineTo(mx + 27, 15 + i * 5); g.strokePath(); }
     bg.on('pointerover', () => bg.setFillStyle(0x1c2330, 0.95));
     bg.on('pointerout', () => bg.setFillStyle(0x10141c, 0.9));
     bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('ui_click'); this.openMenu(); });
@@ -1453,9 +1460,10 @@ export class IsometricScene extends GameScene {
   // A small red badge shows how many events arrived since it was last opened.
   createLogButton() {
     const fix = (o) => o.setScrollFactor(0);
-    const bg = fix(this.add.rectangle(52, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
-    fix(this.add.text(72, 22, '📜', { fontFamily: 'monospace', fontSize: '15px' }).setOrigin(0.5).setDepth(61));
-    const badge = fix(this.add.text(86, 8, '', { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff', fontStyle: 'bold', backgroundColor: '#c0392b', padding: { x: 3, y: 1 } }).setOrigin(0.5, 0).setDepth(62)).setVisible(false);
+    const lx = GAME_W - 90; // (Phase 3) top-right
+    const bg = fix(this.add.rectangle(lx, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
+    fix(this.add.text(lx + 20, 22, '📜', { fontFamily: 'monospace', fontSize: '15px' }).setOrigin(0.5).setDepth(61));
+    const badge = fix(this.add.text(lx + 34, 8, '', { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff', fontStyle: 'bold', backgroundColor: '#c0392b', padding: { x: 3, y: 1 } }).setOrigin(0.5, 0).setDepth(62)).setVisible(false);
     this._logBtnBadge = badge;
     this._logSeen = (this._eventLog || []).length;
     bg.on('pointerover', () => bg.setFillStyle(0x1c2330, 0.95));
@@ -1467,9 +1475,10 @@ export class IsometricScene extends GameScene {
   // (Session-1 Phase 6) Stats button (top-left, beside the log) + full overlay.
   createStatsButton() {
     const fix = (o) => o.setScrollFactor(0);
-    const bg = fix(this.add.rectangle(96, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
+    const sx = GAME_W - 134; // (Phase 3) top-right
+    const bg = fix(this.add.rectangle(sx, 8, 40, 28, 0x10141c, 0.9).setOrigin(0, 0).setDepth(60).setStrokeStyle(1, 0x39455a, 0.9).setInteractive({ useHandCursor: true }));
     const g = fix(this.add.graphics().setDepth(61));
-    g.fillStyle(0x8ab0e6, 1); g.fillRect(104, 24, 4, 8); g.fillRect(110, 20, 4, 12); g.fillRect(116, 16, 4, 16); g.fillRect(122, 22, 4, 10);
+    g.fillStyle(0x8ab0e6, 1); g.fillRect(sx + 8, 24, 4, 8); g.fillRect(sx + 14, 20, 4, 12); g.fillRect(sx + 20, 16, 4, 16); g.fillRect(sx + 26, 22, 4, 10);
     bg.on('pointerover', () => bg.setFillStyle(0x1c2330, 0.95));
     bg.on('pointerout', () => bg.setFillStyle(0x10141c, 0.9));
     bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); sfx.play('ui_click'); this.toggleStats(); });
@@ -2275,19 +2284,46 @@ export class IsometricScene extends GameScene {
       soldiers: (g, x, y) => { g.fillStyle(0xc9d3df, 1); g.beginPath(); g.moveTo(x - 6, y - 6); g.lineTo(x + 6, y - 6); g.lineTo(x + 6, y + 1); g.lineTo(x, y + 7); g.lineTo(x - 6, y + 1); g.closePath(); g.fillPath(); },
       day: (g, x, y) => g.fillStyle(0xffe9a8, 1).fillCircle(x, y, 5),
     };
+    // (Phase 3) Centre the resource bar — top-left is the kingdom identity, the
+    // top-right is day/season/speed/menu. CHX shifts the whole block to centre.
+    const CHX = 430;
     // Row 1 — economy.
-    chip('wood', 6, 2, 86, 'WOOD', 'icon_wood'); chip('stone', 96, 2, 86, 'STONE', null, I.stone);
-    chip('food', 186, 2, 86, 'FOOD', 'icon_food'); chip('gold', 276, 2, 86, 'GOLD', 'icon_gold');
-    chip('iron', 366, 2, 86, 'IRON', null, I.iron);
+    chip('wood', CHX + 6, 2, 86, 'WOOD', 'icon_wood'); chip('stone', CHX + 96, 2, 86, 'STONE', null, I.stone);
+    chip('food', CHX + 186, 2, 86, 'FOOD', 'icon_food'); chip('gold', CHX + 276, 2, 86, 'GOLD', 'icon_gold');
+    chip('iron', CHX + 366, 2, 86, 'IRON', null, I.iron);
     // Row 2 — military / time.
-    chip('equipment', 6, 29, 86, 'EQUIP', null, I.equip);
-    chip('workers', 96, 29, 104, 'WORKERS', null, I.workers);
-    chip('soldiers', 204, 29, 104, 'SOLDIERS', null, I.soldiers);
-    chip('day', 312, 29, 70, 'DAY', null, I.day);
-    chip('season', 386, 29, 160, 'SEASON', null, null);
-    this.seasonIcon = fix(this.add.ellipse(398, 41, 11, 11, 0x66cc66).setDepth(42));
-    this.chips.season.value.setX(410);
-    this.chips.season.label.setX(410);
+    chip('equipment', CHX + 6, 29, 86, 'EQUIP', null, I.equip);
+    chip('workers', CHX + 96, 29, 104, 'WORKERS', null, I.workers);
+    chip('soldiers', CHX + 204, 29, 104, 'SOLDIERS', null, I.soldiers);
+    chip('day', CHX + 312, 29, 70, 'DAY', null, I.day);
+    chip('season', CHX + 386, 29, 160, 'SEASON', null, null);
+    this.seasonIcon = fix(this.add.ellipse(CHX + 398, 41, 11, 11, 0x66cc66).setDepth(42));
+    this.chips.season.value.setX(CHX + 410);
+    this.chips.season.label.setX(CHX + 410);
+    // (Phase 3) Clicking a resource chip shows its production/consumption breakdown.
+    for (const key of ['wood', 'stone', 'food', 'gold', 'iron']) {
+      const ch = this.chips[key]; if (!ch) continue;
+      ch.bg.setInteractive({ useHandCursor: true });
+      ch.bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.showResourceBreakdown(key, ch.bg.x + ch.bg.width / 2); });
+    }
+  }
+
+  // (Phase 3) Resource breakdown tooltip: rough production/consumption per day.
+  showResourceBreakdown(key, cx) {
+    const r = this.resources;
+    const perDay = {
+      wood: this.buildings.buildings.filter((b) => b.typeKey === 'lumberyard' && b.alive).reduce((s, b) => s + (b.currentOutput() || 0), 0),
+      stone: this.buildings.buildings.filter((b) => b.typeKey === 'mine' && b.alive).reduce((s, b) => s + (b.currentOutput() || 0), 0),
+      food: this.buildings.buildings.filter((b) => b.typeKey === 'farm' && b.alive).reduce((s, b) => s + (b.currentOutput() || 0), 0),
+      gold: (this.buildings.castle ? (this.buildings.castle.currentOutput() || 0) : 0) * (this._goldTaxMult || 1),
+      iron: 0,
+    };
+    const upkeep = key === 'food' ? (this.troops.dailyUpkeep ? this.troops.dailyUpkeep() : 0) : 0;
+    const net = Math.round(((perDay[key] || 0) - upkeep) * 10) / 10;
+    const lines = [`Have: ${Math.floor(r[key] || 0)}`, `Production: ~${Math.round((perDay[key] || 0) * 10) / 10}/tick`];
+    if (upkeep) lines.push(`Upkeep: -${upkeep}/day`);
+    this.showTip(cx, TOP_BAR + 8, key.toUpperCase(), lines.join('\n'));
+    this.time.delayedCall(2500, () => this.hideTip());
   }
 
   seasonColor(day) {
@@ -2398,7 +2434,13 @@ export class IsometricScene extends GameScene {
     else if (this.panelMode === 'armies') this.renderArmiesPanel();
     else if (this.panelMode === 'armyform') this.renderArmyForm();
     else if (this.panelMode === 'research' && this.research) this.research.renderPanel();
-    else this.renderDefaultPanel();
+    // (Phase 3) K&C category panels.
+    else if (this.panelMode === 'cat_castle') this.renderCastlePanel();
+    else if (this.panelMode === 'cat_food') this.renderCategoryBuild('FOOD', ['farm', 'tavern', 'house']);
+    else if (this.panelMode === 'cat_industry') this.renderCategoryBuild('INDUSTRY', ['lumberyard', 'mine', 'blacksmith', 'market', 'library', 'watchtower']);
+    else if (this.panelMode === 'cat_military') this.renderMilitaryPanel();
+    else if (this.panelMode === 'build') this.renderDefaultPanel();
+    // (Phase 3) 'none' → no panel (just the category bar). Map filled the screen.
   }
 
   // (Expansion) March/attack a selected army toward a right-clicked point.
@@ -2429,6 +2471,9 @@ export class IsometricScene extends GameScene {
       this.spriteButton(730, y - 2, 92, 24, 'Disband', '', true, () => { m.disband(a); this.refreshPanel(); });
     });
     this.spriteButton(GAME_W - 180, this.PANEL_Y + PANEL_H - 36, 168, 28, 'Form New Army', '', list.length < m.maxPlayerArmies, () => { this._armyFormSpec = { warrior: 0, archer: 0, monk: 0, knight: 0, mercenary: 0 }; this.panelMode = 'armyform'; this.refreshPanel(); }, { active: true });
+    // (Phase 3) Diplomacy + Caravans live under the Armies category.
+    this.spriteButton(GAME_W - 180, this.PANEL_Y + 6, 80, 24, 'Diplomacy', '', true, () => { this.panelMode = 'kingdoms'; this.refreshPanel(); });
+    this.spriteButton(GAME_W - 96, this.PANEL_Y + 6, 84, 24, 'Caravans', '', !!(this.caravans && this.caravans.sites().length >= 2), () => { this.panelMode = 'caravans'; this.refreshPanel(); });
   }
 
   renderArmyForm() {
@@ -2483,6 +2528,78 @@ export class IsometricScene extends GameScene {
     } else {
       this.spriteButton(GAME_W - 150, uy, 140, 56, 'Large Castle', 'max stage', false, null);
     }
+  }
+
+  // (Phase 3) A category build panel — filtered build buttons for one category.
+  renderCategoryBuild(title, keys) {
+    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x12101a, 0.9).setOrigin(0, 0).setStrokeStyle(1, 0xc9a84c, 0.3).setScrollFactor(0));
+    const status = this.placementType ? `Placing: ${BuildingTypes[this.placementType].name} — click a tile (Esc to cancel)` : `${title} — pick a building, then click a tile`;
+    this.panelText(14, this.PANEL_Y + 8, status, { color: '#c9a84c', bold: true });
+    this.panelText(GAME_W - 160, this.PANEL_Y + 8, `Buildings: ${this.buildings.placedCount()}/${this.maxBuildings()}`, { color: '#c9a84c', bold: true });
+    const list = keys.filter((k) => BuildingTypes[k] && this.buildingUnlocked(k));
+    const locked = keys.filter((k) => BuildingTypes[k] && !this.buildingUnlocked(k));
+    const bw = 92, h = 46, gap = 6;
+    list.forEach((k, i) => {
+      const x = 14 + i * (bw + gap), y = this.PANEL_Y + 30;
+      const ok = this.buildings.canPlace(k, this.resources, this.maxBuildings()).ok;
+      this.buildPaletteButton(x, y, bw, h, k, ok);
+    });
+    if (locked.length) this.panelText(14, this.PANEL_Y + PANEL_H - 22, `Locked (later stage): ${locked.map((k) => BuildingTypes[k].name).join(', ')}`, { color: '#7d8389', size: '10px' });
+  }
+
+  // (Phase 3) Castle category — castle HP/upgrade, tier info, House build.
+  renderCastlePanel() {
+    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x12101a, 0.9).setOrigin(0, 0).setStrokeStyle(1, 0xc9a84c, 0.3).setScrollFactor(0));
+    const c = this.buildings.castle;
+    this.panelText(14, this.PANEL_Y + 8, `CASTLE — ${this.TIERS[this.tierIndex].name} (stage ${this.currentStage()}/9)`, { color: '#c9a84c', bold: true });
+    if (c) {
+      this.panelText(14, this.PANEL_Y + 30, `Keep HP: ${Math.round(c.hp)}/${c.maxHp}`, { color: '#ffffff' });
+      this.panel.add(this.add.rectangle(14, this.PANEL_Y + 48, 240, 10, 0x000000, 0.5).setOrigin(0, 0).setScrollFactor(0));
+      this.panel.add(this.add.rectangle(14, this.PANEL_Y + 48, 240 * Phaser.Math.Clamp(c.hp / c.maxHp, 0, 1), 10, 0x4ad66b).setOrigin(0, 0).setScrollFactor(0));
+    }
+    // House build button (population housing lives under the kingdom core).
+    if (this.buildingUnlocked('house')) this.buildPaletteButton(14, this.PANEL_Y + 64, 92, 44, 'house', this.buildings.canPlace('house', this.resources, this.maxBuildings()).ok);
+    // Upgrade to next tier.
+    const uy = this.PANEL_Y + 26;
+    if (this.tierIndex < this.TIERS.length - 1) {
+      const nt = this.TIERS[this.tierIndex + 1];
+      const ok = this.canUpgradeTier();
+      const missing = Object.entries(nt.cost).filter(([r, v]) => (this.resources[r] || 0) < v).map(([r]) => r);
+      const sub = ok ? formatCost(nt.cost) : `need ${missing.join(', ')}`;
+      const btn = this.spriteButton(GAME_W - 220, uy, 200, 56, `Upgrade → ${nt.name}`, sub, ok, ok ? () => this.upgradeTier() : null, { gold: ok });
+      if (ok) this.tweens.add({ targets: btn, alpha: 0.7, yoyo: true, repeat: -1, duration: 700 });
+    } else {
+      this.spriteButton(GAME_W - 220, uy, 200, 56, 'Large Castle', 'max stage reached', false, null);
+    }
+  }
+
+  // (Phase 3) Military category — barracks/tower build, training, expeditions.
+  renderMilitaryPanel() {
+    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x12101a, 0.9).setOrigin(0, 0).setStrokeStyle(1, 0xc9a84c, 0.3).setScrollFactor(0));
+    this.panelText(14, this.PANEL_Y + 8, `MILITARY — Soldiers ${this.soldierTotal()}/${this.soldierCap()}`, { color: '#c9a84c', bold: true });
+    // Build barracks / tower.
+    ['barracks', 'tower'].filter((k) => this.buildingUnlocked(k)).forEach((k, i) => {
+      this.buildPaletteButton(14 + i * 98, this.PANEL_Y + 28, 92, 44, k, this.buildings.canPlace(k, this.resources, this.maxBuildings()).ok);
+    });
+    // Castle Defense roster (unassigned units — Phase 4 Decision 2).
+    const snap = this.troops.snapshot();
+    const defTxt = snap.length ? snap.map((g) => `${g.type} x${g.count}`).join('  ') : 'none';
+    this.panelText(14, this.PANEL_Y + 80, `Castle Defense: ${defTxt}`, { color: '#b9c6d6', size: '11px' });
+    // Train buttons (need a barracks selected normally; here quick-train at first barracks).
+    const bar = this.buildings.buildings.find((b) => b.typeKey === 'barracks' && b.alive);
+    const tx = 230;
+    if (bar) {
+      const types = [['warrior', 1], ['archer', 2], ['monk', 3], ['knight', 2]];
+      types.forEach(([t, lvl], i) => {
+        const can = bar.level >= lvl && this.soldierRoom() > 0 && (t !== 'knight' || (this.hasBlacksmith && this.hasBlacksmith()));
+        this.spriteButton(tx + i * 104, this.PANEL_Y + 28, 96, 30, `Train ${t}`, '', can, () => this.trainUnit(bar, t));
+      });
+    } else {
+      this.panelText(tx, this.PANEL_Y + 34, 'Build a Barracks to train soldiers.', { color: '#9aa0a6', size: '11px' });
+    }
+    // Expeditions + Ruins access.
+    this.spriteButton(GAME_W - 230, this.PANEL_Y + 28, 100, 28, 'Expeditions', '', true, () => { this.panelMode = 'expedition'; this.refreshPanel(); });
+    this.spriteButton(GAME_W - 120, this.PANEL_Y + 28, 100, 28, 'Ruins', '', !!(this.ruins && this.ruins.list.some((r) => r.discovered)), () => { this.panelMode = 'ruins'; this.refreshPanel(); });
   }
 
   // (Phase 5) A build-palette button: name on top, cost as icon+number pairs,
@@ -2956,49 +3073,56 @@ export class IsometricScene extends GameScene {
 
   // (UI overhaul Phase 5) Persistent tabs on the top edge of the bottom panel
   // replace the old top-right openers: [Build][Expeditions][Kingdoms][Caravans].
+  // (Phase 3) K&C-style slim category bar at the very bottom. Icon + label
+  // buttons; clicking opens that category's panel above the bar, clicking the
+  // active one again closes it. Only one panel open at a time.
   createKingdomsButton() {
     const fix = (o) => o.setScrollFactor(0);
-    const defs = [['Build', 'build', 0x3a2f1a], ['Armies', 'armies', 0x2d5a4a], ['Expeditions', 'expedition', 0x1f4f33], ['Kingdoms', 'kingdoms', 0x432863], ['Caravans', 'caravans', 0x2d4a6b], ['Research', 'research', 0x2a3a5a]];
+    // [label, mode, icon-draw]
+    this.catDefs = [
+      ['Castle', 'cat_castle', 'castle'], ['Food', 'cat_food', 'food'], ['Industry', 'cat_industry', 'industry'],
+      ['Military', 'cat_military', 'military'], ['Research', 'research', 'research'], ['Armies', 'armies', 'armies'], ['Map', 'map', 'map'],
+    ];
     this.panelTabs = [];
-    const ty = this.PANEL_Y - 26, h = 26, w = 94, gap = 3;
-    defs.forEach((t, i) => {
-      const x = 8 + i * (w + gap);
-      const bg = fix(this.add.rectangle(x, ty, w, h, t[2]).setOrigin(0, 0).setDepth(40).setStrokeStyle(2, 0xc9a14a, 0.5).setInteractive({ useHandCursor: true }));
-      const txt = fix(this.add.text(x + w / 2, ty + h / 2, t[0], { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(41));
-      bg.on('pointerover', () => { if (!this.tabActive(t[1])) bg.setFillStyle(0x5a4a2a); });
+    const bx0 = 8, by = this.PANEL_Y - 30, h = 28, w = 92, gap = 3;
+    this.catDefs.forEach((t, i) => {
+      const x = bx0 + i * (w + gap);
+      const bg = fix(this.add.rectangle(x, by, w, h, 0x12101a, 0.92).setOrigin(0, 0).setDepth(40).setStrokeStyle(1, 0xc9a84c, 0.3).setInteractive({ useHandCursor: true }));
+      const txt = fix(this.add.text(x + w / 2, by + h / 2, t[0], { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(41));
+      bg.on('pointerover', () => { if (this.panelMode !== t[1]) bg.setFillStyle(0x1c2330, 0.95); });
       bg.on('pointerout', () => this.highlightTabs());
       bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.onTabClick(t[1]); });
-      this.panelTabs.push({ mode: t[1], bg, txt, base: t[2] });
+      this.panelTabs.push({ mode: t[1], bg, txt });
     });
     this.highlightTabs();
   }
 
   tabActive(mode) {
-    if (mode === 'build') return !['expedition', 'artifacts', 'kingdoms', 'caravans', 'armies', 'armyform', 'research'].includes(this.panelMode) || !!this.selectedBuilding;
-    if (mode === 'expedition') return this.panelMode === 'expedition' || this.panelMode === 'artifacts';
-    if (mode === 'armies') return this.panelMode === 'armies' || this.panelMode === 'armyform';
+    if (mode === 'cat_military') return ['cat_military', 'expedition', 'artifacts', 'ruins'].includes(this.panelMode);
+    if (mode === 'armies') return ['armies', 'armyform', 'kingdoms', 'caravans'].includes(this.panelMode);
     return this.panelMode === mode && !this.selectedBuilding;
   }
 
   highlightTabs() {
     if (!this.panelTabs) return;
-    const caravanOk = this.caravans && this.caravans.sites().length >= 2;
     const researchOk = this.research && this.research.hasLibrary();
     for (const t of this.panelTabs) {
-      const on = this.tabActive(t.mode);
-      const dim = (t.mode === 'caravans' && !caravanOk) || (t.mode === 'research' && !researchOk);
-      t.bg.setFillStyle(on ? 0xc9a14a : t.base, dim ? 0.5 : 1);
+      const on = this.tabActive(t.mode) && !this.selectedBuilding;
+      const dim = (t.mode === 'research' && !researchOk);
+      t.bg.setFillStyle(on ? 0xc9a84c : 0x12101a, on ? 1 : 0.92);
       t.txt.setColor(on ? '#1a140c' : dim ? '#8a8f99' : '#ffffff');
-      t.bg.setStrokeStyle(2, 0xc9a14a, on ? 1 : 0.45);
+      t.bg.setStrokeStyle(1, 0xc9a84c, on ? 1 : 0.3);
     }
   }
 
+  // (Phase 3) Category click — toggles its panel; "Map" opens the continent view.
   onTabClick(mode) {
-    sfx.play('ui_click'); // (Polish Phase 2)
+    sfx.play('ui_click');
+    if (mode === 'map') { this.openContinent(); return; }
     this.selectedBuilding = null; this.clearSelection(); this.placementType = null; this.clearGhost(); this.hideTip();
-    if (mode === 'caravans' && !(this.caravans && this.caravans.sites().length >= 2)) { this.showToast('Conquer a settlement first (need 2+ sites)'); return; }
-    if (mode === 'research' && !(this.research && this.research.hasLibrary())) { this.showToast('Build a Library to research'); return; }
-    this.panelMode = mode;
+    if (mode === 'research' && !(this.research && this.research.hasLibrary())) { this.showToast('Build a Library (Industry) to research'); return; }
+    // Toggle closed if the same category is already open.
+    this.panelMode = (this.panelMode === mode) ? 'none' : mode;
     this.refreshPanel();
   }
 
@@ -3148,7 +3272,7 @@ export class IsometricScene extends GameScene {
         this.diploButton(702, y + 1, 116, 32, 'War', '→ -100 rel', 0x5c1a1a, 0x8a2a2a, !!this.diplomacy, () => this.diplomacy.declareWar(key));
       }
     });
-    this.spriteButton(GAME_W - 84, this.PANEL_Y + 4, 76, 20, 'Back', '', true, () => { this.panelMode = 'build'; this.refreshPanel(); });
+    this.spriteButton(GAME_W - 84, this.PANEL_Y + 4, 76, 20, 'Back', '', true, () => { this.panelMode = 'armies'; this.refreshPanel(); });
   }
 
   // Right-click attacks the nearest enemy castle (any faction), else move/gather.

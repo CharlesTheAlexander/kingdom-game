@@ -232,7 +232,7 @@ export class WorldEvents {
   createMessenger() {
     const s = this.scene;
     const fix = (o) => o.setScrollFactor(0);
-    const x = 54, y = 8;
+    const x = GAME_W - 180, y = 8; // (Phase 3) top-right cluster
     this.msgBtn = fix(s.add.container(x + 14, y + 14).setDepth(62).setVisible(false));
     const g = s.add.graphics();
     g.fillStyle(0x2d6cb0, 1).fillCircle(0, 0, 13).lineStyle(2, 0xffffff, 0.9).strokeCircle(0, 0, 13);
