@@ -281,8 +281,26 @@ export function generateBuildings(scene: any, accent = 0x1a3a8b) {
   makeBuilding(scene, 'castle_castle', (g, A) => drawCastle(g, A, 3), accent);
 }
 
+// ---- PHASE 3: AI faction buildings -----------------------------------------
+// Same shapes, faction-accented flags/banners (Red / Purple / Yellow). Reuses
+// the player builders so there are no full redraws.
+const AI_FACTIONS = [
+  { accent: 0x8b1a1a, keys: { castle: 'enemy_castle', barracks: 'ai_barracks', tower: 'ai_tower', house: 'ai_house' } },
+  { accent: 0x4a1a8b, keys: { castle: 'purple_castle', barracks: 'purple_barracks', tower: 'purple_tower', house: 'purple_house' } },
+  { accent: 0x8b7a1a, keys: { castle: 'yellow_castle', barracks: 'yellow_barracks', tower: 'yellow_tower', house: 'yellow_house' } },
+];
+export function generateAIBuildings(scene: any) {
+  for (const f of AI_FACTIONS) {
+    makeBuilding(scene, f.keys.castle, (g, A) => drawCastle(g, A, 3), f.accent); // AI seats render as full castles
+    makeBuilding(scene, f.keys.barracks, BUILD.barracks, f.accent);
+    makeBuilding(scene, f.keys.tower, BUILD.tower, f.accent);
+    makeBuilding(scene, f.keys.house, BUILD.house, f.accent);
+  }
+}
+
 // Master entry — phases are added here as they are built.
 export function generateAll(scene: any) {
   generateTerrain(scene);
   generateBuildings(scene);
+  generateAIBuildings(scene);
 }
