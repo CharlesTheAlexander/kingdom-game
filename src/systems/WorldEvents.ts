@@ -291,9 +291,21 @@ export class WorldEvents {
     const x = GAME_W - 180, y = 8; // (Phase 3) top-right cluster
     this.msgBtn = fix(s.add.container(x + 14, y + 14).setDepth(62).setVisible(false));
     const g = s.add.graphics();
-    g.fillStyle(0x2d6cb0, 1).fillCircle(0, 0, 13).lineStyle(2, 0xffffff, 0.9).strokeCircle(0, 0, 13);
-    const ex = s.add.text(0, 0, '!', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    this.badge = s.add.text(11, -11, '', { fontFamily: 'monospace', fontSize: '11px', color: '#fff', backgroundColor: '#c0392b', padding: { x: 3, y: 1 }, fontStyle: 'bold' }).setOrigin(0.5);
+    // (Visual P6) A tied parchment scroll instead of a plain alert dot.
+    g.fillStyle(0x000000, 0.35).fillCircle(1, 2, 14); // soft shadow
+    // Rolled parchment body.
+    g.fillStyle(0xe8d4a8, 1).fillRoundedRect(-12, -7, 24, 14, 4);
+    g.fillStyle(0xf3e6c4, 1).fillRoundedRect(-12, -6, 24, 6, 3); // lit top half
+    // Rolled ends (darker parchment cylinders).
+    g.fillStyle(0xcdb585, 1).fillRoundedRect(-13, -8, 5, 16, 3);
+    g.fillStyle(0xcdb585, 1).fillRoundedRect(8, -8, 5, 16, 3);
+    g.lineStyle(1, 0xb89a60, 0.8).strokeRoundedRect(-12, -7, 24, 14, 4);
+    // Red ribbon tying the scroll in the middle.
+    g.fillStyle(0xb23a2e, 1).fillRect(-2.5, -9, 5, 18);
+    g.fillStyle(0x8c2f24, 1).fillRect(-2.5, -9, 5, 2).fillRect(-2.5, 7, 5, 2);
+    g.fillStyle(0xd86a5a, 0.9).fillCircle(0, 0, 1.6); // knot highlight
+    const ex = s.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '1px', color: '#ffffff' }).setOrigin(0.5);
+    this.badge = s.add.text(13, -11, '', { fontFamily: 'monospace', fontSize: '11px', color: '#fff', backgroundColor: '#c0392b', padding: { x: 3, y: 1 }, fontStyle: 'bold' }).setOrigin(0.5);
     this.msgBtn.add([g, ex, this.badge]);
     g.setInteractive(new Phaser.Geom.Circle(0, 0, 16), Phaser.Geom.Circle.Contains);
     g.on('pointerdown', (p, lx, ly, ev) => { if (ev) ev.stopPropagation(); this.openPanel(); });
@@ -315,8 +327,15 @@ export class WorldEvents {
     const s = this.scene, fix = (o) => o.setScrollFactor(0);
     const W = 480, H = 230, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2, els = [];
     els.push(fix(s.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.55).setOrigin(0, 0).setDepth(110).setInteractive()));
-    els.push(fix(s.add.rectangle(x, y, W, H, 0x241a0e, 0.99).setOrigin(0, 0).setDepth(111).setStrokeStyle(3, 0xc9a14a, 0.9)));
-    els.push(fix(s.add.text(x + W / 2, y + 22, def.title, { fontFamily: 'monospace', fontSize: '17px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0).setDepth(112)));
+    // (Visual P6) The dispatch reads as a wax-sealed letter on aged parchment.
+    if (s.leatherPanel && s.woodFrame && s.waxSeal) {
+      els.push(fix(s.leatherPanel(x, y, W, H, { radius: 6, seed: 333 }).setDepth(111)));
+      els.push(fix(s.woodFrame(x, y, W, H, { thickness: 7 }).setDepth(111)));
+      els.push(fix(s.waxSeal(x + W - 26, y + 24, 14, 0x8c2f24).setDepth(112)));
+    } else {
+      els.push(fix(s.add.rectangle(x, y, W, H, 0x241a0e, 0.99).setOrigin(0, 0).setDepth(111).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    }
+    els.push(fix(s.add.text(x + W / 2, y + 22, def.title, { fontFamily: 'monospace', fontSize: '17px', color: '#ffe9b0', fontStyle: 'bold', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5, 0).setDepth(112)));
     // (V2 Phase 3) Hero arrival events show the hero's portrait.
     const bodyX = (def.heroPortrait && s.textures.exists(def.heroPortrait)) ? x + 92 : x + 24;
     if (def.heroPortrait && s.textures.exists(def.heroPortrait)) els.push(fix(s.add.image(x + 22, y + 56, def.heroPortrait).setOrigin(0, 0).setDisplaySize(60, 60).setDepth(112)));

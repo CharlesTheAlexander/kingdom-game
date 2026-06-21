@@ -66,7 +66,13 @@ export class Research {
 
   renderPanel() {
     const s = this.scene; const PY = s.PANEL_Y; const PANEL_H = GAME_H - PY;
-    s.panel.add(s.add.rectangle(4, PY + 4, GAME_W - 8, PANEL_H - 8, 0x0e1622, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    // (Visual P6) Research is a carved stone tablet framed in wood.
+    if (s.stonePanel && s.woodFrame) {
+      s.panel.add(s.stonePanel(4, PY + 4, GAME_W - 8, PANEL_H - 8, { seed: PY + 5 }));
+      s.panel.add(s.woodFrame(4, PY + 4, GAME_W - 8, PANEL_H - 8, { thickness: 7 }));
+    } else {
+      s.panel.add(s.add.rectangle(4, PY + 4, GAME_W - 8, PANEL_H - 8, 0x0e1622, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    }
     const cur = this.current ? TECHS.find((t) => t.id === this.current) : null;
     s.panelText(14, PY + 6, cur ? `RESEARCH — ${cur.name}: ${this.daysLeft().toFixed(1)} days left` : 'RESEARCH — pick a technology', { bold: true, color: '#bcd6f0' });
     const colX = [40, 350, 660], rowY = [PY + 28, PY + 60, PY + 92];

@@ -534,9 +534,36 @@ export class IsometricScene extends GameScene {
     const fix = (o) => o.setScrollFactor(0).setDepth(200);
     const els = [];
     els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, victory ? 0x06140a : 0x140606, 0.82).setOrigin(0, 0).setInteractive()));
-    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 210, victory ? 'VICTORY' : 'DEFEAT', { fontFamily: 'monospace', fontSize: '72px', color: victory ? '#ffd24a' : '#e74c3c', fontStyle: 'bold', stroke: '#000', strokeThickness: 8 }).setOrigin(0.5)));
-    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 150, victory ? `${subtitle} Victory` : subtitle, { fontFamily: 'monospace', fontSize: '22px', color: victory ? '#ffe9a8' : '#ffb0a8', fontStyle: 'bold', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5)));
-    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 112, `The Kingdom of ${this.kingdomName} under ${this.rulerName}`, { fontFamily: 'monospace', fontSize: '14px', color: '#cfc1a6' }).setOrigin(0.5)));
+    // (Visual P6) A grand manuscript page behind the result — illuminated gold
+    // for victory, scorched/burned for defeat.
+    const mW = 660, mH = 520, mx = (GAME_W - mW) / 2, my = GAME_H / 2 - 250;
+    if (victory) {
+      els.push(fix(this.parchmentPanel(mx, my, mW, mH, { radius: 8, seed: 9001 })));
+      // Illuminated gold double border.
+      const gb = fix(this.add.graphics());
+      gb.lineStyle(6, 0xc9a14a, 0.95).strokeRoundedRect(mx + 8, my + 8, mW - 16, mH - 16, 6);
+      gb.lineStyle(2, 0xffe9a8, 0.9).strokeRoundedRect(mx + 16, my + 16, mW - 32, mH - 32, 4);
+      els.push(gb);
+      els.push(fix(this.candleGlow(mx + 40, my + 40, 70, 0xffe6a8)));
+      els.push(fix(this.candleGlow(mx + mW - 40, my + 40, 70, 0xffe6a8)));
+      els.push(fix(this.waxSeal(mx + mW / 2, my + mH - 36, 22, 0x8c2f24)));
+    } else {
+      // Burned document — scorched parchment with charred edges.
+      els.push(fix(this.parchmentPanel(mx, my, mW, mH, { radius: 8, seed: 6006 })));
+      const burn = fix(this.add.graphics());
+      const rnd = this._pp_rng(13);
+      // Char overlay + ragged blackened border.
+      burn.fillStyle(0x1a0e08, 0.5).fillRoundedRect(mx, my, mW, mH, 8);
+      burn.lineStyle(10, 0x140a06, 0.95).strokeRoundedRect(mx + 5, my + 5, mW - 10, mH - 10, 8);
+      burn.fillStyle(0x0a0604, 0.9);
+      for (let i = 0; i < 70; i++) { const a = (i / 70) * Math.PI * 2; const rr = (Math.min(mW, mH) / 2) * (0.92 + rnd() * 0.12); burn.fillCircle(mx + mW / 2 + Math.cos(a) * (mW / 2) * 0.99, my + mH / 2 + Math.sin(a) * (mH / 2) * 0.99, 6 + rnd() * 16); }
+      // Ember glow specks along the edge.
+      for (let i = 0; i < 24; i++) { const a = rnd() * Math.PI * 2; burn.fillStyle(rnd() > 0.5 ? 0xff7a2a : 0xffb347, 0.4 + rnd() * 0.4).fillCircle(mx + mW / 2 + Math.cos(a) * (mW / 2) * 0.93, my + mH / 2 + Math.sin(a) * (mH / 2) * 0.93, 1 + rnd() * 2); }
+      els.push(burn);
+    }
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 210, victory ? 'VICTORY' : 'DEFEAT', { fontFamily: 'monospace', fontSize: '72px', color: victory ? '#9a6b14' : '#e74c3c', fontStyle: 'bold', stroke: '#000', strokeThickness: 8 }).setOrigin(0.5)));
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 150, victory ? `${subtitle} Victory` : subtitle, { fontFamily: 'monospace', fontSize: '22px', color: victory ? '#7a5410' : '#ffb0a8', fontStyle: 'bold', stroke: victory ? '#fff3d6' : '#000', strokeThickness: victory ? 2 : 4 }).setOrigin(0.5)));
+    els.push(fix(this.add.text(GAME_W / 2, GAME_H / 2 - 112, `The Kingdom of ${this.kingdomName} under ${this.rulerName}`, { fontFamily: 'monospace', fontSize: '14px', color: victory ? '#5a4a2a' : '#cfc1a6', fontStyle: victory ? 'bold' : 'normal' }).setOrigin(0.5)));
     // Stats panel.
     const stats = this.gatherEndStats();
     const pw = 460, ph = 30 + stats.length * 26, pxx = GAME_W / 2 - pw / 2, pyy = GAME_H / 2 - 80;
@@ -1552,13 +1579,31 @@ export class IsometricScene extends GameScene {
 
   createKingdomNameHud() {
     const fix = (o) => o.setScrollFactor(0);
-    // (Phase 3) Top-left kingdom identity panel — clickable to open Diplomacy/tax.
-    this._idBg = fix(this.add.rectangle(6, 1, 300, 56, 0x12101a, 0.55).setOrigin(0, 0).setDepth(59).setInteractive({ useHandCursor: true }));
-    this._idBg.on('pointerover', () => this._idBg.setFillStyle(0x1c2330, 0.7));
-    this._idBg.on('pointerout', () => this._idBg.setFillStyle(0x12101a, 0.55));
+    // (Visual P6) Top-left kingdom identity = a small carved-wood herald board
+    // with a faction-colour banner stripe down the left edge and iron studs.
+    const accent = this.factionColor();
+    const board = fix(this.add.graphics().setDepth(58));
+    const bx = 6, by = 1, bw = 300, bh = 50;
+    board.fillStyle(0x000000, 0.4).fillRoundedRect(bx + 2, by + 2, bw, bh, 5);
+    // Wood face + grain.
+    board.fillStyle(0x3a2817, 0.95).fillRoundedRect(bx, by, bw, bh, 5);
+    board.fillStyle(0x4a3520, 0.95).fillRoundedRect(bx, by, bw, 4, 5);
+    board.lineStyle(1, 0x271a0e, 0.4);
+    for (let gy = by + 6; gy < by + bh - 2; gy += 4) { board.beginPath(); board.moveTo(bx + 10, gy); board.lineTo(bx + bw - 4, gy); board.strokePath(); }
+    // Faction banner stripe on the left.
+    board.fillStyle(accent, 0.95).fillRect(bx, by, 7, bh);
+    board.fillStyle(0xffffff, 0.18).fillRect(bx, by, 7, 3);
+    // Accent border + iron studs.
+    board.lineStyle(2, accent, 0.7).strokeRoundedRect(bx + 1, by + 1, bw - 2, bh - 2, 5);
+    [[bx + bw - 8, by + 8], [bx + bw - 8, by + bh - 8]].forEach(([sx, sy]) => { board.fillStyle(0x53595f, 1).fillCircle(sx, sy, 2.2); board.fillStyle(0x80868c, 0.9).fillCircle(sx - 0.6, sy - 0.6, 0.9); });
+    this._idBoard = board;
+    // Invisible hit area on top (kept so the click-to-Diplomacy still works).
+    this._idBg = fix(this.add.rectangle(6, 1, 300, 50, 0x000000, 0.001).setOrigin(0, 0).setDepth(59).setInteractive({ useHandCursor: true }));
+    this._idBg.on('pointerover', () => this._idBg.setFillStyle(0xffe9b0, 0.12));
+    this._idBg.on('pointerout', () => this._idBg.setFillStyle(0x000000, 0.001));
     this._idBg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.panelMode = 'kingdoms'; this.refreshPanel(); });
-    this._kingName = fix(this.add.text(12, 3, this.kingdomName, { fontFamily: 'monospace', fontSize: '15px', color: '#c9a84c', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setDepth(60));
-    this._kingTitle = fix(this.add.text(12, 19, '', { fontFamily: 'monospace', fontSize: '10px', color: '#cfc1a6', fontStyle: 'italic' }).setDepth(60));
+    this._kingName = fix(this.add.text(18, 4, this.kingdomName, { fontFamily: 'monospace', fontSize: '15px', color: '#ffe9b0', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setDepth(60));
+    this._kingTitle = fix(this.add.text(18, 22, '', { fontFamily: 'monospace', fontSize: '10px', color: '#d8c79c', fontStyle: 'italic' }).setDepth(60));
     this.updateKingdomTitle();
   }
 
@@ -1679,8 +1724,12 @@ export class IsometricScene extends GameScene {
     const els = [];
     els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.78).setOrigin(0, 0).setInteractive()));
     const W = 760, H = 680, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
-    els.push(fix(this.add.rectangle(x, y, W, H, 0x12101a, 0.99).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
-    els.push(fix(this.add.text(x + 20, y + 14, 'KINGDOM STATISTICS', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold' })));
+    // (Visual P6) A carved stone tablet of records, framed in wood.
+    els.push(fix(this.stonePanel(x, y, W, H, { seed: 4242 })));
+    els.push(fix(this.woodFrame(x, y, W, H, { thickness: 9 })));
+    els.push(fix(this.candleGlow(x + 30, y + 30, 60, 0xffdf9e)));
+    els.push(fix(this.candleGlow(x + W - 30, y + 30, 60, 0xffdf9e)));
+    els.push(fix(this.add.text(x + 20, y + 14, 'KINGDOM STATISTICS', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 })));
     const closeBg = fix(this.add.rectangle(x + W - 32, y + 14, 24, 24, 0x5c1a1a, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0xf0e6c8, 0.6).setInteractive({ useHandCursor: true }));
     els.push(closeBg, fix(this.add.text(x + W - 20, y + 26, 'X', { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
     closeBg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.closeStats(); });
@@ -1891,8 +1940,12 @@ export class IsometricScene extends GameScene {
     const els = [];
     els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.82).setOrigin(0, 0).setDepth(100).setInteractive()));
     const panelW = 560, panelH = 440, px = (GAME_W - panelW) / 2, py = (GAME_H - panelH) / 2;
-    els.push(fix(this.add.rectangle(px, py, panelW, panelH, 0x161b26, 0.99).setOrigin(0, 0).setDepth(101).setStrokeStyle(3, 0xc9a14a, 0.9)));
-    els.push(fix(this.add.text(GAME_W / 2, py + 22, 'KINGDOM GAME', { fontFamily: 'monospace', fontSize: '26px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0).setDepth(102)));
+    // (Visual P6) The menu (and Win Progress) is a wood-framed ledger object.
+    els.push(fix(this.leatherPanel(px, py, panelW, panelH, { radius: 6, seed: 555 }).setDepth(101)));
+    els.push(fix(this.woodFrame(px, py, panelW, panelH, { thickness: 8 }).setDepth(101)));
+    els.push(fix(this.candleGlow(px + 28, py + 28, 56, 0xffdf9e).setDepth(101)));
+    els.push(fix(this.candleGlow(px + panelW - 28, py + 28, 56, 0xffdf9e).setDepth(101)));
+    els.push(fix(this.add.text(GAME_W / 2, py + 22, 'KINGDOM GAME', { fontFamily: 'monospace', fontSize: '26px', color: '#ffe9b0', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(102)));
     this._menuEls = els;
 
     const btn = (label: any, x: number, y: number, w: number, h: number, onClick: any, color?: number) => {
@@ -2474,6 +2527,7 @@ export class IsometricScene extends GameScene {
   _cancelActiveWarning() {
     if (this._warnTimer) { this._warnTimer.remove(false); this._warnTimer = null; }
     if (this._warnBanner) { this._warnBanner.destroy(); this._warnBanner = null; }
+    if (this._warnScroll) { this._warnScroll.destroy(); this._warnScroll = null; }
     this._warnActive = false;
     this._warnLast = null;
     this._warnActiveItem = null;
@@ -2487,17 +2541,222 @@ export class IsometricScene extends GameScene {
     this._warnActiveItem = item;
     this._warnLast = text;
     const hex = '#' + (color >>> 0).toString(16).padStart(6, '0');
+    // (Visual P6) Unfurling-scroll parchment banner. Text sits on a parchment
+    // sheet with rolled wooden ends; both fade together.
     const t = this.add
-      .text(GAME_W / 2, TOP_BAR + 92, text, { fontFamily: 'monospace', fontSize: '13px', color: hex, fontStyle: 'bold', backgroundColor: '#160d0deb', padding: { x: 10, y: 5 }, align: 'center', stroke: '#000000', strokeThickness: 3, wordWrap: { width: GAME_W - 240 } })
+      .text(GAME_W / 2, TOP_BAR + 92, text, { fontFamily: 'monospace', fontSize: '13px', color: hex, fontStyle: 'bold', padding: { x: 14, y: 7 }, align: 'center', stroke: '#000000', strokeThickness: 3, wordWrap: { width: GAME_W - 280 } })
       .setOrigin(0.5, 0)
-      .setDepth(72)
+      .setDepth(73)
       .setScrollFactor(0)
       .setAlpha(0);
+    const bw = t.width + 56, bh = t.height + 4, bx = GAME_W / 2 - bw / 2, by = TOP_BAR + 92 - 2;
+    const scroll = this.add.graphics().setScrollFactor(0).setDepth(72).setAlpha(0);
+    // Parchment body.
+    scroll.fillStyle(0x000000, 0.35).fillRoundedRect(bx + 2, by + 3, bw, bh, 4);
+    scroll.fillStyle(0xd8c08a, 1).fillRoundedRect(bx, by, bw, bh, 4);
+    scroll.fillStyle(0xf3e6c4, 1).fillRoundedRect(bx + 4, by + 3, bw - 8, bh - 6, 3);
+    scroll.fillStyle(0xb89a60, 0.18).fillRoundedRect(bx + 4, by + bh - 8, bw - 8, 5, 3);
+    // Rolled wooden ends (left & right cylinders) — the unfurled scroll look.
+    const roll = (rx) => { scroll.fillStyle(0x4a3520, 1).fillRoundedRect(rx - 9, by - 4, 18, bh + 8, 6); scroll.fillStyle(0x6a4a2a, 1).fillRoundedRect(rx - 6, by - 4, 6, bh + 8, 3); scroll.fillStyle(0x271a0e, 1).fillRoundedRect(rx + 3, by - 4, 4, bh + 8, 2); };
+    roll(bx); roll(bx + bw);
+    // Accent ink line under the text.
+    scroll.lineStyle(1, color, 0.7); scroll.beginPath(); scroll.moveTo(bx + 14, by + bh - 5); scroll.lineTo(bx + bw - 14, by + bh - 5); scroll.strokePath();
     this._warnBanner = t;
-    this.tweens.add({ targets: t, alpha: 1, duration: 180 });
+    this._warnScroll = scroll;
+    // Unfurl feel: the parchment fades + drops in slightly ahead of the text.
+    scroll.setAlpha(0).y = -8;
+    this.tweens.add({ targets: scroll, alpha: { from: 0, to: 1 }, y: { from: -8, to: 0 }, duration: 220, ease: 'Back.out' });
+    this.tweens.add({ targets: t, alpha: { from: 0, to: 1 }, duration: 200, delay: 100 });
+    const finish = () => { if (this._warnScroll) { this._warnScroll.destroy(); this._warnScroll = null; } t.destroy(); this._warnBanner = null; this._warnTimer = null; this._warnActive = false; this._warnActiveItem = null; this._warnLast = null; this._pumpWarnings(); };
     this._warnTimer = this.time.delayedCall(3000, () => {
-      this.tweens.add({ targets: t, alpha: 0, duration: 400, onComplete: () => { t.destroy(); this._warnBanner = null; this._warnTimer = null; this._warnActive = false; this._warnActiveItem = null; this._warnLast = null; this._pumpWarnings(); } });
+      this.tweens.add({ targets: [t, scroll], alpha: 0, duration: 400, onComplete: finish });
     });
+  }
+
+  // ==== (Visual P6) Physical-object panel painters ==========================
+  // Reusable procedural painters that make every panel feel like a tangible
+  // medieval object — aged parchment, carved wood, warm stone — drawn entirely
+  // with Phaser Graphics (no external assets). Each returns the Graphics object
+  // so callers can add it to a container / depth it / destroy it like any other
+  // game object. Warm top-left light is implied throughout (lighter top edges,
+  // darker bottom-right). NOTHING is pure gray or white.
+
+  // Deterministic tiny PRNG so painted grain/fibers/stains stay stable per-call.
+  _pp_rng(seed) { let s = (seed | 0) || 1; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; }
+
+  // Aged parchment sheet: warm cream centre, toasted edges, faint fibers, ink
+  // dots, and a subtle torn/curled edge highlight. Optional rounded corners.
+  parchmentPanel(x, y, w, h, opts: any = {}) {
+    const r = opts.radius != null ? opts.radius : 6;
+    const g = this.add.graphics().setScrollFactor(0);
+    const rand = this._pp_rng(opts.seed != null ? opts.seed : (x * 31 + y * 17 + w));
+    // Drop the warm shadow first so it sits behind the sheet.
+    g.fillStyle(0x000000, 0.28).fillRoundedRect(x + 3, y + 4, w, h, r);
+    // Toasted edge base.
+    g.fillStyle(0xd8c08a, 1).fillRoundedRect(x, y, w, h, r);
+    // Cream interior inset a few px so the toasted band shows as the aged edge.
+    const m = 5;
+    g.fillStyle(0xf3e6c4, 1).fillRoundedRect(x + m, y + m, w - m * 2, h - m * 2, Math.max(1, r - 2));
+    // Warm top-left light wash.
+    g.fillStyle(0xfff4d8, 0.18).fillRoundedRect(x + m, y + m, w - m * 2, (h - m * 2) * 0.45, Math.max(1, r - 2));
+    // Faint horizontal fiber lines.
+    g.lineStyle(1, 0xd9c79b, 0.35);
+    for (let i = 0; i < h - m * 2; i += 9) { const yy = y + m + i + (rand() * 3 - 1.5); g.beginPath(); g.moveTo(x + m + 2, yy); g.lineTo(x + w - m - 2, yy); g.strokePath(); }
+    // Ink-stain dots, kept away from the very edges.
+    const dots = Math.max(3, Math.floor((w * h) / 9000));
+    for (let i = 0; i < dots; i++) {
+      const dx = x + m + 6 + rand() * (w - m * 2 - 12);
+      const dy = y + m + 6 + rand() * (h - m * 2 - 12);
+      g.fillStyle(0x6b5836, 0.10 + rand() * 0.10).fillCircle(dx, dy, 1 + rand() * 2.2);
+    }
+    // Inner toasted vignette along the bottom-right (light from top-left).
+    g.fillStyle(0xb89a60, 0.16).fillRoundedRect(x + m, y + h - m - (h - m * 2) * 0.3, w - m * 2, (h - m * 2) * 0.3, Math.max(1, r - 2));
+    return g;
+  }
+
+  // Dark aged-parchment / oiled-leather sheet: a warm dark backing so the
+  // existing light HUD text stays legible, yet still reads as an aged physical
+  // surface (fibers, stains, warm top-left light, toasted edge). Used for the
+  // bottom panels which carry pre-existing pale text.
+  leatherPanel(x, y, w, h, opts: any = {}) {
+    const r = opts.radius != null ? opts.radius : 5;
+    const g = this.add.graphics().setScrollFactor(0);
+    const rand = this._pp_rng(opts.seed != null ? opts.seed : (x * 19 + y * 11 + w));
+    g.fillStyle(0x000000, 0.3).fillRoundedRect(x + 3, y + 4, w, h, r);
+    // Toasted darker edge then warm dark interior.
+    g.fillStyle(0x231811, 1).fillRoundedRect(x, y, w, h, r);
+    const m = 5;
+    g.fillStyle(0x352617, 1).fillRoundedRect(x + m, y + m, w - m * 2, h - m * 2, Math.max(1, r - 2));
+    // Warm top-left light wash.
+    g.fillStyle(0x6a4f2e, 0.22).fillRoundedRect(x + m, y + m, w - m * 2, (h - m * 2) * 0.4, Math.max(1, r - 2));
+    // Faint fiber lines.
+    g.lineStyle(1, 0x4a3620, 0.3);
+    for (let i = 0; i < h - m * 2; i += 10) { const yy = y + m + i + (rand() * 3 - 1.5); g.beginPath(); g.moveTo(x + m + 2, yy); g.lineTo(x + w - m - 2, yy); g.strokePath(); }
+    // Dark mottling stains.
+    for (let i = 0; i < Math.max(4, Math.floor((w * h) / 11000)); i++) {
+      const dx = x + m + 6 + rand() * (w - m * 2 - 12), dy = y + m + 6 + rand() * (h - m * 2 - 12);
+      g.fillStyle(rand() > 0.5 ? 0x271b10 : 0x46341d, 0.18).fillCircle(dx, dy, 2 + rand() * 4);
+    }
+    // Bottom-right shadow vignette.
+    g.fillStyle(0x1c130b, 0.3).fillRoundedRect(x + m, y + h - m - (h - m * 2) * 0.28, w - m * 2, (h - m * 2) * 0.28, Math.max(1, r - 2));
+    return g;
+  }
+
+  // Dark carved-wood frame drawn AROUND a region (does not fill the interior).
+  // Plank grain + iron corner brackets with rivets. `t` = frame thickness.
+  woodFrame(x, y, w, h, opts: any = {}) {
+    const t = opts.thickness != null ? opts.thickness : 7;
+    const accent = opts.accent != null ? opts.accent : 0xc9a14a; // faction/gold accent line
+    const g = this.add.graphics().setScrollFactor(0);
+    const rand = this._pp_rng(x * 13 + y * 7 + 3);
+    // Outer wood border as four planks (top/bottom lighter via top-left light).
+    const plank = (px, py, pw, ph, top) => {
+      g.fillStyle(top ? 0x4a3520 : 0x3a2817, 1).fillRect(px, py, pw, ph);
+      // grain streaks
+      g.lineStyle(1, 0x271a0e, 0.5);
+      const horiz = pw >= ph;
+      const n = Math.floor((horiz ? ph : pw) / 3);
+      for (let i = 0; i < n; i++) {
+        if (horiz) { const gy = py + 2 + i * 3 + rand() * 1.5; g.beginPath(); g.moveTo(px + 1, gy); g.lineTo(px + pw - 1, gy); g.strokePath(); }
+        else { const gx = px + 2 + i * 3 + rand() * 1.5; g.beginPath(); g.moveTo(gx, py + 1); g.lineTo(gx, py + ph - 1); g.strokePath(); }
+      }
+    };
+    plank(x, y, w, t, true);            // top (lit)
+    plank(x, y + h - t, w, t, false);   // bottom
+    plank(x, y, t, h, true);            // left (lit)
+    plank(x + w - t, y, t, h, false);   // right
+    // Thin warm accent line just inside the wood.
+    g.lineStyle(1.5, accent, 0.7).strokeRect(x + t - 1, y + t - 1, w - (t - 1) * 2, h - (t - 1) * 2);
+    // Iron corner brackets + rivets.
+    const bs = Math.max(12, t + 8);
+    const bracket = (cx, cy, sx, sy) => {
+      g.fillStyle(0x2b2f36, 1);
+      g.fillRect(cx, cy, sx * bs, sy * 4);
+      g.fillRect(cx, cy, sx * 4, sy * bs);
+      g.fillStyle(0x53595f, 0.9).fillCircle(cx + sx * 3, cy + sy * 3, 2);
+      g.fillStyle(0x71777d, 0.9).fillCircle(cx + sx * (bs - 4), cy + sy * 3, 1.6);
+      g.fillStyle(0x71777d, 0.9).fillCircle(cx + sx * 3, cy + sy * (bs - 4), 1.6);
+    };
+    bracket(x + 1, y + 1, 1, 1);
+    bracket(x + w - 1, y + 1, -1, 1);
+    bracket(x + 1, y + h - 1, 1, -1);
+    bracket(x + w - 1, y + h - 1, -1, -1);
+    return g;
+  }
+
+  // Carved warm-stone slab: chiseled inset, mortar lines, lit top-left bevel.
+  stonePanel(x, y, w, h, opts: any = {}) {
+    const g = this.add.graphics().setScrollFactor(0);
+    const rand = this._pp_rng(opts.seed != null ? opts.seed : (x * 7 + y * 23 + w));
+    g.fillStyle(0x000000, 0.30).fillRect(x + 3, y + 4, w, h);
+    // Base stone.
+    g.fillStyle(0x6b5f51, 1).fillRect(x, y, w, h);
+    // Lit top-left bevel + dark bottom-right bevel.
+    g.fillStyle(0x8d8071, 0.9).fillRect(x, y, w, 3);
+    g.fillStyle(0x8d8071, 0.7).fillRect(x, y, 3, h);
+    g.fillStyle(0x39312a, 0.8).fillRect(x, y + h - 3, w, 3);
+    g.fillStyle(0x39312a, 0.6).fillRect(x + w - 3, y, 3, h);
+    // Chiseled inset face (warm stone, slightly lighter).
+    const m = 6;
+    g.fillStyle(0x7d7163, 1).fillRect(x + m, y + m, w - m * 2, h - m * 2);
+    g.fillStyle(0x564a3e, 0.9).fillRect(x + m, y + m, w - m * 2, 2); // inset top shadow
+    g.fillStyle(0x564a3e, 0.7).fillRect(x + m, y + m, 2, h - m * 2);
+    g.fillStyle(0x968874, 0.6).fillRect(x + m, y + h - m - 2, w - m * 2, 2); // inset bottom light
+    // Mortar lines: a couple of irregular horizontal courses + a vertical break.
+    g.lineStyle(2, 0x4c4136, 0.55);
+    const courses = Math.max(1, Math.floor((h - m * 2) / 34));
+    for (let i = 1; i <= courses; i++) {
+      const cy = y + m + (i * (h - m * 2)) / (courses + 1) + (rand() * 4 - 2);
+      g.beginPath(); g.moveTo(x + m + 2, cy); g.lineTo(x + w - m - 2, cy); g.strokePath();
+      const bx = x + m + (0.3 + rand() * 0.4) * (w - m * 2);
+      g.beginPath(); g.moveTo(bx, cy); g.lineTo(bx, cy + (h - m * 2) / (courses + 1)); g.strokePath();
+    }
+    // Faint speckle.
+    for (let i = 0; i < Math.floor((w * h) / 4000); i++) {
+      g.fillStyle(rand() > 0.5 ? 0x8d8071 : 0x564a3e, 0.25).fillCircle(x + m + rand() * (w - m * 2), y + m + rand() * (h - m * 2), 0.8 + rand());
+    }
+    return g;
+  }
+
+  // Wax seal: a glossy blob with a stamped emboss ring. Returns Graphics.
+  waxSeal(cx, cy, radius, color = 0x8c2f24) {
+    const g = this.add.graphics().setScrollFactor(0);
+    g.fillStyle(0x000000, 0.3).fillCircle(cx + 1.5, cy + 2, radius);
+    // Irregular wax rim — a ring of small lobes.
+    g.fillStyle(color, 1);
+    const lobes = 11;
+    for (let i = 0; i < lobes; i++) { const a = (i / lobes) * Math.PI * 2; g.fillCircle(cx + Math.cos(a) * radius * 0.82, cy + Math.sin(a) * radius * 0.82, radius * 0.34); }
+    g.fillCircle(cx, cy, radius * 0.92);
+    // Top-left sheen.
+    g.fillStyle(0xffffff, 0.18).fillCircle(cx - radius * 0.28, cy - radius * 0.3, radius * 0.42);
+    // Darker stamped centre + emboss ring.
+    const dk = Phaser.Display.Color.IntegerToColor(color).darken(28).color;
+    g.fillStyle(dk, 1).fillCircle(cx, cy, radius * 0.62);
+    g.lineStyle(1.5, Phaser.Display.Color.IntegerToColor(color).lighten(18).color, 0.8).strokeCircle(cx, cy, radius * 0.62);
+    return g;
+  }
+
+  // Warm candle-glow blob (for panel corners). Returns Graphics.
+  candleGlow(cx, cy, radius, color = 0xffdf9e) {
+    const g = this.add.graphics().setScrollFactor(0);
+    g.fillStyle(color, 0.12).fillCircle(cx, cy, radius);
+    g.fillStyle(color, 0.14).fillCircle(cx, cy, radius * 0.6);
+    g.fillStyle(color, 0.2).fillCircle(cx, cy, radius * 0.3);
+    return g;
+  }
+
+  // Convenience: a full bottom-panel "object" — parchment sheet inside a wood
+  // frame, with corner candle glows. Adds all pieces to `this.panel` (the
+  // scrollFactor-0 panel container) BEHIND existing contents. Call this first
+  // inside a render* method instead of the old single rectangle.
+  paintBottomPanel(opts: any = {}) {
+    const x = 4, y = this.PANEL_Y + 4, w = GAME_W - 8, h = PANEL_H - 8;
+    const accent = opts.accent != null ? opts.accent : this.factionColor();
+    if (opts.stone) this.panel.add(this.stonePanel(x, y, w, h, { seed: y }));
+    else this.panel.add(this.leatherPanel(x, y, w, h, { radius: 5, seed: y }));
+    this.panel.add(this.woodFrame(x, y, w, h, { thickness: 7, accent }));
+    this.panel.add(this.candleGlow(x + 22, y + 22, 40, 0xffdf9e));
+    this.panel.add(this.candleGlow(x + w - 22, y + 22, 40, 0xffdf9e));
   }
 
   // ---- Phase 5: Iron HUD + artifacts + intel + scrolls ---------------------
@@ -2516,19 +2775,31 @@ export class IsometricScene extends GameScene {
     ['woodIcon', 'foodIcon', 'goldIcon', 'wood', 'stone', 'food', 'gold', 'workers', 'soldiers'].forEach((k) => this.hud[k] && this.hud[k].setVisible(false));
     if (this.hud.day) this.hud.day.setVisible(false);
 
-    fix(this.add.rectangle(0, 0, GAME_W, 56, 0x10141c, 0.96).setOrigin(0, 0).setDepth(39));
-    fix(this.add.rectangle(0, 56, GAME_W, 2, 0x000000, 0.6).setOrigin(0, 0).setDepth(39));
+    // (Visual P6) The whole resource bar is a carved warm-stone & wood ledger.
+    // A stone band fills the strip; resources sit in recessed chiseled slots.
+    fix(this.add.rectangle(0, 0, GAME_W, 56, 0x000000, 0.45).setOrigin(0, 0).setDepth(38));
+    fix(this.stonePanel(-8, -8, GAME_W + 16, 64, { seed: 777 }).setDepth(39));
+    // Heavy wood rails top & bottom of the ledger.
+    const railG = fix(this.add.graphics().setDepth(39));
+    railG.fillStyle(0x3a2817, 1).fillRect(0, 54, GAME_W, 3);
+    railG.fillStyle(0x4a3520, 1).fillRect(0, 0, GAME_W, 2);
+    railG.fillStyle(0x000000, 0.55).fillRect(0, 57, GAME_W, 2);
+    const slotG = fix(this.add.graphics().setDepth(39.5)); // recessed slot painter
     const gfx = fix(this.add.graphics().setDepth(42));
     this.chips = {};
 
-    // A chip = bg rect + icon (image or drawn shape) + value + label.
+    // A chip = recessed carved slot + bg rect + icon + inscribed value + label.
     const chip = (key: any, x: number, y: number, w: number, labelTxt: string, imgKey: any, draw?: any) => {
-      const bg = fix(this.add.rectangle(x, y, w, 25, 0x1c2330, 0.92).setOrigin(0, 0).setDepth(40).setStrokeStyle(1, 0x39455a, 0.9));
+      // Carved recessed slot behind the chip (dark inset with lit lower-right lip).
+      slotG.fillStyle(0x000000, 0.42).fillRoundedRect(x - 2, y - 1, w + 4, 27, 4);
+      slotG.lineStyle(1, 0x2a221a, 0.9).strokeRoundedRect(x - 2, y - 1, w + 4, 27, 4);
+      slotG.lineStyle(1, 0x9c8a64, 0.35); slotG.beginPath(); slotG.moveTo(x - 2, y + 25); slotG.lineTo(x + w + 2, y + 25); slotG.strokePath();
+      const bg = fix(this.add.rectangle(x, y, w, 25, 0x1c2330, 0.55).setOrigin(0, 0).setDepth(40).setStrokeStyle(1, 0x6b5a3c, 0.7));
       const cx = x + 12, cy = y + 12;
       if (imgKey) fix(this.add.image(cx, cy, imgKey).setDisplaySize(18, 18).setDepth(42));
       else if (draw) draw(gfx, cx, cy);
-      const value = fix(this.add.text(x + 23, y + 3, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setDepth(42));
-      const label = fix(this.add.text(x + 23, y + 15, labelTxt, { fontFamily: 'monospace', fontSize: '8px', color: '#8893a3' }).setDepth(42));
+      const value = fix(this.add.text(x + 23, y + 3, '', { fontFamily: 'monospace', fontSize: '13px', color: '#fdf2d4', fontStyle: 'bold', stroke: '#1a120a', strokeThickness: 3 }).setDepth(42));
+      const label = fix(this.add.text(x + 23, y + 15, labelTxt, { fontFamily: 'monospace', fontSize: '8px', color: '#cbb487' }).setDepth(42));
       this.chips[key] = { bg, value, label };
     };
     // Distinct drawn icons (shapes differ for colourblind readability).
@@ -2610,8 +2881,8 @@ export class IsometricScene extends GameScene {
       ch.value.setText(fmtNum(val)); // (Polish Phase 5) abbreviate big numbers so they don't clip
       const prev = this._chipPrev[key];
       if (prev !== undefined && Math.abs(val - prev) >= 2 && !ch._crit) {
-        ch.bg.setFillStyle(val > prev ? 0x1e3a24 : 0x3a1e22, 0.95);
-        this.time.delayedCall(300, () => { if (!ch._crit) ch.bg.setFillStyle(0x1c2330, 0.92); });
+        ch.bg.setFillStyle(val > prev ? 0x2e6a36 : 0x6a2426, 0.9);
+        this.time.delayedCall(300, () => { if (!ch._crit) ch.bg.setFillStyle(0x1c2330, 0.55); });
       }
       this._chipPrev[key] = val;
     };
@@ -2630,8 +2901,8 @@ export class IsometricScene extends GameScene {
 
   critChip(key, on) {
     const ch = this.chips[key]; if (!ch) return;
-    if (on && !ch._crit) { ch._crit = true; ch.bg.setFillStyle(0x4a1e1e, 0.92); ch._critTween = this.tweens.add({ targets: ch.bg, alpha: { from: 0.92, to: 0.4 }, yoyo: true, repeat: -1, duration: 600 }); }
-    else if (!on && ch._crit) { ch._crit = false; if (ch._critTween) ch._critTween.stop(); ch.bg.setAlpha(0.92).setFillStyle(0x1c2330, 0.92); }
+    if (on && !ch._crit) { ch._crit = true; ch.bg.setFillStyle(0x6a2020, 0.9); ch._critTween = this.tweens.add({ targets: ch.bg, alpha: { from: 0.9, to: 0.35 }, yoyo: true, repeat: -1, duration: 600 }); }
+    else if (!on && ch._crit) { ch._crit = false; if (ch._critTween) ch._critTween.stop(); ch.bg.setAlpha(0.55).setFillStyle(0x1c2330, 0.55); }
   }
 
   updateHud() {
@@ -2730,7 +3001,7 @@ export class IsometricScene extends GameScene {
 
   // ---- Armies tab ----------------------------------------------------------
   renderArmiesPanel() {
-    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x111c18, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.paintBottomPanel({ stone: true });
     const m = this.armyMgr; const list = m.playerArmies();
     this.panelText(14, this.PANEL_Y + 6, `ARMIES  (${list.length}/${m.maxPlayerArmies})`, { bold: true, color: '#bdf0d4' });
     if (!list.length) this.panelText(16, this.PANEL_Y + 32, 'No armies yet. Form one from your trained troops →', { color: '#9aa0a6' });
@@ -2749,7 +3020,7 @@ export class IsometricScene extends GameScene {
   }
 
   renderArmyForm() {
-    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x111c18, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.paintBottomPanel({ stone: true });
     this.panelText(14, this.PANEL_Y + 6, 'FORM NEW ARMY — add units, then Form Army', { bold: true, color: '#bdf0d4' });
     const avail = this.armyMgr.availableUnits();
     const spec = this._armyFormSpec || (this._armyFormSpec = { warrior: 0, archer: 0, monk: 0, knight: 0, mercenary: 0 });
@@ -2804,7 +3075,7 @@ export class IsometricScene extends GameScene {
 
   // (Phase 3) A category build panel — filtered build buttons for one category.
   renderCategoryBuild(title, keys) {
-    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x12101a, 0.9).setOrigin(0, 0).setStrokeStyle(1, 0xc9a84c, 0.3).setScrollFactor(0));
+    this.paintBottomPanel();
     const status = this.placementType ? `Placing: ${BuildingTypes[this.placementType].name} — click a tile (Esc to cancel)` : `${title} — pick a building, then click a tile`;
     this.panelText(14, this.PANEL_Y + 8, status, { color: '#c9a84c', bold: true });
     this.panelText(GAME_W - 160, this.PANEL_Y + 8, `Buildings: ${this.buildings.placedCount()}/${this.maxBuildings()}`, { color: '#c9a84c', bold: true });
@@ -2826,7 +3097,7 @@ export class IsometricScene extends GameScene {
 
   // (Phase 3) Castle category — castle HP/upgrade, tier info, House build.
   renderCastlePanel() {
-    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x12101a, 0.9).setOrigin(0, 0).setStrokeStyle(1, 0xc9a84c, 0.3).setScrollFactor(0));
+    this.paintBottomPanel({ stone: true });
     const c = this.buildings.castle;
     this.panelText(14, this.PANEL_Y + 8, `CASTLE — ${this.TIERS[this.tierIndex].name} (stage ${this.currentStage()}/9)`, { color: '#c9a84c', bold: true });
     if (c) {
@@ -2868,7 +3139,7 @@ export class IsometricScene extends GameScene {
 
   // (Phase 3) Military category — barracks/tower build, training, expeditions.
   renderMilitaryPanel() {
-    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x12101a, 0.9).setOrigin(0, 0).setStrokeStyle(1, 0xc9a84c, 0.3).setScrollFactor(0));
+    this.paintBottomPanel({ stone: true });
     this.panelText(14, this.PANEL_Y + 8, `MILITARY — Soldiers ${this.soldierTotal()}/${this.soldierCap()}`, { color: '#c9a84c', bold: true });
     // Build barracks / tower.
     ['barracks', 'tower'].filter((k) => this.buildingUnlocked(k)).forEach((k, i) => {
@@ -3075,7 +3346,8 @@ export class IsometricScene extends GameScene {
   }
 
   renderMarketPanel(b) {
-    this.panel.add(this.add.rectangle(8, this.PANEL_Y + 8, GAME_W - 16, PANEL_H - 16, 0x241a0e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.panel.add(this.leatherPanel(8, this.PANEL_Y + 8, GAME_W - 16, PANEL_H - 16, { radius: 5, seed: this.PANEL_Y + 1 }));
+    this.panel.add(this.woodFrame(8, this.PANEL_Y + 8, GAME_W - 16, PANEL_H - 16, { thickness: 6 }));
     this.panelText(20, this.PANEL_Y + 12, `Market  ·  ${b.workers > 0 ? 'open' : 'needs a worker'}`, { bold: true, color: '#ffe9b0', size: '16px' });
     this.workerControls(b, 20, this.PANEL_Y + 36);
     const trades: any[] = [
@@ -3100,7 +3372,8 @@ export class IsometricScene extends GameScene {
   }
 
   renderTavernPanel(b) {
-    this.panel.add(this.add.rectangle(8, this.PANEL_Y + 8, 440, PANEL_H - 16, 0x241a0e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.panel.add(this.leatherPanel(8, this.PANEL_Y + 8, 440, PANEL_H - 16, { radius: 5, seed: this.PANEL_Y + 2 }));
+    this.panel.add(this.woodFrame(8, this.PANEL_Y + 8, 440, PANEL_H - 16, { thickness: 6 }));
     this.panelText(20, this.PANEL_Y + 12, 'Tavern', { bold: true, color: '#ffe9b0', size: '18px' });
     this.panelText(20, this.PANEL_Y + 40, '+10 starting morale in battle while built.', { color: '#cfe0ff', size: '12px' });
     this.panelText(20, this.PANEL_Y + 60, b._recruitCd > 0 ? `Recruit ready in ${b._recruitCd} day(s)` : 'A mercenary is available to recruit.', { color: '#cfc1a6', size: '12px' });
@@ -3112,9 +3385,7 @@ export class IsometricScene extends GameScene {
 
   // (Phase 5) Expeditions now return only special rewards; durations in days.
   renderExpeditionPanel() {
-    this.panel.add(
-      this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x241a0e, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0)
-    );
+    this.paintBottomPanel();
     this.panelText(16, this.PANEL_Y + 8, `EXPEDITIONS — special rewards only.   Soldiers: ${this.troops.count}    Iron: ${Math.floor(this.resources.iron)}`, { bold: true, color: '#ffe9b0' });
 
     // (FIX 3) Each type can have several slots running at once; the button
@@ -3160,7 +3431,7 @@ export class IsometricScene extends GameScene {
 
   // (Session-1 Phase 1) Discovered ruins, each explorable once.
   renderRuinsPanel() {
-    this.panel.add(this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x241a0e, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
+    this.paintBottomPanel();
     this.panelText(16, this.PANEL_Y + 8, `ANCIENT RUINS — explore for unique rewards   (Soldiers: ${this.troops.count})`, { bold: true, color: '#ffe9b0' });
     const avail = this.ruins.available();
     const out = this.ruins.list.filter((r) => r.explored);
@@ -3183,9 +3454,7 @@ export class IsometricScene extends GameScene {
 
   // (Phase 5) Owned artifacts + scroll / iron tallies.
   renderArtifactsPanel() {
-    this.panel.add(
-      this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x241a0e, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0)
-    );
+    this.paintBottomPanel();
     this.panelText(16, this.PANEL_Y + 8, `ARTIFACTS (${this.artifacts.length}/${this.ARTIFACT_DEFS.length})    Scrolls: ${this.scrolls}    Iron: ${Math.floor(this.resources.iron)}`, { bold: true, color: '#ffe9b0' });
     if (this.artifacts.length === 0) {
       this.panelText(16, this.PANEL_Y + 42, 'No artifacts yet — a Major Campaign returns one for certain; scouting has a small chance.', { color: '#cfc1a6' });
@@ -3501,16 +3770,49 @@ export class IsometricScene extends GameScene {
     ];
     this.panelTabs = [];
     const bx0 = 8, by = this.PANEL_Y - 30, h = 28, w = 92, gap = 3;
+    // (Visual P6) A heavy wooden plank runs behind the category plaques, studded
+    // with iron nail-heads at each seam. Faction accent colour tints the rivets.
+    const accent = (this.factionColor && this.factionColor()) || 0xc9a14a;
+    const plankW = this.catDefs.length * (w + gap) + 8;
+    const plank = fix(this.add.graphics().setDepth(39));
+    plank.fillStyle(0x000000, 0.45).fillRect(bx0 - 4, by - 4, plankW, h + 8);
+    // plank face with grain
+    plank.fillStyle(0x3a2817, 1).fillRect(bx0 - 4, by - 4, plankW, h + 8);
+    plank.fillStyle(0x4a3520, 1).fillRect(bx0 - 4, by - 4, plankW, 3); // lit top
+    plank.fillStyle(0x271a0e, 1).fillRect(bx0 - 4, by + h + 1, plankW, 3); // dark bottom
+    plank.lineStyle(1, 0x271a0e, 0.45);
+    for (let gy = by - 1; gy < by + h + 2; gy += 4) { plank.beginPath(); plank.moveTo(bx0 - 4, gy); plank.lineTo(bx0 - 4 + plankW, gy); plank.strokePath(); }
+    // iron nail-heads at each plaque seam
+    this.catDefs.forEach((_t, i) => {
+      const nx = bx0 + i * (w + gap) - 2;
+      plank.fillStyle(0x53595f, 1).fillCircle(nx, by - 1, 2.2);
+      plank.fillStyle(0x80868c, 0.9).fillCircle(nx - 0.6, by - 1.6, 0.9);
+      plank.fillStyle(0x53595f, 1).fillCircle(nx, by + h - 1, 2.2);
+      plank.fillStyle(0x80868c, 0.9).fillCircle(nx - 0.6, by + h - 1.6, 0.9);
+    });
+    const lastX = bx0 + this.catDefs.length * (w + gap) - 2;
+    plank.fillStyle(0x53595f, 1).fillCircle(lastX, by - 1, 2.2).fillCircle(lastX, by + h - 1, 2.2);
     this.catDefs.forEach((t, i) => {
       const x = bx0 + i * (w + gap);
-      const bg = fix(this.add.rectangle(x, by, w, h, 0x12101a, 0.92).setOrigin(0, 0).setDepth(40).setStrokeStyle(1, 0xc9a84c, 0.3).setInteractive({ useHandCursor: true }));
-      const txt = fix(this.add.text(x + w / 2, by + h / 2, t[0], { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(41));
-      bg.on('pointerover', () => { if (this.panelMode !== t[1]) bg.setFillStyle(0x1c2330, 0.95); });
+      // Raised wooden plaque shadow behind each tab.
+      const plaque = fix(this.add.graphics().setDepth(39.5));
+      plaque.fillStyle(0x000000, 0.4).fillRoundedRect(x + 1, by + 2, w, h, 4);
+      const bg = fix(this.add.rectangle(x, by, w, h, 0x6a4a2a, 0.96).setOrigin(0, 0).setDepth(40).setStrokeStyle(2, accent, 0.55).setInteractive({ useHandCursor: true }));
+      const txt = fix(this.add.text(x + w / 2, by + h / 2, t[0], { fontFamily: 'monospace', fontSize: '12px', color: '#f3e4c0', fontStyle: 'bold', stroke: '#1a120a', strokeThickness: 2 }).setOrigin(0.5).setDepth(41));
+      bg.on('pointerover', () => { if (this.panelMode !== t[1]) bg.setFillStyle(0x87623a, 0.98); });
       bg.on('pointerout', () => this.highlightTabs());
       bg.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.onTabClick(t[1]); });
       this.panelTabs.push({ mode: t[1], bg, txt });
     });
     this.highlightTabs();
+  }
+
+  // (Visual P6) Faction accent colour for HUD/frame trim. Falls back to gold.
+  factionColor() {
+    try {
+      const c = this.kingTrait && TRAITS[this.kingTrait] ? TRAITS[this.kingTrait].color : null;
+      return (typeof c === 'number') ? c : 0xc9a14a;
+    } catch (e) { return 0xc9a14a; }
   }
 
   tabActive(mode) {
@@ -3522,12 +3824,15 @@ export class IsometricScene extends GameScene {
   highlightTabs() {
     if (!this.panelTabs) return;
     const researchOk = this.research && this.research.hasLibrary();
+    const accent = this.factionColor();
     for (const t of this.panelTabs) {
       const on = this.tabActive(t.mode) && !this.selectedBuilding;
       const dim = (t.mode === 'research' && !researchOk);
-      t.bg.setFillStyle(on ? 0xc9a84c : 0x12101a, on ? 1 : 0.92);
-      t.txt.setColor(on ? '#1a140c' : dim ? '#8a8f99' : '#ffffff');
-      t.bg.setStrokeStyle(1, 0xc9a84c, on ? 1 : 0.3);
+      // Active = pressed/darker carved plaque (faction accent border lit).
+      // Inactive = raised wood. Disabled (research) = greyed wood.
+      t.bg.setFillStyle(on ? 0x3a2817 : dim ? 0x4a3e30 : 0x6a4a2a, on ? 1 : 0.96);
+      t.txt.setColor(on ? '#ffe9b0' : dim ? '#8a7f6a' : '#f3e4c0');
+      t.bg.setStrokeStyle(2, on ? accent : 0x2a1d10, on ? 1 : 0.7);
     }
   }
 
@@ -3588,9 +3893,11 @@ export class IsometricScene extends GameScene {
   }
 
   renderKingdomsPanel() {
-    this.panel.add(
-      this.add.rectangle(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, 0x16101f, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0)
-    );
+    // (Visual P6) A diplomatic treaty on aged parchment, sealed with wax.
+    this.panel.add(this.leatherPanel(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, { radius: 5, seed: this.PANEL_Y + 9 }));
+    this.panel.add(this.woodFrame(4, this.PANEL_Y + 4, GAME_W - 8, PANEL_H - 8, { thickness: 7 }));
+    // Wax seal in the bottom-right corner of the treaty.
+    this.panel.add(this.waxSeal(GAME_W - 34, this.PANEL_Y + PANEL_H - 30, 16, 0x8c2f24));
     const scouted = this.intelActive();
     this.panelText(14, this.PANEL_Y + 6, `AI KINGDOMS — DIPLOMACY${scouted ? '   (scouted)' : ''}`, { bold: true, color: '#ffe9b0' });
     // (Pre-loop audit) Conquest-victory progress so the win path is legible.
@@ -3659,7 +3966,9 @@ export class IsometricScene extends GameScene {
       const relStatus = this.diplomacy ? this.diplomacy.status(key) : 'Neutral';
       this.panelText(196, y + 9, relStatus, { color: this.diploColor(relStatus), size: '14px', bold: true });
       // Relationship bar: centre tick at neutral, red (hostile) / green (friendly).
+      // (Visual P6) Carved temperature-gauge track recessed into the parchment.
       const bx = 330, bw = 150, cx = bx + bw / 2, barY = y + 20;
+      this.panel.add(this.add.rectangle(bx - 1, barY - 1, bw + 2, 13, 0x1a120a, 0.9).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(1, 0x6b5a3c, 0.8));
       this.panel.add(this.add.rectangle(bx, barY, bw, 11, 0x000000, 0.55).setOrigin(0, 0).setScrollFactor(0));
       this.panel.add(this.add.rectangle(bx, barY, bw / 2, 11, 0x3a1418, 0.7).setOrigin(0, 0).setScrollFactor(0));
       this.panel.add(this.add.rectangle(cx, barY, bw / 2, 11, 0x123a1a, 0.7).setOrigin(0, 0).setScrollFactor(0));

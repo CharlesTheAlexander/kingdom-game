@@ -873,7 +873,25 @@ export class GameScene extends Phaser.Scene {
     // (FIX 5) Smaller minimap (120x80) tucked into the bottom-right corner.
     this.MM = { x: GAME_W - 132, y: this.PANEL_Y - 92, w: 120, h: 80 };
     const m = this.MM;
-    this.add.rectangle(m.x - 2, m.y - 2, m.w + 4, m.h + 4, 0x000000, 0.7).setOrigin(0, 0).setDepth(44).setScrollFactor(0).setStrokeStyle(2, 0xc9a14a, 0.7);
+    // (Visual P6) Carved-wood frame around the minimap (does NOT cover the map).
+    const ft = 8; // frame thickness
+    const fr = this.add.graphics().setDepth(43).setScrollFactor(0);
+    const fx = m.x - ft, fy = m.y - ft, fw = m.w + ft * 2, fh = m.h + ft * 2;
+    fr.fillStyle(0x000000, 0.5).fillRect(fx + 2, fy + 3, fw, fh);
+    fr.fillStyle(0x3a2817, 1).fillRect(fx, fy, fw, fh);
+    // lit top / left, dark bottom / right (warm top-left light).
+    fr.fillStyle(0x4a3520, 1).fillRect(fx, fy, fw, 3).fillRect(fx, fy, 3, fh);
+    fr.fillStyle(0x271a0e, 1).fillRect(fx, fy + fh - 3, fw, 3).fillRect(fx + fw - 3, fy, 3, fh);
+    // grain on the frame border only
+    fr.lineStyle(1, 0x271a0e, 0.4);
+    for (let gy = fy + 2; gy < fy + fh; gy += 3) { fr.beginPath(); fr.moveTo(fx + 1, gy); fr.lineTo(fx + fw - 1, gy); fr.strokePath(); }
+    // re-cover the map hole so grain lines don't show through it
+    fr.fillStyle(0x12281a, 1).fillRect(m.x - 1, m.y - 1, m.w + 2, m.h + 2);
+    fr.lineStyle(1.5, 0xc9a14a, 0.7).strokeRect(m.x - 1, m.y - 1, m.w + 2, m.h + 2);
+    // iron corner brackets + rivets
+    const bs = 13;
+    const bracket = (cx, cy, sx, sy) => { fr.fillStyle(0x2b2f36, 1).fillRect(cx, cy, sx * bs, sy * 4).fillRect(cx, cy, sx * 4, sy * bs); fr.fillStyle(0x71777d, 0.9).fillCircle(cx + sx * 3, cy + sy * 3, 1.6); };
+    bracket(fx + 1, fy + 1, 1, 1); bracket(fx + fw - 1, fy + 1, -1, 1); bracket(fx + 1, fy + fh - 1, 1, -1); bracket(fx + fw - 1, fy + fh - 1, -1, -1);
     const bg = this.add.rectangle(m.x, m.y, m.w, m.h, 0x12281a, 0.92).setOrigin(0, 0).setDepth(44).setScrollFactor(0).setInteractive();
     bg.on('pointerdown', (p, lx, ly, ev) => ev.stopPropagation()); // swallow clicks
     this.minimapGfx = this.add.graphics().setDepth(45).setScrollFactor(0);
