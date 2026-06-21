@@ -3812,28 +3812,52 @@ export class IsometricScene extends GameScene {
   // ---- Day / night cycle + day counter (new) -------------------------------
 
   createDayNightOverlay() {
+    // (Visual P5) Layered atmospheric sky. The whole screen-fixed stack renders
+    // on the UI camera (above the world), so the sky reads as a dramatic gradient
+    // band across the top "headroom" that fades to a translucent wash over the
+    // world below — giving a true horizon without hiding the terrain.
+    // --- Sky gradient band (behind the day/night tint) ---
+    // Confined to the upper "headroom" so it reads as sky above the horizon and
+    // fades fully to transparent before the play field (no hard seam, no wash).
+    this._skyHorizon = Math.round(GAME_H * 0.30); // where the painted sky fades to 0
+    this.skyGradG = this.add.graphics().setScrollFactor(0).setDepth(31);
+    this._skyPhaseBucket = -1; // redraw the gradient only when the phase bucket changes
+    this._skySeasonKey = '';
+    // --- Global day/night colour tint (above the world, below the HUD) ---
     this.dnOverlay = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x0a1430, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(35);
     // (Phase 8) Subtle seasonal cast over the world (below the night overlay).
     this.seasonOverlay = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(34);
-    // (Polish Phase 3) Sky bodies — stars, sun, moon — drawn above the overlay.
+    // (Polish Phase 3 / Visual P5) Sky bodies — stars, sun, moon, clouds, god-rays.
     this._stars = [];
-    // (Audit FIX 7) More, brighter stars for a clearer night sky.
-    for (let i = 0; i < 40; i++) this._stars.push({ x: Phaser.Math.Between(16, GAME_W - 16), y: Phaser.Math.Between(58, Math.round(GAME_H * 0.42)), r: Phaser.Math.FloatBetween(0.9, 2.4), ph: Math.random() * 6.28 });
+    // (Visual P5) ~56 twinkling stars of varied size, kept within the sky band.
+    for (let i = 0; i < 56; i++) this._stars.push({ x: Phaser.Math.Between(12, GAME_W - 12), y: Phaser.Math.Between(34, Math.round(GAME_H * 0.27)), r: Phaser.Math.FloatBetween(0.7, 2.6), ph: Math.random() * 6.28, sp: Phaser.Math.FloatBetween(0.0025, 0.006) });
+    // (Visual P5) Subtle nebula wisps for the deep-night sky.
+    this._nebula = [];
+    for (let i = 0; i < 3; i++) this._nebula.push({ x: Phaser.Math.Between(120, GAME_W - 120), y: Phaser.Math.Between(50, Math.round(GAME_H * 0.22)), r: Phaser.Math.Between(110, 180), col: [0x3a4a8a, 0x5a3a7a, 0x2a5a7a][i % 3] });
+    // (Visual P5) A few slow-drifting cumulus clouds for the daytime sky.
+    this._clouds = [];
+    for (let i = 0; i < 4; i++) this._clouds.push({ x: Phaser.Math.Between(0, GAME_W), y: Phaser.Math.Between(46, Math.round(GAME_H * 0.18)), s: Phaser.Math.FloatBetween(0.7, 1.4), v: Phaser.Math.FloatBetween(3, 8) });
     this.skyG = this.add.graphics().setScrollFactor(0).setDepth(36);
+    this.createAmbientParticles(); // (Visual P5) subtle always-on ambient life
     this.updateSeason();
   }
 
   // (Polish Phase 3) Smooth atmosphere colour + darkness across the full day:
   // dawn (warm) → day (clear) → dusk (orange-purple) → night (deep navy).
   atmosphereAt(phase) {
+    // (Visual P5) Global lighting tint keyframes, tuned to Northgard-style targets:
+    // dawn warm orange ~rgba(255,150,50,.18) · day none · dusk warm orange
+    // ~rgba(255,100,30,.28) · night deep blue ~rgba(10,20,60,.5). Smoothly blended.
     const KF = [
-      [0.00, 0xff8a4a, 0.32], // dawn — warm orange-pink
-      [0.10, 0xfff2d8, 0.00], // morning — clear
-      [0.58, 0xfff2d8, 0.00], // day — clear
-      [0.70, 0xffa64a, 0.15], // late afternoon — warming
-      [0.80, 0x5a3f80, 0.36], // dusk — orange-purple (Audit FIX 7: darker)
-      [0.88, 0x060e24, 0.60], // night onset — deep navy (Audit FIX 7: noticeably darker)
-      [1.00, 0x060e24, 0.64], // deep night
+      [0.00, 0xff9632, 0.18], // dawn — warm orange (255,150,50)
+      [0.06, 0xffb060, 0.12], // sunrise glow
+      [0.12, 0xfff2d8, 0.00], // morning — clear
+      [0.56, 0xfff2d8, 0.00], // day — clear
+      [0.68, 0xffa64a, 0.13], // late afternoon — warming
+      [0.78, 0xff641e, 0.28], // dusk — warm orange (255,100,30)
+      [0.85, 0x3a2456, 0.46], // dusk-purple transition
+      [0.90, 0x081030, 0.60], // night onset — deep blue, distinctly dark
+      [1.00, 0x060c26, 0.64], // deep night
     ];
     let a = KF[0], b = KF[KF.length - 1];
     for (let i = 0; i < KF.length - 1; i++) { if (phase >= KF[i][0] && phase <= KF[i + 1][0]) { a = KF[i]; b = KF[i + 1]; break; } }
@@ -3847,9 +3871,11 @@ export class IsometricScene extends GameScene {
   updateSeason() {
     if (!this.seasonOverlay) return;
     const s = this.seasonHint(this.gameDay);
+    // (Visual P5) Seasonal colour grading: spring brighter/green, summer warm/yellow,
+    // autumn desaturated orange, winter blue-cold. Layered lightly over the world.
     const map = {
-      'Early Spring': [0x66ff88, 0.0], 'Late Spring': [0x66ff88, 0.0],
-      Summer: [0xffd070, 0.07], 'Early Autumn': [0xd07a20, 0.09], 'Late Autumn': [0xc06010, 0.11], Winter: [0xbcd6f0, 0.20], // (Audit FIX 7) stronger white-blue winter cast
+      'Early Spring': [0x7affa0, 0.05], 'Late Spring': [0x88ffb0, 0.06], // spring — fresh green
+      Summer: [0xffd060, 0.08], 'Early Autumn': [0xd08838, 0.09], 'Late Autumn': [0xc06822, 0.11], Winter: [0xbcd6f0, 0.20], // (Audit FIX 7) stronger white-blue winter cast
     };
     const [col, a] = map[s] || [0x000000, 0];
     this.seasonOverlay.fillColor = col;
@@ -3870,29 +3896,56 @@ export class IsometricScene extends GameScene {
   createWeather() {
     if (!this.textures.exists('wx_snow')) {
       const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
-      g.fillStyle(0xffffff, 1); g.fillCircle(4, 4, 3); g.generateTexture('wx_snow', 8, 8); g.destroy();
+      g.fillStyle(0xffffff, 0.5); g.fillCircle(5, 5, 4); g.fillStyle(0xffffff, 1); g.fillCircle(5, 5, 2.6); g.generateTexture('wx_snow', 10, 10); g.destroy();
     }
     if (!this.textures.exists('wx_rain')) {
+      // (Visual P5) A soft diagonal streak reads as a fast raindrop.
       const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
-      g.fillStyle(0xbfd4ec, 1); g.fillRect(0, 0, 2, 10); g.generateTexture('wx_rain', 2, 10); g.destroy();
+      g.fillStyle(0xcfe0f4, 0.85); g.fillRect(0, 0, 2, 14); g.fillStyle(0xeaf3ff, 1); g.fillRect(0, 0, 1, 14); g.generateTexture('wx_rain', 2, 14); g.destroy();
     }
     // Screen-fixed emitters above the world but below the HUD; both start idle.
-    // (Audit FIX 7) Denser, slightly larger snow for a clearly visible winter.
+    // (Visual P5) Snow: drifting flakes in 3 sizes (scale spread) with gentle wind sway.
     this.snowEmitter = this.add.particles(0, 0, 'wx_snow', {
-      x: { min: -20, max: GAME_W + 20 }, y: -12, lifespan: 6500,
-      speedY: { min: 25, max: 55 }, speedX: { min: -18, max: 18 },
-      scale: { min: 0.6, max: 1.5 }, alpha: { start: 0.95, end: 0.55 },
-      quantity: 3, frequency: 70, maxParticles: 250,
+      x: { min: -20, max: GAME_W + 20 }, y: -14, lifespan: 7000,
+      speedY: { min: 22, max: 60 }, speedX: { min: -22, max: 22 },
+      scale: { min: 0.45, max: 1.55 }, alpha: { start: 0.95, end: 0.5 },
+      rotate: { min: -20, max: 20 },
+      quantity: 3, frequency: 65, maxParticles: 260,
     }).setScrollFactor(0).setDepth(38);
+    // (Visual P5) Rain: steeper diagonal streaks angled with the wind.
     this.rainEmitter = this.add.particles(0, 0, 'wx_rain', {
-      x: { min: -40, max: GAME_W + 120 }, y: -12, lifespan: 1500,
-      speedY: { min: 380, max: 470 }, speedX: { min: -130, max: -90 },
-      scale: { min: 0.7, max: 1.0 }, alpha: { start: 0.5, end: 0.18 }, rotate: -16,
-      quantity: 3, frequency: 35, maxParticles: 200,
+      x: { min: -60, max: GAME_W + 160 }, y: -14, lifespan: 1400,
+      speedY: { min: 420, max: 540 }, speedX: { min: -160, max: -110 },
+      scale: { min: 0.7, max: 1.15 }, alpha: { start: 0.55, end: 0.15 }, rotate: -18,
+      quantity: 4, frequency: 26, maxParticles: 260,
     }).setScrollFactor(0).setDepth(38);
     this.snowEmitter.stop(); this.rainEmitter.stop();
     this.snowEmitter.setAlpha(0); this.rainEmitter.setAlpha(0);
+    // (Visual P5) Drifting fog: two soft horizontal bands that ease in/out by alpha.
+    if (!this.textures.exists('wx_fog')) {
+      const tex = this.textures.createCanvas('wx_fog', 256, 96);
+      const ctx = tex.getContext();
+      const grad = ctx.createLinearGradient(0, 0, 0, 96);
+      grad.addColorStop(0, 'rgba(210,220,228,0)');
+      grad.addColorStop(0.5, 'rgba(210,220,228,0.6)');
+      grad.addColorStop(1, 'rgba(210,220,228,0)');
+      ctx.fillStyle = grad; ctx.fillRect(0, 0, 256, 96); tex.refresh();
+    }
+    this.fogLayer = this.add.container(0, 0).setScrollFactor(0).setDepth(33).setAlpha(0);
+    this._fogTiles = [];
+    for (let i = 0; i < 4; i++) {
+      const ti = this.add.image((i % 2) * 720 + (i < 2 ? 0 : 360), GAME_H * (0.45 + 0.13 * Math.floor(i / 2)), 'wx_fog')
+        .setOrigin(0, 0.5).setDisplaySize(820, 150).setAlpha(0.5);
+      ti.setData('v', Phaser.Math.FloatBetween(4, 10) * (i % 2 ? 1 : -1));
+      this.fogLayer.add(ti); this._fogTiles.push(ti);
+    }
+    // (Visual P5) Lightning graphics (forked bolt) + a screen flash, both idle.
+    this.lightningG = this.add.graphics().setScrollFactor(0).setDepth(39).setAlpha(0);
+    this.lightningFlash = this.add.rectangle(0, 0, GAME_W, GAME_H, 0xdfe8ff, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(39);
     this._weather = 'clear';
+    // (Visual P5) Dev/test hook: force a weather visual without changing season logic.
+    this._forceWeather = (w) => this._applyWeatherVisual(w, true);
+    this._triggerLightning = () => this._strikeLightning();
   }
 
   weatherForSeason(season) {
@@ -3901,16 +3954,49 @@ export class IsometricScene extends GameScene {
     return 'clear';
   }
 
-  updateWeather() {
-    const want = this.weatherForSeason(this.seasonHint(this.gameDay));
-    if (want === this._weather) return;
+  // (Visual P5) Apply the *visual* state for a weather type. updateWeather() keeps
+  // the season→weather mapping (logic); this only swaps the emitters/fog/sound.
+  _applyWeatherVisual(want, force?) {
+    if (!force && want === this._weather) return;
     this._weather = want;
     const fadeOut = (em) => { if (!em) return; this.tweens.add({ targets: em, alpha: 0, duration: 1200, onComplete: () => em.stop() }); };
     const fadeIn = (em) => { if (!em) return; em.start(); this.tweens.add({ targets: em, alpha: 1, duration: 1500 }); };
-    if (want === 'snow') { fadeOut(this.rainEmitter); fadeIn(this.snowEmitter); sfx.stopAmbient('rain'); sfx.startAmbient('wind', 'wind', 0.16); } // (Audit FIX 7) louder winter wind
-    else if (want === 'rain') { fadeOut(this.snowEmitter); fadeIn(this.rainEmitter); sfx.stopAmbient('wind'); sfx.startAmbient('rain', 'rain'); }
-    else { fadeOut(this.snowEmitter); fadeOut(this.rainEmitter); sfx.stopAmbient('wind'); sfx.stopAmbient('rain'); }
+    const fogTo = (a) => { if (this.fogLayer) this.tweens.add({ targets: this.fogLayer, alpha: a, duration: 1500 }); };
+    if (want === 'snow') { fadeOut(this.rainEmitter); fadeIn(this.snowEmitter); fogTo(0); sfx.stopAmbient('rain'); sfx.startAmbient('wind', 'wind', 0.16); } // (Audit FIX 7) louder winter wind
+    else if (want === 'rain') { fadeOut(this.snowEmitter); fadeIn(this.rainEmitter); fogTo(0); sfx.stopAmbient('wind'); sfx.startAmbient('rain', 'rain'); }
+    else if (want === 'fog') { fadeOut(this.snowEmitter); fadeOut(this.rainEmitter); fogTo(0.75); sfx.stopAmbient('rain'); sfx.startAmbient('wind', 'wind', 0.1); }
+    else { fadeOut(this.snowEmitter); fadeOut(this.rainEmitter); fogTo(0); sfx.stopAmbient('wind'); sfx.stopAmbient('rain'); }
     this.updateSnowCaps(want === 'snow');
+  }
+
+  updateWeather() {
+    // (Logic unchanged) Season decides which weather we want; visual swap delegated.
+    const want = this.weatherForSeason(this.seasonHint(this.gameDay));
+    if (want === this._weather) return;
+    this._applyWeatherVisual(want);
+  }
+
+  // (Visual P5) A brief forked lightning bolt + screen flash (rain only, rare).
+  _strikeLightning() {
+    if (!this.lightningG) return;
+    const g = this.lightningG; g.clear();
+    let x = Phaser.Math.Between(GAME_W * 0.2, GAME_W * 0.8), y = 0;
+    g.lineStyle(2.5, 0xeaf3ff, 1);
+    g.beginPath(); g.moveTo(x, y);
+    const segs = 7, step = (GAME_H * 0.55) / segs;
+    for (let i = 0; i < segs; i++) {
+      x += Phaser.Math.Between(-40, 40); y += step;
+      g.lineTo(x, y);
+      if (Math.random() < 0.4) { // small fork
+        g.lineTo(x + Phaser.Math.Between(-30, 30), y + step * 0.6);
+        g.moveTo(x, y);
+      }
+    }
+    g.strokePath();
+    g.setAlpha(1);
+    this.tweens.add({ targets: g, alpha: 0, duration: 260, ease: 'Quad.in' });
+    if (this.lightningFlash) { this.lightningFlash.setAlpha(0.5); this.tweens.add({ targets: this.lightningFlash, alpha: 0, duration: 320 }); }
+    try { sfx.play && sfx.play('thunder'); } catch (e) {}
   }
 
   // White snow caps on building roofs during Winter (visual accumulation).
@@ -3951,40 +4037,231 @@ export class IsometricScene extends GameScene {
     if (this.dnOverlay) { this.dnOverlay.fillColor = atmo.color; this.dnOverlay.setAlpha(atmo.alpha); }
     // Night-ness (stars/moon) spans dusk→dawn. (BUG 8) Torches removed entirely —
     // the day/night sky shift is sufficient atmosphere.
-    let night = phase >= 0.85 ? (phase - 0.85) / 0.10 : phase < 0.08 ? 1 - phase / 0.08 : 0;
+    let night = phase >= 0.84 ? (phase - 0.84) / 0.10 : phase < 0.08 ? 1 - phase / 0.08 : 0;
     night = Phaser.Math.Clamp(night, 0, 1);
     this._nightness = night;
+    this.drawSkyGradient(phase, night); // (Visual P5) layered sky band (bucketed)
     this.drawSkyBodies(phase, night);
+    this.updateAtmosphereFx(phase, night); // (Visual P5) fog drift, lightning, ambient
     if (this.hud && this.hud.day) this.hud.day.setText(`Day ${this.gameDay}`);
   }
 
-  // Stars (twinkling), an arcing sun (east→west by day), and a night moon.
+  // (Visual P5) Per-frame atmosphere extras: drifting fog, rare rain lightning,
+  // and ambient particle layer keyed to season/time. Kept cheap and self-gating.
+  updateAtmosphereFx(phase, night) {
+    const now = this.time.now;
+    const dt = this._lastFxNow ? Math.min(80, now - this._lastFxNow) : 16;
+    this._lastFxNow = now;
+    // --- Fog drift (only when the fog layer is visible) ---
+    if (this.fogLayer && this.fogLayer.alpha > 0.01 && this._fogTiles) {
+      for (const ti of this._fogTiles) {
+        ti.x += (ti.getData('v') || 5) * dt * 0.001;
+        if (ti.x > GAME_W) ti.x = -ti.displayWidth;
+        else if (ti.x < -ti.displayWidth) ti.x = GAME_W;
+      }
+    }
+    // --- Rare lightning during rain ---
+    if (this._weather === 'rain') {
+      this._lightAcc = (this._lightAcc || 0) + dt;
+      if (this._lightAcc >= (this._nextLight || 9000)) {
+        this._lightAcc = 0;
+        this._nextLight = Phaser.Math.Between(12000, 28000); // next strike window
+        if (Math.random() < 0.6) this._strikeLightning();
+      }
+    } else { this._lightAcc = 0; }
+    // --- Ambient particles: pick the layer that fits season + time ---
+    this.updateAmbientParticles(phase, night);
+  }
+
+  // (Visual P5) Subtle always-on ambient life. One screen-fixed emitter, retargeted
+  // by season/time: day dust motes, autumn leaves, spring pollen, night fireflies.
+  createAmbientParticles() {
+    if (!this.textures.exists('amb_dot')) {
+      const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
+      g.fillStyle(0xffffff, 0.45); g.fillCircle(4, 4, 4); g.fillStyle(0xffffff, 1); g.fillCircle(4, 4, 2); g.generateTexture('amb_dot', 8, 8); g.destroy();
+    }
+    if (!this.textures.exists('amb_leaf')) {
+      const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
+      g.fillStyle(0xffffff, 1); g.fillEllipse(5, 4, 9, 5); g.generateTexture('amb_leaf', 10, 8); g.destroy();
+    }
+    // Low count for performance; screen-fixed so it reads as floating atmosphere.
+    this.ambientEmitter = this.add.particles(0, 0, 'amb_dot', {
+      x: { min: 0, max: GAME_W }, y: { min: TOP_BAR + 20, max: GAME_H - PANEL_H },
+      lifespan: 6000, speedX: { min: -10, max: 10 }, speedY: { min: -6, max: 6 },
+      scale: { min: 0.4, max: 1.0 }, alpha: { start: 0, end: 0 },
+      tint: 0xfff2c8, quantity: 1, frequency: 600, maxParticles: 26,
+    }).setScrollFactor(0).setDepth(37);
+    this.ambientEmitter.stop();
+    this._ambientKind = 'none';
+  }
+
+  updateAmbientParticles(phase, night) {
+    const em = this.ambientEmitter; if (!em) return;
+    const season = this.seasonHint(this.gameDay);
+    // Decide the ambient kind. (Visual only — no gameplay coupling.)
+    let kind = 'dust';
+    if (night > 0.6) kind = 'firefly';
+    else if (season.indexOf('Autumn') >= 0) kind = 'leaf';
+    else if (season.indexOf('Spring') >= 0) kind = 'pollen';
+    if (kind === this._ambientKind) return; // only reconfigure on change (cheap)
+    this._ambientKind = kind;
+    // Reconfigure via the documented emitter setters (Phaser 3.90). Alpha pulses
+    // in/out over each particle's life via the onUpdate (p,k,t) signature.
+    const cfg = {
+      firefly: { tex: 'amb_dot', tint: 0xbfff8a, freq: 700, peak: 0.85, sx: 6, sy: 6 },
+      leaf:    { tex: 'amb_leaf', tint: 0xd08a30, freq: 900, peak: 0.7, sx: -16, sy: 24 },
+      pollen:  { tex: 'amb_dot', tint: 0xfff0a0, freq: 700, peak: 0.6, sx: 8, sy: 4 },
+      dust:    { tex: 'amb_dot', tint: 0xfff2c8, freq: 600, peak: 0.45, sx: 6, sy: 4 },
+    }[kind];
+    em.setTexture(cfg.tex);
+    em.setParticleTint(cfg.tint);
+    em.setFrequency(cfg.freq);
+    em.setParticleSpeed(cfg.sx, cfg.sy);
+    em.setParticleAlpha((p, k, t) => cfg.peak * Math.sin(Math.PI * t));
+    if (!em.emitting) em.start();
+  }
+
+  // (Visual P5) Interpolate a 3-stop sky palette (top / middle / horizon) for the
+  // given day phase. Dawn warm-pink, day blue, dusk orange-purple, night near-black.
+  skyPaletteAt(phase) {
+    // [phase, topColor, midColor, horizonColor]
+    const KF = [
+      [0.00, 0x2a1f4a, 0x7a3a6a, 0xff9a5a], // dawn — deep blue → purple-pink → warm orange horizon
+      [0.10, 0x4a78b8, 0x88b0d8, 0xd8e6f0], // morning — pale blue
+      [0.50, 0x2f5fa8, 0x6fa0d8, 0xbcd8ee], // day — blue, pale horizon
+      [0.68, 0x355f9a, 0x9a7aa8, 0xffc878], // late afternoon — warming horizon
+      [0.78, 0x3a2456, 0x8a3a5a, 0xff5a22], // dusk — purple → orange-red horizon
+      [0.86, 0x140e34, 0x33214e, 0x6a2a4a], // dusk fade
+      [0.92, 0x05081c, 0x0a1030, 0x12183a], // night — very deep blue → near-black
+      [1.00, 0x04061a, 0x080d28, 0x0e1430], // deep night
+    ];
+    let a = KF[0], b = KF[KF.length - 1];
+    for (let i = 0; i < KF.length - 1; i++) { if (phase >= KF[i][0] && phase <= KF[i + 1][0]) { a = KF[i]; b = KF[i + 1]; break; } }
+    const t = Phaser.Math.Clamp((phase - a[0]) / Math.max(1e-6, b[0] - a[0]), 0, 1);
+    const lerp = (ca, cb) => { const c = Phaser.Display.Color.Interpolate.ColorWithColor(Phaser.Display.Color.IntegerToColor(ca), Phaser.Display.Color.IntegerToColor(cb), 100, Math.round(t * 100)); return `rgb(${c.r},${c.g},${c.b})`; };
+    return { top: lerp(a[1], b[1]), mid: lerp(a[2], b[2]), horizon: lerp(a[3], b[3]) };
+  }
+
+  // (Visual P5) Paint the layered sky band into a canvas texture, then show it as
+  // a screen-fixed image. Redrawn only when the phase bucket changes (cheap).
+  drawSkyGradient(phase, night) {
+    const bucket = Math.round(phase * 60); // ~60 buckets across a day → smooth, rare redraws
+    const seasonKey = this.seasonHint(this.gameDay);
+    if (bucket === this._skyPhaseBucket && seasonKey === this._skySeasonKey) return;
+    this._skyPhaseBucket = bucket; this._skySeasonKey = seasonKey;
+    const g = this.skyGradG; if (!g) return;
+    const pal = this.skyPaletteAt(phase);
+    const h = this._skyHorizon, w = GAME_W;
+    // (Visual P5) seasonal grading nudges the horizon warmth/coolness slightly.
+    g.clear();
+    // Vertical gradient: opaque at the very top, fading to transparent at horizon.
+    const toRGB = (s) => { const m = s.match(/\d+/g); return [+m[0], +m[1], +m[2]]; };
+    const [tr, tg, tb] = toRGB(pal.top), [mr, mg, mb] = toRGB(pal.mid), [hr, hg, hb] = toRGB(pal.horizon);
+    const bands = 30;
+    for (let i = 0; i < bands; i++) {
+      const f = i / (bands - 1);
+      let r, gg, bb;
+      if (f < 0.5) { const k = f / 0.5; r = tr + (mr - tr) * k; gg = tg + (mg - tg) * k; bb = tb + (mb - tb) * k; }
+      else { const k = (f - 0.5) / 0.5; r = mr + (hr - mr) * k; gg = mg + (hg - mg) * k; bb = mb + (hb - mb) * k; }
+      // Opaque sky at the top, easing to fully transparent at the horizon so the
+      // play field below is governed only by the global tint (no band seam).
+      const al = Math.pow(1 - f, 1.6) * 0.96;
+      g.fillStyle(Phaser.Display.Color.GetColor(Math.round(r), Math.round(gg), Math.round(bb)), Phaser.Math.Clamp(al, 0, 1));
+      g.fillRect(0, Math.floor(h * f), w, Math.ceil(h / bands) + 1);
+    }
+    // Warm horizon glow at dawn/dusk: a soft bloom around the horizon line that
+    // also fades out (centred near the bottom of the sky band, never a hard edge).
+    const warm = (phase < 0.14) ? (1 - phase / 0.14) : (phase > 0.70 && phase < 0.86) ? (1 - Math.abs(phase - 0.78) / 0.08) : 0;
+    if (warm > 0.02) {
+      const gy = Math.floor(h * 0.80), gh = Math.ceil(h * 0.22);
+      const steps = 8;
+      for (let i = 0; i < steps; i++) {
+        const k = i / (steps - 1);
+        const a = warm * 0.32 * (1 - Math.abs(k - 0.5) * 2);
+        g.fillStyle(Phaser.Display.Color.GetColor(hr, hg, hb), Phaser.Math.Clamp(a, 0, 1));
+        g.fillRect(0, gy + Math.floor(gh * k), w, Math.ceil(gh / steps) + 1);
+      }
+    }
+  }
+
+  // Stars (twinkling), nebula wisps, clouds, an arcing sun w/ glow + god-rays, moon.
   drawSkyBodies(phase, night) {
     const g = this.skyG; if (!g) return;
     g.clear();
+    const now = this.time.now;
+    // --- Nebula wisps (deep night only) ---
+    if (night > 0.4) {
+      const na = (night - 0.4) / 0.6 * 0.06;
+      for (const n of this._nebula) {
+        g.fillStyle(n.col, na);
+        g.fillCircle(n.x, n.y, n.r);
+        g.fillStyle(n.col, na * 0.8);
+        g.fillCircle(n.x + n.r * 0.4, n.y + n.r * 0.2, n.r * 0.6);
+      }
+    }
+    // --- Stars (twinkling, varied size) ---
     if (night > 0.02) {
       for (const s of this._stars) {
-        const tw = 0.7 + 0.3 * Math.sin(this.time.now * 0.004 + s.ph);
-        // (Audit FIX 7) faint halo + brighter core so stars read clearly.
-        g.fillStyle(0xbcd0ff, night * tw * 0.35);
-        g.fillCircle(s.x, s.y, s.r + 1.4);
+        const tw = 0.7 + 0.3 * Math.sin(now * s.sp + s.ph);
+        g.fillStyle(0xbcd0ff, night * tw * 0.4);
+        g.fillCircle(s.x, s.y, s.r + 1.6);
         g.fillStyle(0xffffff, night * tw);
         g.fillCircle(s.x, s.y, s.r);
       }
     }
-    const sunA = Phaser.Math.Clamp(1 - night * 1.4, 0, 1);
-    if (sunA > 0.02 && phase < 0.86) {
-      const p = Phaser.Math.Clamp(phase / 0.85, 0, 1);
-      const sx = GAME_W * (0.92 - p * 0.84), sy = 120 - Math.sin(Math.PI * p) * 72;
-      g.fillStyle(0xfff3c0, sunA * 0.4); g.fillCircle(sx, sy, 20);
-      g.fillStyle(0xffe07a, sunA); g.fillCircle(sx, sy, 13);
+    // --- Daytime cumulus clouds (drift slowly across the sky band) ---
+    const dayAmt = Phaser.Math.Clamp(1 - night * 1.6, 0, 1);
+    if (dayAmt > 0.05) {
+      const dt = this._lastSkyNow ? Math.min(80, now - this._lastSkyNow) : 16;
+      for (const cl of this._clouds) {
+        cl.x += cl.v * dt * 0.001;
+        if (cl.x - 90 * cl.s > GAME_W) cl.x = -90 * cl.s;
+        const ca = dayAmt * 0.5;
+        g.fillStyle(0xffffff, ca);
+        const x = cl.x, y = cl.y, s = cl.s;
+        g.fillCircle(x, y, 22 * s);
+        g.fillCircle(x + 26 * s, y + 4 * s, 28 * s);
+        g.fillCircle(x + 54 * s, y, 20 * s);
+        g.fillCircle(x + 28 * s, y - 12 * s, 20 * s);
+        g.fillStyle(0xdfe8f4, ca * 0.6);
+        g.fillEllipse(x + 26 * s, y + 12 * s, 90 * s, 18 * s);
+      }
     }
+    this._lastSkyNow = now;
+    // --- Sun: arcs east→west, soft warm glow; god-ray shafts at dusk ---
+    const sunA = Phaser.Math.Clamp(1 - night * 1.4, 0, 1);
+    if (sunA > 0.02 && phase < 0.88) {
+      const p = Phaser.Math.Clamp(phase / 0.86, 0, 1);
+      const sx = GAME_W * (0.90 - p * 0.80), sy = 130 - Math.sin(Math.PI * p) * 86;
+      const dusk = Phaser.Math.Clamp((phase - 0.66) / 0.16, 0, 1); // god-rays ramp at dusk
+      const dawn = Phaser.Math.Clamp((0.12 - phase) / 0.12, 0, 1);
+      const rim = Math.max(dusk, dawn);
+      // God-ray shafts (cheap: a few translucent triangles fanning down from the sun).
+      if (rim > 0.05) {
+        const rayCol = phase > 0.5 ? 0xff8a40 : 0xffd27a;
+        for (let i = -3; i <= 3; i++) {
+          const spread = i * 60;
+          g.fillStyle(rayCol, rim * 0.05 * sunA);
+          g.beginPath();
+          g.moveTo(sx, sy);
+          g.lineTo(sx + spread - 36, sy + 320);
+          g.lineTo(sx + spread + 36, sy + 320);
+          g.closePath(); g.fillPath();
+        }
+      }
+      const warmGlow = phase > 0.5 ? 0xff9a4a : phase < 0.13 ? 0xffb060 : 0xfff3c0;
+      g.fillStyle(warmGlow, sunA * 0.18); g.fillCircle(sx, sy, 46);
+      g.fillStyle(warmGlow, sunA * 0.35); g.fillCircle(sx, sy, 26);
+      g.fillStyle(0xfff3c0, sunA * 0.5); g.fillCircle(sx, sy, 16);
+      g.fillStyle(0xffe890, sunA); g.fillCircle(sx, sy, 11);
+    }
+    // --- Moon: soft halo + crescent carve ---
     if (night > 0.05) {
-      // (Audit FIX 7) Larger, brighter moon with a soft halo.
-      const mx = GAME_W * 0.5, my = 78;
-      g.fillStyle(0xdfe8ff, night * 0.22); g.fillCircle(mx, my, 28); // halo
+      const mx = GAME_W * 0.52, my = 84;
+      g.fillStyle(0xdfe8ff, night * 0.10); g.fillCircle(mx, my, 40);
+      g.fillStyle(0xdfe8ff, night * 0.22); g.fillCircle(mx, my, 28);
       g.fillStyle(0xf2f6ff, night); g.fillCircle(mx, my, 16);
-      g.fillStyle(this.atmosphereAt(phase).color, night); g.fillCircle(mx + 6, my - 4, 14); // carve crescent
+      g.fillStyle(0x05081c, night); g.fillCircle(mx + 7, my - 4, 14); // carve crescent w/ near-black night sky
     }
   }
 
