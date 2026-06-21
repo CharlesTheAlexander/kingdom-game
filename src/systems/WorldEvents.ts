@@ -151,6 +151,44 @@ export class WorldEvents {
           { label: 'Patronage (150 gold)', enabled: () => s.resources.gold >= 150, effect: () => { s.resources.gold -= 150; s._researchSpeedMult = (s._researchSpeedMult || 1) * 1.25; s.showToast && s.showToast('Research is now faster'); } },
           { label: 'Decline', effect: () => {} },
         ] },
+
+      // ===== (Improvement session) more variety =====
+      { id: 'iron_vein', type: 'choice', title: 'A Rich Iron Vein', body: () => 'Prospectors report a seam of iron ore in the hills, but extracting it will take coin.',
+        choices: [
+          { label: 'Fund the dig (80 gold → 60 iron)', enabled: () => s.resources.gold >= 80, effect: () => { s.resources.gold -= 80; s.resources.add('iron', 60); s.showToast && s.showToast('+60 iron'); } },
+          { label: 'Leave it', effect: () => {} },
+        ] },
+      { id: 'carpenters_guild', type: 'choice', title: "Carpenters' Guild", body: () => 'The guild offers finished planks at a fair price — no sawmill required.',
+        choices: [
+          { label: 'Buy (60 gold → 40 planks)', enabled: () => s.resources.gold >= 60, effect: () => { s.resources.gold -= 60; s.resources.add('planks', 40); if (s.reputation) s.reputation.add('merchant', 3); } },
+          { label: 'Masons too (90 gold → 40 cut stone)', enabled: () => s.resources.gold >= 90, effect: () => { s.resources.gold -= 90; s.resources.add('cutStone', 40); if (s.reputation) s.reputation.add('merchant', 3); } },
+          { label: 'Pass', effect: () => {} },
+        ] },
+      { id: 'roaming_knight', type: 'choice', title: 'A Knight Errant', body: () => 'An armoured knight seeks a worthy lord to serve.',
+        choices: [
+          { label: 'Knight him (120 gold)', enabled: () => s.resources.gold >= 120 && (!s.soldierRoom || s.soldierRoom() > 0), effect: () => { s.resources.gold -= 120; if (s.troops.spawnKnight) s.troops.spawnKnight(s.buildings.castle); } },
+          { label: 'Send him on', effect: () => {} },
+        ] },
+      { id: 'good_harvest', type: 'news', cond: () => (s.seasonHint && s.seasonHint(s.gameDay).indexOf('Autumn') >= 0),
+        effect: () => { s.resources.add('food', 120); if (s.population) s.population.addTempMod('Bountiful harvest', 10, 4); }, text: () => 'A bountiful harvest fills the granaries — the people rejoice. (+120 food)' },
+      { id: 'bandit_toll', type: 'choice', title: 'Bandit Toll', body: () => 'Brigands have blocked a trade road and demand a toll.',
+        choices: [
+          { label: 'Pay the toll (60 gold)', enabled: () => s.resources.gold >= 60, effect: () => { s.resources.gold -= 60; } },
+          { label: 'Refuse (they raid)', effect: () => { if (s.wildlife && s.wildlife.spawnGoblinRaid) s.wildlife.spawnGoblinRaid(); } },
+        ] },
+      { id: 'siege_engineer', type: 'choice', title: 'The Siege Engineer', body: () => 'A renowned engineer offers to assemble a war engine for your army.',
+        choices: [
+          { label: 'Commission it (120 gold, 30 iron)', enabled: () => s.resources.gold >= 120 && s.resources.iron >= 30, effect: () => { s.resources.gold -= 120; s.resources.iron -= 30; if (s.troops.spawnSiege) s.troops.spawnSiege(s.buildings.castle); s.showToast && s.showToast('A siege engine joins your forces'); } },
+          { label: 'Not now', effect: () => {} },
+        ] },
+      { id: 'comet', type: 'news', effect: () => { const good = Math.random() < 0.5; if (s.population) s.population.addTempMod(good ? 'Auspicious comet' : 'Ill omen', good ? 12 : -10, 3); },
+        text: () => 'A comet streaks across the night sky. The people whisper of omens.' },
+      { id: 'royal_betrothal', type: 'choice', title: 'A Royal Betrothal', cond: () => (s.kingdoms || []).some((k) => k.castleAlive),
+        body: () => `${this.rngKingdomName()} proposes a marriage alliance to bind your houses.`,
+        choices: [
+          { label: 'Accept (100 gold → +25 relations)', enabled: () => s.resources.gold >= 100, effect: () => { s.resources.gold -= 100; const k = this.firstKingdom(); if (k && s.diplomacy) s.diplomacy.change(k.cfg.key, 25, 'royal betrothal'); if (s.reputation) s.reputation.add('protector', 4); } },
+          { label: 'Decline politely', effect: () => { const k = this.firstKingdom(); if (k && s.diplomacy) s.diplomacy.change(k.cfg.key, -5); } },
+        ] },
     ];
   }
 

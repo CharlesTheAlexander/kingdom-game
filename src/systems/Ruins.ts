@@ -8,10 +8,13 @@ import Phaser from 'phaser';
 const RUIN_NAMES = [
   'The Sunken Citadel', 'The Wanderer’s Rest', 'The Forge of Ages',
   'The Shattered Keep', 'The Drowned Temple', 'The Iron Throne',
+  'The Hollow Spire', 'The Ashen Vault', 'The Weeping Arch',
 ];
 
 // Reward kinds (assigned one-each, shuffled, at map generation).
-export const RUIN_REWARDS = ['whetstone', 'map', 'iron', 'tome', 'champion', 'cursed'];
+// (Improvement session) 10 reward types shuffled across the ruins, so each
+// playthrough reveals a different subset — the world feels less predictable.
+export const RUIN_REWARDS = ['whetstone', 'map', 'iron', 'tome', 'champion', 'cursed', 'armory', 'hoard', 'relic', 'stoneworks'];
 
 const REVEAL_TILES = 5;
 
@@ -37,7 +40,7 @@ export class Ruins {
       return true;
     };
     // biome → how many ruins go there
-    const plan: any[] = [['forest', 2], ['mountains', 2], ['wildlands', 1], ['delta', 1]];
+    const plan: any[] = [['forest', 3], ['mountains', 2], ['wildlands', 2], ['delta', 1]]; // (Improvement) 8 ruins for more reward variety
     const rewards = Phaser.Utils.Array.Shuffle([...RUIN_REWARDS]);
     let ni = 0;
     for (const [biome, n] of plan) {
@@ -184,7 +187,27 @@ export class Ruins {
         toast(`${ruin.name}: The Ancient — a legendary champion joins you!`); break;
       case 'cursed':
         this.offerCursedGold(ruin); break;
-      default: break;
+      // (Improvement session) more reward variety
+      case 'armory':
+        for (const w of s.troops.warriors) { w.maxHp += 15; w.hp = Math.min(w.maxHp, w.hp + 15); }
+        s.buffs.warriorBonusHp = (s.buffs.warriorBonusHp || 0) + 15;
+        toast(`${ruin.name}: Ancient Armory — all warriors gain +15 HP!`); break;
+      case 'hoard':
+        s.resources.add('gold', 300); s.resources.add('iron', 40);
+        toast(`${ruin.name}: Dragon's Hoard — +300 gold, +40 iron!`); break;
+      case 'relic': {
+        // A holy relic: a lasting happiness blessing + protector renown.
+        if (s.population) s.population.addTempMod('Holy relic', 15, 12);
+        if (s.reputation) s.reputation.add('protector', 10);
+        toast(`${ruin.name}: Sacred Relic — your people are blessed (happiness +15).`); break;
+      }
+      case 'stoneworks':
+        s.resources.add('cutStone', 80); s.resources.add('planks', 60);
+        toast(`${ruin.name}: Master Stoneworks — +80 cut stone, +60 planks!`); break;
+      default:
+        // Unknown reward → a modest gold + iron find, so a ruin is never a dud.
+        s.resources.add('gold', 120); s.resources.add('iron', 20);
+        toast(`${ruin.name}: an old cache — +120 gold, +20 iron.`); break;
     }
   }
 
