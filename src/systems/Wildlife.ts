@@ -134,7 +134,7 @@ class Beast {
 // ---- Wolf -----------------------------------------------------------------
 class Wolf extends Beast {
   constructor(scene, x, y) {
-    super(scene, x, y, { kind: 'wolf', tex: 'warrior_idle', anim: 'warrior_idle', px: 28, tint: 0xff6b6b, hp: 20, dropType: 'meat', dropAmt: 5 });
+    super(scene, x, y, { kind: 'wolf', tex: 'wolf_idle', anim: 'wolf_idle', px: 30, hp: 20, dropType: 'meat', dropAmt: 5 }); // (Assets P5) real wolf sprite
     this.speed = 26;
     this.chaseSpeed = 64;
     this.goal = this.wanderPoint(['north']);

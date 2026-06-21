@@ -13,6 +13,7 @@ import Phaser from 'phaser';
 // [textureKey, lastFrameIndex, framesPerSecond]
 const LOOPS: any[] = [
   ['blue_warrior_idle', 7, 8], ['warrior_idle', 7, 8], ['yellow_warrior_idle', 7, 8], ['purple_warrior_idle', 7, 8], ['goblin_idle', 7, 8],
+  ['wolf_idle', 5, 6], ['boar_idle', 5, 6], // (Assets P5) wildlife idle anims
   ['blue_warrior_run', 5, 12], ['red_warrior_run', 5, 12], ['yellow_warrior_run', 5, 12], ['purple_warrior_run', 5, 12], ['goblin_run', 5, 12],
   ['blue_archer_idle', 5, 8], ['red_archer_idle', 5, 8], ['blue_archer_run', 3, 12],
   ['monk_idle', 5, 7], ['monk_run', 3, 12],

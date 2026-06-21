@@ -340,6 +340,7 @@ function figure(ctx: any, P: any, o: any = {}) {
   // Headgear.
   if (o.helmet) { ctx.fillStyle = css(P.helmet); ctx.beginPath(); ctx.arc(cx + lean, 54 + bob, 17, Math.PI, 0); ctx.fill(); ctx.fillRect(cx - 17 + lean, 52 + bob, 34, 4); if (o.visor) fillRect2(ctx, cx - 12 + lean, 54 + bob, 24, 4, 0x14202c); }
   if (o.hood) { ctx.fillStyle = css(P.hood); ctx.beginPath(); ctx.arc(cx + lean, 52 + bob, 18, Math.PI * 1.04, -Math.PI * 0.04); ctx.fill(); ctx.fillRect(cx - 18 + lean, 50 + bob, 36, 6); }
+  if (o.ears) { ctx.fillStyle = css(P.skin); ctx.beginPath(); ctx.moveTo(cx - 14 + lean, 50 + bob); ctx.lineTo(cx - 28 + lean, 40 + bob); ctx.lineTo(cx - 12 + lean, 56 + bob); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx + 14 + lean, 50 + bob); ctx.lineTo(cx + 28 + lean, 40 + bob); ctx.lineTo(cx + 12 + lean, 56 + bob); ctx.closePath(); ctx.fill(); }
   // Shield on the left arm.
   if (o.shield) { ctx.fillStyle = css(P.shield); ctx.beginPath(); ctx.moveTo(cx - 28 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 100 + bob); ctx.lineTo(cx - 21 + lean, 108 + bob); ctx.lineTo(cx - 28 + lean, 100 + bob); ctx.closePath(); ctx.fill(); if (o.cross) fillRect2(ctx, cx - 22 + lean, 84 + bob, 2, 18, 0xe8c84a); }
   // Weapon arm (ang in radians from shoulder, 0 = straight down toward +x).
@@ -373,6 +374,10 @@ function drawWeapon(ctx: any, w: string, hx: number, hy: number, ang: number, P:
   } else if (w === 'staff') {
     ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx, hy + 14); ctx.lineTo(hx, hy - 30); ctx.stroke();
     if (o.healGlow) disc(ctx, hx, hy - 32, 4 + o.healGlow * 6, 0xfff2a8);
+  } else if (w === 'club') {
+    const a = ang - Math.PI * 0.5;
+    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + Math.cos(a) * 20, hy + Math.sin(a) * 20); ctx.stroke();
+    disc(ctx, hx + Math.cos(a) * 22, hy + Math.sin(a) * 22, 6, 0x5c3a1e);
   }
   // Carried resource (pawns) drawn over the shoulder.
   if (o.carry) { const c = o.carry === 'wood' ? 0x8b5e3c : o.carry === 'gold' ? 0xe8c84a : 0xc0504a; fillRect2(ctx, 96 - 6, 64 + (o.bob || 0), 12, 8, c); }
@@ -434,10 +439,47 @@ export function generateUnits(scene: any) {
   spriteSheet(scene, 'pawn_interact_pickaxe', 6, (ctx, t) => figure(ctx, PAL.pawn, { weapon: 'pickaxe', armAng: Math.PI * (0.9 - Math.abs(Math.sin(t * Math.PI)) * 0.6), lean: 4 }));
 }
 
+// A four-legged beast (wolf / boar) centred at x=96, feet ~y150.
+function beastFig(ctx: any, t: number, kind: 'wolf' | 'boar') {
+  const cx = 96, gY = 148, step = Math.sin(t * Math.PI * 2) * 4;
+  const body = kind === 'wolf' ? 0x55555c : 0x6b4a2a;
+  const belly = kind === 'wolf' ? 0x7a7a82 : 0x8a6238;
+  // legs
+  ctx.fillStyle = css(0x2a2a2e);
+  for (const [lx, ph] of [[-22, 1], [-8, -1], [8, 1], [22, -1]] as any[]) { ctx.fillRect(cx + lx, gY - 18, 6, 18 + ph * step); }
+  // body (elongated)
+  ctx.fillStyle = css(body); ctx.beginPath(); ctx.ellipse(cx, gY - 30, kind === 'wolf' ? 34 : 30, kind === 'wolf' ? 16 : 18, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = css(belly); ctx.beginPath(); ctx.ellipse(cx, gY - 22, kind === 'wolf' ? 26 : 22, 7, 0, 0, Math.PI * 2); ctx.fill();
+  // head (front = +x)
+  const hx = cx + (kind === 'wolf' ? 32 : 30), hy = gY - (kind === 'wolf' ? 38 : 34);
+  disc(ctx, hx, hy, kind === 'wolf' ? 13 : 15, body);
+  if (kind === 'wolf') { ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(hx + 6, hy - 12); ctx.lineTo(hx + 12, hy - 22); ctx.lineTo(hx + 14, hy - 10); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(hx - 4, hy - 12); ctx.lineTo(hx - 2, hy - 22); ctx.lineTo(hx + 4, hy - 12); ctx.closePath(); ctx.fill(); disc(ctx, hx + 12, hy + 2, 4, belly); } // ears + snout
+  else { disc(ctx, hx + 12, hy + 2, 6, belly); ctx.fillStyle = '#eee'; ctx.fillRect(hx + 14, hy + 4, 4, 2); ctx.fillRect(hx + 14, hy - 2, 4, 2); } // boar snout + tusks
+  disc(ctx, hx + (kind === 'wolf' ? 4 : 6), hy - 2, 1.8, kind === 'wolf' ? 0xffd24a : 0x20140c); // eye
+  // tail
+  ctx.strokeStyle = css(body); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(cx - 32, gY - 32); ctx.lineTo(cx - 42, gY - 38 + step); ctx.stroke();
+}
+
+// ---- PHASE 5: enemy + wildlife units ---------------------------------------
+export function generateEnemyUnits(scene: any) {
+  warriorSheets(scene, PAL.warriorR, { idle: 'warrior_idle', run: 'red_warrior_run', atk: 'red_warrior_attack', atk2: 'red_warrior_attack2' }, { helmet: true, shield: true });
+  warriorSheets(scene, PAL.warriorY, { idle: 'yellow_warrior_idle', run: 'yellow_warrior_run', atk: 'yellow_warrior_attack', atk2: 'yellow_warrior_attack2' }, { helmet: true, shield: true });
+  warriorSheets(scene, PAL.warriorP, { idle: 'purple_warrior_idle', run: 'purple_warrior_run', atk: 'purple_warrior_attack', atk2: 'purple_warrior_attack2' }, { helmet: true, shield: true });
+  // Goblins — green, ragged, club, oversized ears, hunched (lean).
+  warriorSheets(scene, PAL.goblin, { idle: 'goblin_idle', run: 'goblin_run', atk: 'goblin_attack', atk2: 'goblin_attack2' }, { weapon: 'club', ears: true, lean: 3 });
+  // Red archer.
+  spriteSheet(scene, 'red_archer_idle', 6, (ctx, t) => figure(ctx, PAL.archerR, { hood: true, weapon: 'bow', ...idlePose(t), armAng: 0 }));
+  spriteSheet(scene, 'red_archer_shoot', 8, (ctx, t) => figure(ctx, PAL.archerR, { hood: true, weapon: 'bow', armAng: 0, pull: t < 0.7 ? t / 0.7 : 0 }));
+  // Wildlife.
+  spriteSheet(scene, 'wolf_idle', 6, (ctx, t) => beastFig(ctx, t, 'wolf'));
+  spriteSheet(scene, 'boar_idle', 6, (ctx, t) => beastFig(ctx, t, 'boar'));
+}
+
 // Master entry — phases are added here as they are built.
 export function generateAll(scene: any) {
   generateTerrain(scene);
   generateBuildings(scene);
   generateAIBuildings(scene);
   generateUnits(scene);
+  generateEnemyUnits(scene);
 }
