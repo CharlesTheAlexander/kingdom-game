@@ -32,7 +32,9 @@ export class Weather {
     s._riversFrozen = false;
     switch (this.cond) {
       case 'winter':
-        s._weatherMoveMult = 0.7; s._weatherFoodMult = 1.3; s._riversFrozen = true; break;
+        // (V2 P3 balance) +20% food (was +30% — a sudden +30% could crash a
+        // marginal economy the moment winter arrives). Movement -30%, rivers freeze.
+        s._weatherMoveMult = 0.7; s._weatherFoodMult = 1.2; s._riversFrozen = true; break;
       case 'drought':
         s._weatherFarmMult = 0.5; s._weatherTradeMult = 1.2; break;
       case 'storm':

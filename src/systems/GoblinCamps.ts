@@ -88,8 +88,14 @@ class GoblinCamp {
   onNewDay() {
     if (this._cleared || !this.alive) return;
     this._ageDays += 1;
-    const need = this.tier * 25; // 25 days to become large, 50 to become a fortress
-    if (this.tier < 3 && this._ageDays >= need) { this.expand(); }
+    // (V2 P3 balance) 20 days per stage (was 25) with an early warning at 15 so
+    // the player has time to react before a camp becomes a fortress.
+    const need = this.tier * 20;
+    if (this.tier < 3 && !this._warned && this._ageDays >= need - 5 && this.discovered) {
+      this._warned = true;
+      if (this.scene.threatWarning) this.scene.threatWarning('A goblin camp is growing rapidly — clear it soon', 0x6cff8a, false);
+    }
+    if (this.tier < 3 && this._ageDays >= need) { this._warned = false; this.expand(); }
   }
 
   expand() {

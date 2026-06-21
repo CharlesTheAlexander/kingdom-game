@@ -804,7 +804,10 @@ export class BattleScene extends Phaser.Scene {
           const cm = this.counterMul(u.type, foe.type);
           let power = u.dmg * 0.5 * (u.count || 1) * this.terrainAtkMul(u) * (u.vetMul || 1) * cm;
           power *= u.side === 'player' ? this.playerCmdMul() : this.enemyCmdMul(); // (V2 P5) commander buffs/collapse
-          if (u.type === 'cavalry' && !u._charged) { power *= 3; u._charged = true; } // CHARGE first strike
+          // (V2 P3 balance) Cavalry charge: 2x first strike (was 3x — 3x one-shot
+          // archers). Spearmen are a HARD counter: their pike wall negates the
+          // charge entirely, so cavalry must not open on them.
+          if (u.type === 'cavalry' && !u._charged) { if (foe.type !== 'spearmen') power *= 2; u._charged = true; }
           this.counterArrow(u, cm); // teach the matchup
           if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(power * this.terrainDefMul(o)); } }
           else foe.takeDamage(power * this.terrainDefMul(foe));

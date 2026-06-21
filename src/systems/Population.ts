@@ -71,11 +71,14 @@ export class Population {
     // --- Production modifier ---------------------------------------------------
     this.prodMult = this.happiness >= 70 ? 1.1 : this.happiness >= 40 ? 1.0 : this.happiness >= 20 ? 0.8 : 0;
 
-    // --- Growth: +1 person every 3 days if fed and below capacity -------------
+    // --- Growth: scales with happiness so a thriving kingdom fills its houses
+    // (V2 P3 balance): the old flat +1/3-days could never reach the Legacy
+    // pop-50 target by day 80. Happy kingdoms now grow ~+1/1.5-days.
     const growthPaused = s._growthPauseUntil && day < s._growthPauseUntil; // (Phase 3) plague
     if (this.happiness >= 30 && food > 0 && this.count < cap && !growthPaused) {
-      this._growthAcc += 1;
-      if (this._growthAcc >= 3) { this._growthAcc = 0; this.count = Math.min(cap, this.count + 1); }
+      const rate = this.happiness >= 70 ? 2 : this.happiness >= 50 ? 1.5 : 1;
+      this._growthAcc += rate;
+      if (this._growthAcc >= 3) { const add = Math.floor(this._growthAcc / 3); this._growthAcc -= add * 3; this.count = Math.min(cap, this.count + add); }
     } else {
       this._growthAcc = 0;
     }
