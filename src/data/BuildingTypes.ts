@@ -122,6 +122,12 @@ export const BuildingTypes: Record<string, BuildingType> = {
     wall: true, placeable: true, noCap: true, anywhere: true, stageUnlock: 3,
     desc: 'Blocks enemies (100 HP). Place along your border, anywhere.',
   },
+  // (V2 Phase 9) Intelligence Guild — trains spies and runs covert missions.
+  intelligence: {
+    key: 'intelligence', name: 'Spy Guild', cost: { gold: 120, planks: 40 }, maxWorkers: 1, hp: 120,
+    placeable: true, stageUnlock: 4, tex: 'tavern',
+    desc: 'Trains spies (80g, 2 days) and sends them on missions: intel, sabotage, incite, assassinate, rumors.',
+  },
   // (V2 Phase 6) Mason's Lodge — its masons maintain nearby buildings, halting
   // deterioration and slowly repairing them. Staffed lodges also help fight fires.
   masonslodge: {
@@ -134,7 +140,7 @@ export const BuildingTypes: Record<string, BuildingType> = {
 // Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now
 // grow automatically by settlement tier. The wall type def is kept above only so
 // old saves containing a placed Wall still load without error.
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'masonslodge', 'library', 'sawmill', 'stonecutter', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall'];
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'masonslodge', 'library', 'sawmill', 'stonecutter', 'intelligence', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 // (Loop 3, Feature #3) Buildings upgrade through 5 levels. Output scales on a

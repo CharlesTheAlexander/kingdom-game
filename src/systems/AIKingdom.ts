@@ -187,7 +187,10 @@ export class AIKingdom {
   // (Audit FIX 3) Each kingdom keeps a standing garrison so it reads as a real
   // threat even before it has built up barracks.
   estimatedArmy() {
-    return (this.cfg.garrison || 0) + Math.max(2, this.barracksCount * 2) + this.liveEnemies().length;
+    let n = (this.cfg.garrison || 0) + Math.max(2, this.barracksCount * 2) + this.liveEnemies().length;
+    // (V2 Phase 9) Espionage unrest (incite/rumors) halves their fielded strength.
+    if (this._unrestUntil && (this.scene.gameDay || 0) < this._unrestUntil) n = Math.max(1, Math.floor(n * 0.5));
+    return n;
   }
 
   placeCastle() {

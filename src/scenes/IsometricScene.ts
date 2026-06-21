@@ -63,6 +63,7 @@ import { Heroes } from '../systems/Heroes.js';
 import { Maintenance } from '../systems/Maintenance.js';
 import { RoyalCourt } from '../systems/RoyalCourt.js';
 import { Succession } from '../systems/Succession.js';
+import { Espionage, MISSIONS } from '../systems/Espionage.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -297,6 +298,7 @@ export class IsometricScene extends GameScene {
     this._plagueMult = 1;
     this.court = new RoyalCourt(this); // (V2 Phase 7) advisors
     this.succession = new Succession(this); // (V2 Phase 8) heir, marriage, succession
+    this.espionage = new Espionage(this); // (V2 Phase 9) spy network
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -959,6 +961,52 @@ export class IsometricScene extends GameScene {
     else this.closeFirePanel();
     if (b && b.typeKey === 'castle') this.openCourtPanel(); // (V2 Phase 7) the seat of the court
     else this.closeCourtPanel();
+    if (b && b.typeKey === 'intelligence') this.openSpyPanel(); // (V2 Phase 9)
+    else this.closeSpyPanel();
+  }
+
+  // (V2 Phase 9) Spy Guild — train spies and dispatch covert missions.
+  closeSpyPanel() { if (this._spyPanel) { this._spyPanel.forEach((o) => o.destroy()); this._spyPanel = null; } }
+  openSpyPanel() {
+    this.closeSpyPanel();
+    const E = this.espionage; if (!E) return;
+    const fix = (o) => o.setScrollFactor(0).setDepth(122);
+    const factions = (this.kingdoms || []).filter((k) => k.castleAlive);
+    const W = 580, ht = 150 + factions.length * 30, x = (GAME_W - W) / 2, y = (GAME_H - ht) / 2, els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.55).setOrigin(0, 0).setInteractive()));
+    els.push(fix(this.add.rectangle(x, y, W, ht, 0x131017, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0x5a7c8a, 0.9)));
+    els.push(fix(this.add.text(x + W / 2, y + 12, 'SPY GUILD', { fontFamily: 'monospace', fontSize: '20px', color: '#bfe0ee', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    const close = fix(this.add.text(x + W - 14, y + 10, '✕', { fontFamily: 'monospace', fontSize: '18px', color: '#9fc4d2' }).setOrigin(1, 0).setInteractive({ useHandCursor: true }));
+    close.on('pointerdown', () => this.closeSpyPanel()); els.push(close);
+    const inTrain = E.training.length;
+    els.push(fix(this.add.text(x + 20, y + 42, `Spies ready: ${E.spies}   ·   in training: ${inTrain}`, { fontFamily: 'monospace', fontSize: '13px', color: '#dfe9ee' })));
+    const tb = fix(this.add.rectangle(x + W - 170, y + 38, 150, 24, 0x2a4a5c, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0x6aa0c0, 0.9).setInteractive({ useHandCursor: true }));
+    const tbt = fix(this.add.text(x + W - 95, y + 50, 'Train spy — 80g', { fontFamily: 'monospace', fontSize: '11px', color: '#dff0fa' }).setOrigin(0.5));
+    tb.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.espionage.trainSpy(); this.openSpyPanel(); });
+    els.push(tb, tbt);
+    // Mission picker.
+    els.push(fix(this.add.text(x + 20, y + 74, this._spyMission ? `Mission: ${MISSIONS[this._spyMission].label} — ${MISSIONS[this._spyMission].desc}` : 'Pick a mission, then a target faction below:', { fontFamily: 'monospace', fontSize: '10px', color: '#a9c0cc', wordWrap: { width: W - 40 } })));
+    const mkeys = Object.keys(MISSIONS);
+    const mw = (W - 40) / mkeys.length;
+    mkeys.forEach((mk, i) => {
+      const sel = this._spyMission === mk;
+      const b = fix(this.add.rectangle(x + 20 + i * mw, y + 92, mw - 4, 24, sel ? 0x3a6a4a : 0x24303a, 0.95).setOrigin(0, 0).setStrokeStyle(1, sel ? 0x6ad68a : 0x456, 0.9).setInteractive({ useHandCursor: true }));
+      const t = fix(this.add.text(x + 20 + i * mw + (mw - 4) / 2, y + 104, MISSIONS[mk].label.split(' ')[0], { fontFamily: 'monospace', fontSize: '9px', color: '#dfe9ee' }).setOrigin(0.5));
+      b.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this._spyMission = mk; this.openSpyPanel(); });
+      els.push(b, t);
+    });
+    let ry = y + 124;
+    for (const k of factions) {
+      const key = k.cfg.key;
+      els.push(fix(this.add.text(x + 20, ry + 4, k.cfg.name, { fontFamily: 'monospace', fontSize: '12px', color: '#e7eef2' })));
+      const canGo = E.spies > 0 && this._spyMission;
+      const b = fix(this.add.rectangle(x + W - 150, ry, 130, 22, canGo ? 0x4a2e5c : 0x2a2a30, 0.95).setOrigin(0, 0).setStrokeStyle(1, canGo ? 0x9a6ac0 : 0x444, 0.9).setInteractive({ useHandCursor: canGo }));
+      const t = fix(this.add.text(x + W - 85, ry + 11, this._spyMission ? `Send (${Math.round(MISSIONS[this._spyMission].chance * 100)}%)` : 'Pick mission', { fontFamily: 'monospace', fontSize: '10px', color: canGo ? '#e9d6fa' : '#888' }).setOrigin(0.5));
+      if (canGo) b.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.espionage.runMission(this._spyMission, key); this.openSpyPanel(); });
+      els.push(b, t);
+      ry += 30;
+    }
+    this._spyPanel = els;
   }
 
   // (V2 Phase 7) Royal Court — advisors, loyalty, and weekly suggestions.
@@ -3906,6 +3954,7 @@ export class IsometricScene extends GameScene {
     if (this.maintenance) this.maintenance.onNewDay(); // (V2 Phase 6) aging + disasters
     if (this.court) this.court.onNewDay(); // (V2 Phase 7) royal court weekly reports
     if (this.succession) this.succession.onNewDay(); // (V2 Phase 8) heir raising + natural death
+    if (this.espionage) this.espionage.onNewDay(); // (V2 Phase 9) spy training
     // (Completion Phase 7) Advance Siege Workshop training.
     for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
