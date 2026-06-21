@@ -2,6 +2,7 @@
 import Phaser from 'phaser';
 import './style.css';
 import { GameScene, GAME_W, GAME_H } from './scenes/GameScene.js';
+import { MainMenuScene } from './scenes/MainMenuScene.js';
 import { IsometricScene } from './scenes/IsometricScene.js';
 import { ContinentScene } from './scenes/ContinentScene.js';
 import { BattleScene } from './scenes/BattleScene.js';
@@ -17,10 +18,10 @@ const config: Phaser.Types.Core.GameConfig = {
     autoCenter: Phaser.Scale.CENTER_BOTH,
     expandParent: true,
   },
-  // IsometricScene is the active scene (first in the array auto-starts);
-  // GameScene stays registered as reference but is not started. ContinentScene
-  // is launched on demand (Tab) on top of the local view.
-  scene: [IsometricScene, GameScene, ContinentScene, BattleScene],
+  // MainMenuScene auto-starts (first in the array) and launches IsometricScene
+  // on New Kingdom / Continue / Load. GameScene stays registered as reference;
+  // ContinentScene is launched on demand (Tab) on top of the local view.
+  scene: [MainMenuScene, IsometricScene, GameScene, ContinentScene, BattleScene],
 };
 
 const game = new Phaser.Game(config);

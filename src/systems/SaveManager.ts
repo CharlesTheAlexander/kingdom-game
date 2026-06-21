@@ -113,6 +113,16 @@ export function requestLoad(scene: any, slot: number): { ok: boolean; error?: st
 
 export function consumePending() { const p = PENDING; PENDING = null; return p; }
 export function hasPending() { return !!PENDING; }
+export function clearPending() { PENDING = null; }
+
+// (Main menu) Stash a slot's snapshot WITHOUT restarting a scene, so the menu can
+// start IsometricScene fresh and have its create() apply the save (Continue/Load).
+export function preparePending(slot: number): { ok: boolean; error?: string } {
+  const raw = readRaw(slot);
+  if (!raw || raw.corrupted || !raw.data) return { ok: false, error: raw && raw.corrupted ? 'Save is corrupted.' : 'Empty slot.' };
+  PENDING = raw.data;
+  return { ok: true };
+}
 
 // ------------------------------------------------------------------ apply ----
 
