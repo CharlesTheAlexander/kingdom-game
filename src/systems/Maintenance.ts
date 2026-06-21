@@ -150,6 +150,7 @@ export class Maintenance {
         this.clearFire(b);
         b.condition = 0; this.applyConditionVisual(b);
         this.scene.logEvent(`${b.type.name} burned down`, 'red');
+        this.scene.stats && this.scene.stats.note('buildingsBurned'); // (V2 P4 #10)
         if (this.scene.razeBuilding) this.scene.razeBuilding(b); else b.alive = false;
       } else if (Math.random() < 0.3) {
         const near = this.buildingsList().find((o: any) => o !== b && !o._onFire && o.typeKey !== 'castle' && Math.abs(o.col - b.col) <= 2 && Math.abs(o.row - b.row) <= 2);
@@ -207,6 +208,7 @@ export class Maintenance {
     this.dragon = { since: day };
     this.spawnDragonSprite(); // (Assets V2) show the beast circling the kingdom
     sfx.play('dragon_roar'); // (V2 P4 #8) massive roar
+    this.scene.stats && this.scene.stats.note('dragonsEncountered'); // (V2 P4 #10)
     this.scene.threatWarning('A DRAGON descends upon your kingdom! A champion or siege weapons can stop it', 0xc0392b, true);
   }
   // (Assets V2) A dragon sprite circles over the castle while the threat is active.

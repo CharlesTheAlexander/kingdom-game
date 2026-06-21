@@ -60,10 +60,12 @@ export class Espionage {
     if (this.spies <= 0) { if (this.scene.showToast) this.scene.showToast('No trained spies'); return null; }
     this.spies -= 1;
     sfx.play('spy_mission'); // (V2 P4 #8) intrigue
+    this.scene.stats && this.scene.stats.note('spiesSent'); // (V2 P4 #10)
     const k = this.kingdom(key);
     const name = k && k.cfg ? k.cfg.name : key;
     const day = this.scene.gameDay || 0;
     const success = Math.random() < m.chance;
+    if (!success && (type === 'sabotage' || type === 'assassinate')) this.scene.stats && this.scene.stats.note('spiesCaught'); // (V2 P4 #10)
     let msg = '';
     switch (type) {
       case 'intel':

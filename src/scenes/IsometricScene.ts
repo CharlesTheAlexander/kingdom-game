@@ -1678,7 +1678,7 @@ export class IsometricScene extends GameScene {
     const st = this.stats ? this.stats.s : null;
     const els = [];
     els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.78).setOrigin(0, 0).setInteractive()));
-    const W = 760, H = 600, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    const W = 760, H = 680, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
     els.push(fix(this.add.rectangle(x, y, W, H, 0x12101a, 0.99).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
     els.push(fix(this.add.text(x + 20, y + 14, 'KINGDOM STATISTICS', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold' })));
     const closeBg = fix(this.add.rectangle(x + W - 32, y + 14, 24, 24, 0x5c1a1a, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0xf0e6c8, 0.6).setInteractive({ useHandCursor: true }));
@@ -1726,6 +1726,16 @@ export class IsometricScene extends GameScene {
       ['Ruins explored', `${this.ruins ? this.ruins.exploredCount() : 0}/${this.ruins ? this.ruins.list.length : 0}`],
       ['Settlements found', `${this.discovery ? this.discovery.settlementsDiscovered() : 0}/${settleTotal}`],
       ['Biomes explored', `${this.discovery ? this.discovery.biomesExplored() : 0}/4`],
+    ]);
+    // (V2 P4 #10) LEGENDS — records from the new V2 systems.
+    ly = y + 472;
+    sect(L, ly, 'LEGENDS', [
+      ['Heroes recruited', st ? st.heroesRecruited : 0], ['Heroes lost', st ? st.heroesLost : 0],
+      ['Spies sent', st ? st.spiesSent : 0], ['Spies caught', st ? st.spiesCaught : 0],
+    ]);
+    sect(Rc, ly, 'LEGACY', [
+      ['Buildings burned', st ? st.buildingsBurned : 0], ['Dragons faced', st ? st.dragonsEncountered : 0],
+      ['Royal marriages', st ? st.marriagesArranged : 0], ['Advisors defected', st ? st.advisorsDefected : 0],
     ]);
     // Reputation bars at the bottom
     if (this.reputation) {
@@ -2346,6 +2356,29 @@ export class IsometricScene extends GameScene {
     if (c) {
       g.fillStyle(0x00e5ff, 1);
       g.fillRect(toX(c.col) - 2, toY(c.row) - 2, 5, 5);
+    }
+
+    // (V2 P4 #7) Goblin camps — colour by escalation tier (green→orange→red).
+    if (this.goblinCamps) {
+      for (const cmp of this.goblinCamps.list) {
+        if (!cmp.alive || !cmp.discovered) continue;
+        g.fillStyle([0, 0x6cff8a, 0xffa53a, 0xff3a3a][cmp.tier] || 0x6cff8a, 1);
+        g.fillRect(toX(cmp.col) - 1, toY(cmp.row) - 1, 3, 3);
+      }
+    }
+    // (V2 P4 #7) Buildings on fire — orange dots.
+    if (this.maintenance && this.maintenance.fires) {
+      g.fillStyle(0xff8c1a, 1);
+      for (const b of this.maintenance.fires) { if (b.alive) g.fillRect(toX(b.col) - 1, toY(b.row) - 1, 3, 3); }
+    }
+    // (V2 P4 #7) Heroes assigned to armies — small gold stars at the army.
+    if (this.heroes && this.armyMgr) {
+      g.fillStyle(0xffd24a, 1);
+      for (const h of this.heroes.living()) {
+        if (!h.armyId) continue;
+        const army = this.armyMgr.armies.find((a: any) => a.id === h.armyId);
+        if (army) { const x = toX(army.col), y = toY(army.row); g.fillRect(x - 2, y - 2, 4, 4); g.fillRect(x - 3, y, 8, 1); g.fillRect(x, y - 3, 1, 8); }
+      }
     }
 
     // Camera viewport outline (map its corners through screen->tile).

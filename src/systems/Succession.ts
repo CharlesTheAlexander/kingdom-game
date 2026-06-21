@@ -55,6 +55,7 @@ export class Succession {
     }
     // Shared research bonus (applied in Research.onNewDay).
     this.scene._marriageResearchMult = 1.15;
+    this.scene.stats && this.scene.stats.note('marriagesArranged'); // (V2 P4 #10)
     const fname = this.factionName(key);
     if (this.scene.heir) {/* noop */}
     if (this.scene.logEvent) this.scene.logEvent(`Royal wedding! Heir ${this.heir.name} weds into the ${fname}. Permanent alliance sealed.`, 'gold');

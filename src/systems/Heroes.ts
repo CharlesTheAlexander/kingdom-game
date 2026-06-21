@@ -76,6 +76,7 @@ export class Heroes {
     s.logEvent && s.logEvent(`${d.name} the ${d.title} has joined your kingdom!`, 'gold');
     s.showToast && s.showToast(`${d.name} joins you!`);
     sfx.play('hero_join'); // (V2 P4 #8) fanfare
+    s.stats && s.stats.note('heroesRecruited'); // (V2 P4 #10)
     s.refreshPanel && s.refreshPanel();
   }
 
@@ -109,6 +110,7 @@ export class Heroes {
     s.logEvent && s.logEvent(`${h.name} the ${h.title} has fallen at ${location}. Day ${h.deathDay}.`, 'red');
     s.threatWarning && s.threatWarning(`${h.name} has fallen in battle`, 0xff4d4d, true);
     sfx.play('hero_death'); // (V2 P4 #8) somber tone
+    s.stats && s.stats.note('heroesLost'); // (V2 P4 #10)
     s.refreshPanel && s.refreshPanel();
   }
 

@@ -19,6 +19,9 @@ export class KingdomStats {
       battlesWon: 0, battlesLost: 0, soldiersTrained: 0, enemiesDefeated: 0,
       marketTrades: 0, caravanTrades: 0, caravansDelivered: 0, expeditions: 0,
       ruinsDiscovered: 0, ruinsExplored: 0,
+      // (V2 P4 #10) records for the new systems
+      heroesRecruited: 0, heroesLost: 0, spiesSent: 0, spiesCaught: 0,
+      buildingsBurned: 0, dragonsEncountered: 0, marriagesArranged: 0, advisorsDefected: 0,
       gathered: { wood: 0, stone: 0, food: 0, gold: 0, iron: 0 },
     };
   }

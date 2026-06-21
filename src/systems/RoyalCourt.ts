@@ -115,6 +115,7 @@ export class RoyalCourt {
     this.advisors = this.advisors.filter((x) => x !== a);
     if (this.scene.diplomacy && this.scene.diplomacy.rel) this.scene.diplomacy.rel[enemy] = Math.max(-100, (this.scene.diplomacy.rel[enemy] || 0) - 15);
     this.scene.logEvent(`${a.title} ${a.name} has defected to the ${enemy}!`, 'red');
+    this.scene.stats && this.scene.stats.note('advisorsDefected'); // (V2 P4 #10)
     if (this.scene.threatWarning) this.scene.threatWarning(`${a.title} ${a.name} betrayed your court!`, 0xc0392b, true);
     this._pendingReturns.push({ role: a.role, day: this.scene.gameDay + 6 });
   }
