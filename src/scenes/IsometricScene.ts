@@ -539,9 +539,10 @@ export class IsometricScene extends GameScene {
     };
     if (victory) {
       mkBtn(GAME_W / 2 - 115, 'Continue Playing', 0x1f5b3a, () => this.dismissEndScreen());
-      mkBtn(GAME_W / 2 + 115, 'New Game', 0x5c1a1a, () => this.startNewGame());
+      mkBtn(GAME_W / 2 + 115, 'Main Menu', 0x5c1a1a, () => this.toMainMenu());
     } else {
-      mkBtn(GAME_W / 2, 'Try Again', 0x2d4a6b, () => this.scene.restart());
+      mkBtn(GAME_W / 2 - 115, 'Try Again', 0x2d4a6b, () => this.scene.restart());
+      mkBtn(GAME_W / 2 + 115, 'Main Menu', 0x5c1a1a, () => this.toMainMenu());
     }
     this._endScreenEls = els;
     this.routeCameras && this.routeCameras();
@@ -556,6 +557,15 @@ export class IsometricScene extends GameScene {
   startNewGame() {
     try { for (let i = 0; i < 3; i++) SaveManager.deleteSlot(i); localStorage.removeItem('kg_king'); localStorage.removeItem('kg_tut'); } catch (e) {}
     this.scene.restart();
+  }
+
+  // (Improvement) Return to the main menu — the hub for New Kingdom / Continue /
+  // Load. Stops any side scenes so the menu starts clean.
+  toMainMenu() {
+    try { SaveManager.clearPending && SaveManager.clearPending(); } catch (e) {}
+    try { if (this.scene.isActive('ContinentScene')) this.scene.stop('ContinentScene'); } catch (e) {}
+    try { if (this.scene.isActive('BattleScene')) this.scene.stop('BattleScene'); } catch (e) {}
+    this.scene.start('MainMenuScene');
   }
 
   // Slice the "finished" frame out of each construction sheet into a standalone
