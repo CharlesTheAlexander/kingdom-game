@@ -1,3 +1,4 @@
+import { sfx } from '../audio/SoundEngine.js';
 // (V2 Phase 9) Espionage Network.
 //
 // Requires a Spy Guild (Intelligence building). Spies are trained for 80 gold
@@ -58,6 +59,7 @@ export class Espionage {
     const m = MISSIONS[type]; if (!m) return null;
     if (this.spies <= 0) { if (this.scene.showToast) this.scene.showToast('No trained spies'); return null; }
     this.spies -= 1;
+    sfx.play('spy_mission'); // (V2 P4 #8) intrigue
     const k = this.kingdom(key);
     const name = k && k.cfg ? k.cfg.name : key;
     const day = this.scene.gameDay || 0;

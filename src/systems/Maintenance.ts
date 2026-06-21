@@ -1,3 +1,4 @@
+import { sfx } from '../audio/SoundEngine.js';
 // (V2 Phase 6) Building Aging + Disasters.
 //
 // Aging: every 20 days each building loses one condition level (Perfect → Good
@@ -121,6 +122,7 @@ export class Maintenance {
   igniteBuilding(b: any) {
     if (b._onFire || !b.alive) return;
     b._onFire = true; b._fireDays = 2; this.fires.push(b);
+    sfx.play('building_fire'); // (V2 P4 #8) crackle
     if (this.scene.add) {
       b._fireFx = this.scene.add.text(b.x, b.y - 30, '🔥', { fontSize: '20px' }).setOrigin(0.5).setDepth(40);
       this.scene.tweens.add({ targets: b._fireFx, scale: { from: 0.9, to: 1.25 }, yoyo: true, duration: 300, repeat: -1 });
@@ -204,6 +206,7 @@ export class Maintenance {
   startDragon(day: number) {
     this.dragon = { since: day };
     this.spawnDragonSprite(); // (Assets V2) show the beast circling the kingdom
+    sfx.play('dragon_roar'); // (V2 P4 #8) massive roar
     this.scene.threatWarning('A DRAGON descends upon your kingdom! A champion or siege weapons can stop it', 0xc0392b, true);
   }
   // (Assets V2) A dragon sprite circles over the castle while the threat is active.

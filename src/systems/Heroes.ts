@@ -1,5 +1,7 @@
 // Heroes.ts (V2 Phase 3) — named heroes join the kingdom, fight with armies,
 // gain XP, and can fall permanently. Each arrives via a specific condition/event.
+import { sfx } from '../audio/SoundEngine.js';
+
 export interface HeroDef {
   id: string; name: string; title: string; backstory: string;
   type: 'warrior' | 'monk' | 'merchant' | 'ranger' | 'scholar' | 'renegade';
@@ -73,6 +75,7 @@ export class Heroes {
     const s = this.scene;
     s.logEvent && s.logEvent(`${d.name} the ${d.title} has joined your kingdom!`, 'gold');
     s.showToast && s.showToast(`${d.name} joins you!`);
+    sfx.play('hero_join'); // (V2 P4 #8) fanfare
     s.refreshPanel && s.refreshPanel();
   }
 
@@ -105,6 +108,7 @@ export class Heroes {
     if (s.population) s.population.addTempMod(`Mourning ${h.name}`, -20, 3);
     s.logEvent && s.logEvent(`${h.name} the ${h.title} has fallen at ${location}. Day ${h.deathDay}.`, 'red');
     s.threatWarning && s.threatWarning(`${h.name} has fallen in battle`, 0xff4d4d, true);
+    sfx.play('hero_death'); // (V2 P4 #8) somber tone
     s.refreshPanel && s.refreshPanel();
   }
 

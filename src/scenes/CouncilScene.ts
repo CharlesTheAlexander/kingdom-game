@@ -25,6 +25,7 @@ export class CouncilScene extends Phaser.Scene {
     const stage = iso.currentStage ? iso.currentStage() : 7;
     this.drawHall(stage);
     this.seatLeaders(iso);
+    sfx.play('council_chord'); // (V2 P4 #8) grand entry chord
     this.cameras.main.fadeIn(500, 0, 0, 0);
     // Entrance → opening greeting → proposals.
     this.time.delayedCall(600, () => this.opening(iso));

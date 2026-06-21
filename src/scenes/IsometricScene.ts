@@ -3325,6 +3325,7 @@ export class IsometricScene extends GameScene {
       enemyArmy: enemyUnits.map((u) => ({ type: u.type, count: u.count })),
       terrainType: this.battleTerrain(), enemyFaction: ctx.faction || 'red',
       commander: { name: this.rulerName, trait: this.kingTrait }, // (V2 P5) King/Queen leads in person
+      weather: this._weather || 'clear', // (V2 P4 #4) carry the weather onto the battlefield
       context: ctx, playerDefending: !!ctx.defending,
       defenderWalls: !!(ctx && !ctx.defending && (ctx.kind === 'settlement' || ctx.kind === 'castle')), // (Phase 7)
       onComplete: (res) => this.onArmyBattleComplete(playerArmy, res, ctx),

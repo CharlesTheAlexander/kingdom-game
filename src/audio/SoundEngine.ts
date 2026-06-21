@@ -147,6 +147,39 @@ class SoundEngine {
         this.tone(120, 0.25, { type: 'sine', vol: 0.5, slideTo: 40 });
         this.noise(0.25, { vol: 0.35, type: 'lowpass', freq: 600 });
         break;
+
+      // (V2 Phase 4, improvement #8) Sounds for the new systems.
+      case 'council_chord': // Great Council entry — a grand sustained organ chord.
+        this.tone(NOTE.C4, 0.9, { type: 'triangle', vol: 0.45 });
+        this.tone(NOTE.E4, 0.9, { type: 'triangle', vol: 0.3 });
+        this.tone(NOTE.G4, 0.9, { type: 'triangle', vol: 0.3 });
+        this.tone(NOTE.C5, 0.9, { type: 'sine', vol: 0.2, when: 0.05 });
+        break;
+      case 'hero_join': // a bright rising fanfare
+        this.arp([NOTE.G4, NOTE.C5, NOTE.E5, NOTE.G5], 0.18, { type: 'triangle', vol: BIG, gap: 0.08 });
+        break;
+      case 'hero_death': // a somber descending tone
+        this.arp([NOTE.E4, NOTE.C4, 220, 174.61], 0.34, { type: 'sine', vol: 0.5, gap: 0.16 });
+        break;
+      case 'dragon_roar': // a massive low growl
+        this.tone(70, 0.7, { type: 'sawtooth', vol: 0.6, slideTo: 38 });
+        this.noise(0.7, { vol: 0.4, type: 'lowpass', freq: 220 });
+        break;
+      case 'cavalry_charge': // thundering hooves
+        for (let i = 0; i < 8; i++) this.noise(0.06, { vol: 0.3, type: 'lowpass', freq: 180, when: i * 0.08 });
+        this.tone(90, 0.5, { type: 'sine', vol: 0.3, slideTo: 70 });
+        break;
+      case 'battle_cry': // a rallying shout
+        this.tone(220, 0.3, { type: 'sawtooth', vol: 0.5, slideTo: 360 });
+        this.noise(0.3, { vol: 0.25, type: 'bandpass', freq: 900 });
+        break;
+      case 'spy_mission': // subtle intrigue
+        this.tone(660, 0.1, { type: 'sine', vol: 0.22 });
+        this.tone(440, 0.16, { type: 'sine', vol: 0.2, when: 0.12 });
+        break;
+      case 'building_fire': // a crackle
+        for (let i = 0; i < 5; i++) this.noise(0.04, { vol: 0.22, type: 'highpass', freq: 2600, when: i * 0.05 });
+        break;
       default: break;
     }
   }

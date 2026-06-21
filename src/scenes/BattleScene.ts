@@ -218,7 +218,18 @@ export class BattleScene extends Phaser.Scene {
     this.createStartButton(); // (Phase 5) skip the pre-battle timer
     this.createAbilityButton(); // (V2 P5) commander special ability
     this.setupBattleInput();  // (Loop 1) in-battle box-select
+    this.createBattleWeather(); // (V2 P4 #4) rain/snow carried from the world
     this.cameras.main.fadeIn(400, 0, 0, 0);
+  }
+
+  // (V2 P4, improvement #4) If it was raining/snowing in the world, the battle is
+  // fought under the same sky.
+  createBattleWeather() {
+    const w = this.cfg.weather;
+    if (w !== 'rain' && w !== 'snow') return;
+    if (!this.textures.exists('battle_wx')) { const wg = this.make.graphics({ x: 0, y: 0, add: false } as any); wg.fillStyle(0xffffff, 1); wg.fillRect(0, 0, w === 'rain' ? 2 : 3, w === 'rain' ? 10 : 3); wg.generateTexture('battle_wx', 3, 10); wg.destroy(); }
+    if (w === 'rain') this.add.particles(0, -10, 'battle_wx', { x: { min: 0, max: GAME_W }, y: -10, lifespan: 900, speedY: { min: 600, max: 800 }, speedX: { min: -60, max: -40 }, scaleY: { min: 0.8, max: 1.4 }, alpha: { start: 0.5, end: 0.2 }, quantity: 6, frequency: 24, tint: 0x9fc4d2 }).setDepth(68);
+    else this.add.particles(0, -10, 'battle_wx', { x: { min: 0, max: GAME_W }, y: -10, lifespan: 4200, speedY: { min: 50, max: 110 }, speedX: { min: -30, max: 30 }, scale: { min: 0.6, max: 1.2 }, alpha: { start: 0.8, end: 0.3 }, quantity: 3, frequency: 50, tint: 0xffffff }).setDepth(68);
   }
 
   // (V2 Phase 5) Spawn the player's King/Queen as a powerful Commander unit.
@@ -256,7 +267,7 @@ export class BattleScene extends Phaser.Scene {
     const trait = this.cfg.commander.trait;
     if (trait === 'warlord') {
       this._cryUntil = this.battleTime + 20; this.morale.player = Math.min(100, this.morale.player + 10);
-      this.battleToast('BATTLE CRY!  +30% attack for 20s', 0xffd24a);
+      this.battleToast('BATTLE CRY!  +30% attack for 20s', 0xffd24a); sfx.play('battle_cry'); // (V2 P4 #8)
     } else if (trait === 'diplomat') {
       this._hexUntil = this.battleTime + 20; this.morale.enemy = Math.max(0, this.morale.enemy - 22);
       this.battleToast('HONORABLE DUEL!  enemy weakened', 0x66ddff);
@@ -807,7 +818,7 @@ export class BattleScene extends Phaser.Scene {
           // (V2 P3 balance) Cavalry charge: 2x first strike (was 3x — 3x one-shot
           // archers). Spearmen are a HARD counter: their pike wall negates the
           // charge entirely, so cavalry must not open on them.
-          if (u.type === 'cavalry' && !u._charged) { if (foe.type !== 'spearmen') power *= 2; u._charged = true; }
+          if (u.type === 'cavalry' && !u._charged) { if (foe.type !== 'spearmen') power *= 2; u._charged = true; sfx.playThrottled('cavalry_charge', 400); /* (V2 P4 #8) hooves */ }
           this.counterArrow(u, cm); // teach the matchup
           if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(power * this.terrainDefMul(o)); } }
           else foe.takeDamage(power * this.terrainDefMul(foe));
@@ -845,6 +856,14 @@ export class BattleScene extends Phaser.Scene {
     // Simple obstacle avoidance.
     for (const o of this.obstacles) { if (Phaser.Math.Distance.Between(nx, ny, o.x, o.y) < o.r) { nx = u.x + Math.cos(ang + 1) * speed * dt; ny = u.y + Math.sin(ang + 1) * speed * dt; break; } }
     u.x = Phaser.Math.Clamp(nx, 30, GAME_W - 30); u.y = Phaser.Math.Clamp(ny, HORIZON + 60, GAME_H - 120);
+    // (V2 P4 #4) Galloping cavalry kick up a dust trail.
+    if (u.type === 'cavalry') { u._dustCd = (u._dustCd || 0) - dt; if (u._dustCd <= 0) { u._dustCd = 0.1; this.dustPuff(u.x + (u.side === 'player' ? 14 : -14), u.y + 18); } }
+  }
+
+  // (V2 P4 #4) A small fading dust cloud (cavalry trail).
+  dustPuff(x, y) {
+    const d = this.add.ellipse(x, y, 12, 6, 0xb6a886, 0.45).setDepth(9);
+    this.tweens.add({ targets: d, scale: 1.8, alpha: 0, y: y - 4, duration: 480, onComplete: () => d.destroy() });
   }
 
   projectile(x1, y1, x2, y2) {
@@ -875,6 +894,8 @@ export class BattleScene extends Phaser.Scene {
     const enemyDead = (this.cfg.enemyArmy || []).reduce((s, g) => s + g.count, 0);
     const loot = victory ? { gold: enemyDead * 8, iron: this.faction === 'goblin' ? enemyDead * 2 : 0 } : null;
 
+    // (V2 P4 #4) Surviving troops raise their weapons in celebration on victory.
+    if (victory) { for (const u of this.sideUnits('player')) this.tweens.add({ targets: u.spr, y: u.spr.y - 10, angle: u.side === 'player' ? -8 : 8, yoyo: true, repeat: 2, duration: 220, delay: Phaser.Math.Between(0, 300) }); }
     // (Feel pass) Victory confetti rains down; defeat washes the screen gray.
     if (victory) {
       if (!this.textures.exists('confetti_px')) { const cg = this.make.graphics({ x: 0, y: 0, add: false } as any); cg.fillStyle(0xffffff, 1); cg.fillRect(0, 0, 4, 4); cg.generateTexture('confetti_px', 4, 4); cg.destroy(); }
