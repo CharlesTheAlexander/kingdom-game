@@ -66,7 +66,7 @@ export const BuildingTypes: Record<string, BuildingType> = {
   // sprite (tinted blue + floating book icon) since the pack has no library art.
   library: {
     key: 'library', name: 'Library', cost: { gold: 100, wood: 80, stone: 40 }, maxWorkers: 2, hp: 130,
-    footprint: 2, placeable: true, stageUnlock: 2, tex: 'mine',
+    footprint: 2, placeable: true, stageUnlock: 2,
     desc: 'Unlocks research. 1 worker = 1 tech / 3 days, 2 workers = faster.',
   },
   watchtower: {

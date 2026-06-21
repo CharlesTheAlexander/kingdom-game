@@ -353,6 +353,7 @@ export class IsometricScene extends GameScene {
       { key: 'tome', name: "Healer's Tome", desc: 'Monks heal 50% more HP/sec', apply: (s) => (s.buffs.monkHeal *= 1.5) },
     ];
 
+    AssetGenerator.generateBuildings(this); // (Assets Phase 2) procedural buildings; slice/alias below then no-op
     this.sliceBuildingTextures();
     this.createAnimations();
     AssetGenerator.generateTerrain(this); // (Assets Phase 1) procedural terrain into iso_* keys
@@ -961,7 +962,9 @@ export class IsometricScene extends GameScene {
     b.x = sc.x;
     b.y = sc.y;
     b.rect.setOrigin(0.5, 1.0).setScale(scale).setAngle(0).setPosition(sc.x, sc.y);
-    const BTINT = { market: 0xffe27a, blacksmith: 0xd08a4a, watchtower: 0xa9c6e6, tavern: 0xe0b070, wall: 0xb6b6b6, library: 0x8ab0e6 };
+    // (Assets Phase 2) Buildings now have distinct generated art, so the old
+    // colour-coding tints are gone — show the real sprite colours.
+    const BTINT: Record<string, number> = {};
     if (BTINT[b.typeKey]) b.rect.setTint(BTINT[b.typeKey]); else if (!b._tierTinted) b.rect.clearTint();
     if (b.shadow) b.shadow.setVisible(false);
 

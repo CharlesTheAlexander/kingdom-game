@@ -115,7 +115,174 @@ export function generateTerrain(scene: any) {
   makeTile(scene, 'iso_snow', 0xe8e8f0);
 }
 
+// ---- building drawing primitives -------------------------------------------
+// All buildings are drawn in a 64x64 canvas with the structure's BASE at the
+// bottom-centre (≈ x32, y60), because the scene anchors building sprites at
+// origin (0.5, 1.0) on the tile's south corner and scales them by footprint
+// (×1 / ×1.5 / ×2). Matching the originals' 64px size keeps placement identical.
+const STONE = 0x8a8a82, STONE_M = 0x6f6f68, STONE_D = 0x52524c;
+const WOOD = 0x9a6a44, BEAM = 0x5c3a1e, DOOR = 0x4a3018;
+const THATCH = 0xc2a45a, ROOF = 0x46464e, GLOW = 0xffcf5a;
+
+// Pseudo-3D box: flat front + darker right edge + lighter top lip.
+function box(g: any, x: number, y: number, w: number, h: number, base: number) {
+  g.fillStyle(base, 1); g.fillRect(x, y, w, h);
+  g.fillStyle(darken(base, 0.24), 1); g.fillRect(x + w - 3, y, 3, h);
+  g.fillStyle(lighten(base, 0.16), 1); g.fillRect(x, y, w, 2);
+}
+// Crenellations along the top edge of a tower/wall.
+function merlons(g: any, x: number, y: number, w: number, color: number) {
+  g.fillStyle(color, 1);
+  for (let cx = x; cx < x + w - 2; cx += 6) g.fillRect(cx, y, 4, 4);
+}
+function flag(g: any, x: number, y: number, h: number, accent: number) {
+  g.fillStyle(0x6b4a28, 1); g.fillRect(x, y, 1.5, h);                 // pole
+  g.fillStyle(accent, 1); g.fillTriangle(x + 1.5, y, x + 1.5, y + 7, x + 13, y + 3.5); // pennant
+}
+function shadow(g: any, cx = 32, cy = 60, rw = 24) { g.fillStyle(0x000000, 0.25); g.fillEllipse(cx, cy, rw, 8); }
+
+// Draw one building texture (accent-coloured) under `key`.
+function makeBuilding(scene: any, key: string, draw: (g: any, A: number) => void, accent = 0x1a3a8b) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const g = scene.make.graphics({ x: 0, y: 0, add: false });
+  shadow(g);
+  draw(g, accent);
+  g.generateTexture(key, 64, 64);
+  g.destroy();
+}
+
+// Each draw fn (g, A=accent). Base sits near y60, centred on x32.
+const BUILD: Record<string, (g: any, A: number) => void> = {
+  house: (g, A) => {
+    box(g, 22, 44, 20, 14, STONE);                       // stone foundation
+    box(g, 23, 30, 18, 16, WOOD);                        // timber wall
+    g.fillStyle(BEAM, 1); for (const bx of [26, 32, 38]) g.fillRect(bx, 30, 1.5, 16); // beams
+    g.fillStyle(THATCH, 1); g.fillTriangle(20, 30, 44, 30, 32, 15);   // thatch roof
+    g.fillStyle(darken(THATCH, 0.2), 1); g.fillTriangle(32, 15, 44, 30, 38, 30);
+    g.fillStyle(DOOR, 1); g.fillRect(29, 40, 6, 8);                   // door
+    g.fillStyle(0x2a2a30, 1); g.fillRect(24, 34, 3, 3); g.fillRect(37, 34, 3, 3); // windows
+    g.fillStyle(STONE_D, 1); g.fillRect(36, 12, 4, 7);               // chimney
+  },
+  lumberyard: (g, A) => {
+    g.fillStyle(BEAM, 1); for (const bx of [20, 42]) g.fillRect(bx, 26, 2, 32);   // corner posts
+    g.fillStyle(BEAM, 1); g.fillRect(20, 24, 24, 2);                              // top beam
+    g.fillStyle(darken(WOOD, 0.1), 1); g.fillTriangle(16, 24, 48, 24, 32, 14);   // sloped roof
+    for (let i = 0; i < 3; i++) { g.fillStyle(0x8b5e3c, 1); g.fillEllipse(26, 52 - i * 5, 16, 5); g.fillStyle(0xc89a5a, 1); g.fillCircle(18, 52 - i * 5, 2.2); } // log pile
+    g.fillStyle(0xbfbfb2, 1); g.fillCircle(42, 46, 5); g.fillStyle(STONE_D, 1); g.fillCircle(42, 46, 2); // saw blade
+  },
+  mine: (g, A) => {
+    box(g, 18, 32, 28, 26, STONE_M);                     // stone entrance block
+    g.fillStyle(0x0a0a0c, 1); g.fillRect(26, 40, 12, 18); g.fillStyle(0x0a0a0c, 1); g.fillTriangle(26, 40, 38, 40, 32, 33); // tunnel
+    g.fillStyle(BEAM, 1); g.fillRect(24, 36, 2, 22); g.fillRect(38, 36, 2, 22);  // support timbers
+    g.fillStyle(0x6f6f68, 1); g.fillRect(40, 52, 8, 5); g.fillStyle(STONE_D, 1); g.fillCircle(41, 57, 1.5); g.fillCircle(47, 57, 1.5); // cart
+    g.fillStyle(STONE_D, 0.8); for (const [x, y] of [[16, 56], [50, 55], [20, 57]]) g.fillCircle(x, y, 1.6); // rubble
+  },
+  farm: (g, A) => {
+    box(g, 22, 42, 20, 16, STONE);                       // stone base
+    const hx = 32, hy = 30;
+    g.lineStyle(3, 0xeae0c8, 1);                         // 4 windmill sails
+    for (const a of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) { g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx + Math.cos(a) * 16, hy + Math.sin(a) * 16); g.strokePath(); }
+    g.fillStyle(STONE_D, 1); g.fillCircle(hx, hy, 3);    // hub
+    g.fillStyle(0xc9a86a, 1); g.fillRect(24, 52, 5, 5); g.fillRect(35, 52, 5, 5); // grain sacks
+  },
+  barracks: (g, A) => {
+    box(g, 16, 32, 32, 26, STONE_M);                     // big stone hall
+    g.fillStyle(ROOF, 1); g.fillTriangle(14, 32, 50, 32, 32, 20);    // roof
+    g.fillStyle(DOOR, 1); g.fillRect(27, 46, 10, 12);    // double door
+    g.fillStyle(BEAM, 1); g.fillRect(32, 46, 1, 12);
+    box(g, 44, 24, 9, 34, STONE_D);                      // corner watchtower
+    merlons(g, 44, 22, 9, STONE);
+    g.lineStyle(1.5, 0xcfcfcf, 1); g.beginPath(); g.moveTo(20, 38); g.lineTo(26, 44); g.moveTo(26, 38); g.lineTo(20, 44); g.strokePath(); // crossed swords
+    flag(g, 31, 12, 8, A);                               // faction banner
+  },
+  tower: (g, A) => {
+    g.fillStyle(STONE_M, 1); g.fillTriangle(18, 56, 46, 56, 40, 24); g.fillTriangle(18, 56, 40, 24, 24, 24); // tapered body
+    box(g, 24, 22, 16, 10, STONE);
+    merlons(g, 23, 18, 18, STONE_D);
+    g.fillStyle(0x2a2a30, 1); g.fillRect(30, 34, 4, 8); g.fillRect(31, 46, 2, 6); // arrow slits
+    flag(g, 32, 6, 8, A);
+  },
+  watchtower: (g, A) => {
+    g.fillStyle(STONE_M, 1); g.fillTriangle(22, 58, 42, 58, 38, 20); g.fillTriangle(22, 58, 38, 20, 26, 20); // tall thin tower
+    box(g, 20, 14, 24, 8, BEAM);                         // platform
+    g.lineStyle(1.5, 0x6b4a28, 1); g.strokeRect(20, 10, 24, 6);      // railing
+    g.fillStyle(STONE_D, 1); g.fillRect(33, 4, 12, 3);  // telescope
+    g.fillStyle(GLOW, 1); g.fillCircle(21, 12, 1.6); g.fillCircle(43, 12, 1.6); // torches
+  },
+  blacksmith: (g, A) => {
+    box(g, 18, 34, 28, 24, STONE_M);
+    g.fillStyle(0x14100c, 1); g.fillRect(22, 42, 16, 16);            // open front
+    g.fillStyle(0xff7a1a, 0.9); g.fillCircle(30, 52, 5); g.fillStyle(0xffd24a, 0.9); g.fillCircle(30, 52, 2.5); // forge glow
+    g.fillStyle(STONE_D, 1); g.fillRect(36, 50, 6, 2); g.fillRect(38, 50, 2, 6);     // anvil
+    box(g, 40, 26, 6, 10, STONE_D);                      // chimney
+    g.fillStyle(0xb0b0b0, 0.5); g.fillCircle(43, 22, 3); g.fillCircle(46, 17, 2.4);  // smoke
+  },
+  market: (g, A) => {
+    g.fillStyle(0x8b5e3c, 1); g.fillRect(18, 40, 28, 18);            // counter/stall
+    for (let i = 0; i < 6; i++) { g.fillStyle(i % 2 ? 0xf0f0f0 : A, 1); g.fillRect(16 + i * 5.5, 24, 5.5, 8); } // striped awning
+    g.fillStyle(BEAM, 1); g.fillRect(18, 32, 2, 26); g.fillRect(44, 32, 2, 26);      // posts
+    g.fillStyle(0x8b5e3c, 1); g.fillEllipse(24, 44, 7, 5); g.fillStyle(0xc9a86a, 1); g.fillRect(33, 40, 5, 5); // goods
+    g.fillStyle(GLOW, 1); g.fillCircle(38, 46, 2.4); g.fillStyle(STONE_D, 1); g.fillRect(37.4, 44, 1.2, 5);    // coin sign
+  },
+  library: (g, A) => {
+    box(g, 18, 30, 28, 28, STONE);
+    g.fillStyle(0x2a2436, 1); g.fillRect(24, 36, 16, 16); g.fillTriangle(24, 36, 40, 36, 32, 28);  // arched window
+    for (let i = 0; i < 4; i++) { g.fillStyle([0x9a3a3a, 0x3a7a9a, 0xc9a84c, 0x6a9a4a][i], 1); g.fillRect(26 + i * 3.4, 38, 3, 12); } // book spines
+    g.fillStyle(GLOW, 0.8); g.fillCircle(36, 46, 2);                 // candle glow
+    g.fillStyle(DOOR, 1); g.fillRect(29, 50, 6, 8);
+    g.fillStyle(STONE_M, 1); g.fillRect(24, 56, 16, 2);             // steps
+    flag(g, 31, 14, 7, A);
+  },
+  tavern: (g, A) => {
+    box(g, 16, 34, 32, 24, WOOD);
+    g.fillStyle(ROOF, 1); g.fillTriangle(14, 34, 50, 34, 32, 22);
+    g.fillStyle(GLOW, 0.9); g.fillRect(20, 40, 6, 6); g.fillRect(38, 40, 6, 6);      // warm windows
+    g.fillStyle(DOOR, 1); g.fillRect(29, 46, 6, 12);
+    g.fillStyle(0x8b5e3c, 1); g.fillEllipse(50, 52, 8, 6); g.fillEllipse(50, 46, 7, 5); // barrels
+    g.fillStyle(0xd8b06a, 1); g.fillCircle(40, 28, 3); g.lineStyle(1, 0xd8b06a, 1); g.strokeRect(43, 26, 2, 4); // mug sign
+  },
+  wall: (g, A) => {
+    box(g, 14, 38, 36, 18, STONE_M);
+    merlons(g, 14, 34, 36, STONE);
+    g.lineStyle(1, STONE_D, 0.8); g.beginPath(); g.moveTo(14, 46); g.lineTo(50, 46); g.moveTo(26, 38); g.lineTo(26, 56); g.moveTo(38, 38); g.lineTo(38, 56); g.strokePath(); // block seams
+  },
+};
+
+// Castle stages share a builder, growing with the tier.
+function drawCastle(g: any, A: number, stage: 1 | 2 | 3) {
+  const gold = 0xc9a84c;
+  // Towers (wider/taller as the castle grows).
+  const th = stage === 1 ? 30 : stage === 2 ? 34 : 38;
+  box(g, 10, 58 - th, 13, th, STONE_M); merlons(g, 10, 56 - th, 13, STONE);
+  box(g, 41, 58 - th, 13, th, STONE_M); merlons(g, 41, 56 - th, 13, STONE);
+  // Central gatehouse.
+  box(g, 22, 30, 20, 28, stage === 3 ? STONE : STONE_M);
+  merlons(g, 22, 26, 20, STONE_D);
+  // Gate / portcullis.
+  g.fillStyle(DOOR, 1); g.fillRect(28, 44, 8, 14); g.fillTriangle(28, 44, 36, 44, 32, 38);
+  if (stage >= 3) { g.lineStyle(1, gold, 0.9); for (const lx of [29.5, 32, 34.5]) { g.beginPath(); g.moveTo(lx, 40); g.lineTo(lx, 58); g.strokePath(); } } // portcullis bars
+  // Roof caps on towers.
+  g.fillStyle(ROOF, 1); g.fillTriangle(10, 58 - th, 23, 58 - th, 16.5, 50 - th); g.fillTriangle(41, 58 - th, 54, 58 - th, 47.5, 50 - th);
+  // Windows.
+  g.fillStyle(0x2a2a30, 1); g.fillRect(15, 44, 3, 5); g.fillRect(46, 44, 3, 5); g.fillRect(30, 34, 4, 5);
+  // Wall wings appear at town+, full stone at castle.
+  if (stage >= 2) { box(g, 4, 48, 8, 10, STONE_D); box(g, 52, 48, 8, 10, STONE_D); }
+  // Flags — one (village), two (town), gold-trimmed banner (castle).
+  flag(g, 16, 58 - th - 9, 8, A);
+  if (stage >= 2) flag(g, 47, 58 - th - 9, 8, A);
+  if (stage >= 3) { g.fillStyle(gold, 1); g.fillRect(30, 18, 4, 1); g.fillStyle(A, 1); g.fillRect(30, 19, 4, 7); g.fillStyle(gold, 1); g.fillRect(30, 26, 4, 1); }
+}
+
+// ---- PHASE 2: player buildings ---------------------------------------------
+export function generateBuildings(scene: any, accent = 0x1a3a8b) {
+  for (const key of Object.keys(BUILD)) makeBuilding(scene, key, BUILD[key], accent);
+  makeBuilding(scene, 'castle', (g, A) => drawCastle(g, A, 1), accent);
+  makeBuilding(scene, 'castle_town', (g, A) => drawCastle(g, A, 2), accent);
+  makeBuilding(scene, 'castle_castle', (g, A) => drawCastle(g, A, 3), accent);
+}
+
 // Master entry — phases are added here as they are built.
 export function generateAll(scene: any) {
   generateTerrain(scene);
+  generateBuildings(scene);
 }
