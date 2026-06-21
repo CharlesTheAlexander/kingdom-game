@@ -1001,6 +1001,27 @@ export function generateAIBuildings(scene: any) {
 const css = (n: number) => '#' + (n & 0xffffff).toString(16).padStart(6, '0');
 function fillRect2(ctx: any, x: number, y: number, w: number, h: number, c: number) { ctx.fillStyle = css(c); ctx.fillRect(x, y, w, h); }
 function disc(ctx: any, x: number, y: number, r: number, c: number) { ctx.fillStyle = css(c); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+// rgba string from a packed colour + alpha (canvas wants strings).
+const csa = (n: number, a: number) => `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+// Filled ellipse helper (canvas).
+function ellipse(ctx: any, x: number, y: number, rx: number, ry: number, c: number, a = 1) { ctx.fillStyle = a < 1 ? csa(c, a) : css(c); ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+// Soft warm-dark ground contact shadow under a unit's feet. ALWAYS drawn first.
+function groundShadow(ctx: any, cx: number, cy: number, rw: number, rh = rw * 0.32) {
+  ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(cx, cy, rw, rh, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(cx, cy - rh * 0.3, rw * 0.66, rh * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+}
+// A rounded vertical "limb" capsule (lit left, shaded right) — warmer than a flat rect.
+function limb(ctx: any, x: number, y: number, w: number, h: number, base: number) {
+  fillRect2(ctx, x, y, w, h, base);
+  ctx.fillStyle = csa(WARM_LIGHT, 0.18); ctx.fillRect(x, y, Math.max(1.5, w * 0.3), h);     // lit left edge
+  ctx.fillStyle = csa(WARM_SHADOW, 0.3); ctx.fillRect(x + w - Math.max(1.5, w * 0.28), y, Math.max(1.5, w * 0.28), h); // shaded right
+}
+// A round head disc with warm top-left highlight + lower-right ambient shade.
+function headDisc(ctx: any, x: number, y: number, r: number, skin: number) {
+  disc(ctx, x, y, r, skin);
+  ellipse(ctx, x - r * 0.3, y - r * 0.35, r * 0.5, r * 0.5, WARM_LIGHT, 0.3); // lit cheek/brow
+  ctx.fillStyle = csa(WARM_SHADOW, 0.22); ctx.beginPath(); ctx.arc(x, y, r, Math.PI * 0.05, Math.PI * 0.85); ctx.arc(x, y, r * 0.5, Math.PI * 0.85, Math.PI * 0.05, true); ctx.closePath(); ctx.fill();
+}
 
 function spriteSheet(scene: any, key: string, frames: number, draw: (ctx: any, t: number, i: number) => void) {
   if (scene.textures.exists(key)) return;
@@ -1016,124 +1037,247 @@ function spriteSheet(scene: any, key: string, frames: number, draw: (ctx: any, t
 }
 
 // A humanoid centred at x=96, feet ~y150. opts drive pose + gear.
+// Layered (Northgard): ground shadow, cape, legs+boots, torso (shaded+trim),
+// belt, shoulders, head+face, headgear, shield, weapon arm. Warm top-left light.
 function figure(ctx: any, P: any, o: any = {}) {
   const cx = 96, gY = 150, bob = o.bob || 0, lean = o.lean || 0, lp = o.legPhase || 0;
-  // Legs + boots (lp spreads them for the run cycle).
-  fillRect2(ctx, cx - 9 + lp * 7, gY - 30 + bob, 8, 30, P.legs);
-  fillRect2(ctx, cx + 1 - lp * 7, gY - 30 + bob, 8, 30, P.legs);
-  fillRect2(ctx, cx - 10 + lp * 7, gY - 4 + bob, 10, 5, 0x241a10);
-  fillRect2(ctx, cx + 0 - lp * 7, gY - 4 + bob, 10, 5, 0x241a10);
-  // Cape (champion/knight) behind body.
-  if (o.cape) { ctx.fillStyle = css(o.cape); ctx.beginPath(); ctx.moveTo(cx - 14 + lean, 74 + bob); ctx.lineTo(cx + 14 + lean, 74 + bob); ctx.lineTo(cx + 20 + lean, 128 + bob); ctx.lineTo(cx - 20 + lean, 128 + bob); ctx.closePath(); ctx.fill(); }
-  // Torso.
-  fillRect2(ctx, cx - 18 + lean, 72 + bob, 36, 50, P.tunic);
-  fillRect2(ctx, cx - 18 + lean, 112 + bob, 36, 10, P.tunicDark);
-  if (P.trim) fillRect2(ctx, cx - 18 + lean, 84 + bob, 36, 3, P.trim);
-  // Head + face.
-  disc(ctx, cx + lean, 56 + bob, 16, P.skin);
-  disc(ctx, cx - 5 + lean, 55 + bob, 2, 0x20140c);
-  disc(ctx, cx + 5 + lean, 55 + bob, 2, o.glowEyes ? 0x66ccff : 0x20140c);
-  // Headgear.
-  if (o.helmet) { ctx.fillStyle = css(P.helmet); ctx.beginPath(); ctx.arc(cx + lean, 54 + bob, 17, Math.PI, 0); ctx.fill(); ctx.fillRect(cx - 17 + lean, 52 + bob, 34, 4); if (o.visor) fillRect2(ctx, cx - 12 + lean, 54 + bob, 24, 4, 0x14202c); }
-  if (o.hood) { ctx.fillStyle = css(P.hood); ctx.beginPath(); ctx.arc(cx + lean, 52 + bob, 18, Math.PI * 1.04, -Math.PI * 0.04); ctx.fill(); ctx.fillRect(cx - 18 + lean, 50 + bob, 36, 6); }
-  if (o.ears) { ctx.fillStyle = css(P.skin); ctx.beginPath(); ctx.moveTo(cx - 14 + lean, 50 + bob); ctx.lineTo(cx - 28 + lean, 40 + bob); ctx.lineTo(cx - 12 + lean, 56 + bob); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx + 14 + lean, 50 + bob); ctx.lineTo(cx + 28 + lean, 40 + bob); ctx.lineTo(cx + 12 + lean, 56 + bob); ctx.closePath(); ctx.fill(); }
-  // Shield on the left arm. (Assets V2) round=small buckler for cheaper units.
-  if (o.shield && o.round) { disc(ctx, cx - 20 + lean, 92 + bob, 9, P.shield); ctx.strokeStyle = css(darken(P.shield, 0.3)); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx - 20 + lean, 92 + bob, 9, 0, Math.PI * 2); ctx.stroke(); disc(ctx, cx - 20 + lean, 92 + bob, 2, 0xcfcfcf); }
-  else if (o.shield) { ctx.fillStyle = css(P.shield); ctx.beginPath(); ctx.moveTo(cx - 28 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 100 + bob); ctx.lineTo(cx - 21 + lean, 108 + bob); ctx.lineTo(cx - 28 + lean, 100 + bob); ctx.closePath(); ctx.fill(); if (o.cross) fillRect2(ctx, cx - 22 + lean, 84 + bob, 2, 18, 0xe8c84a); }
-  // Weapon arm (ang in radians from shoulder, 0 = straight down toward +x).
-  const sx = cx + 16 + lean, sy = 84 + bob, ang = o.armAng != null ? o.armAng : Math.PI * 0.5;
-  fillRect2(ctx, cx + 12 + lean, 76 + bob, 7, 26, P.tunic); // upper arm stub
-  const hx = sx + Math.cos(ang) * 22, hy = sy + Math.sin(ang) * 22;
-  ctx.strokeStyle = css(P.skin); ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+  const sc = o.scale || 1;                              // overall heroic scale (knight/warlord)
+  const hw = 18 * sc, top = 72 + bob - (sc - 1) * 14;   // torso half-width / top
+  const tunic = P.tunic, dark = P.tunicDark;
+  // ---- Ground shadow ALWAYS first (anchors the unit to the ground).
+  groundShadow(ctx, cx, gY + 1, 24 * sc, 7 * sc);
+  // ---- Cape (knight/champion) behind everything, with a fold highlight.
+  if (o.cape) {
+    ctx.fillStyle = css(darken(o.cape, 0.12)); ctx.beginPath();
+    ctx.moveTo(cx - 15 * sc + lean, top + 2); ctx.lineTo(cx + 15 * sc + lean, top + 2);
+    ctx.lineTo(cx + 22 * sc + lean, 132 + bob); ctx.lineTo(cx - 22 * sc + lean, 132 + bob); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = csa(WARM_LIGHT, 0.16); ctx.beginPath(); ctx.moveTo(cx - 14 * sc + lean, top + 4); ctx.lineTo(cx - 4 * sc + lean, top + 4); ctx.lineTo(cx - 8 * sc + lean, 130 + bob); ctx.lineTo(cx - 20 * sc + lean, 130 + bob); ctx.closePath(); ctx.fill();
+  }
+  // ---- Quiver on the back (archers) — behind the torso, fletches poking out.
+  if (o.quiver) {
+    ctx.save(); ctx.translate(cx + 14 + lean, top + 6); ctx.rotate(0.35);
+    fillRect2(ctx, 0, 0, 9, 30, 0x5c3a1e); fillRect2(ctx, 0, 0, 3, 30, 0x8b5e3c); fillRect2(ctx, 0, 0, 9, 4, 0x4a2e16);
+    for (const ax of [2, 5]) { ctx.strokeStyle = css(0xb89060); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(ax + 1, 0); ctx.lineTo(ax + 1, -10); ctx.stroke(); ctx.fillStyle = css(0xd64a3a); ctx.beginPath(); ctx.moveTo(ax + 1, -10); ctx.lineTo(ax - 1, -14); ctx.lineTo(ax + 3, -14); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+  }
+  // ---- Legs + boots (lp spreads them for the run cycle), rounded + lit.
+  const lw = 8 * sc, ly = gY - 30 + bob;
+  limb(ctx, cx - 9 * sc + lp * 7, ly, lw, 30, P.legs);
+  limb(ctx, cx + 1 * sc - lp * 7, ly, lw, 30, P.legs);
+  fillRect2(ctx, cx - 10 * sc + lp * 7, gY - 4 + bob, 11 * sc, 6, 0x241a10);
+  fillRect2(ctx, cx + 0 - lp * 7, gY - 4 + bob, 11 * sc, 6, 0x241a10);
+  ctx.fillStyle = csa(WARM_LIGHT, 0.2); ctx.fillRect(cx - 10 * sc + lp * 7, gY - 4 + bob, 11 * sc, 1.5); ctx.fillRect(cx + 0 - lp * 7, gY - 4 + bob, 11 * sc, 1.5);
+  // ---- Long robe (monk/shaman): flared skirt down to the feet, hides legs.
+  if (o.robe) {
+    ctx.fillStyle = css(tunic); ctx.beginPath(); ctx.moveTo(cx - hw + 2 + lean, top + 6); ctx.lineTo(cx + hw - 2 + lean, top + 6); ctx.lineTo(cx + hw + 6 + lean, gY - 1); ctx.lineTo(cx - hw - 6 + lean, gY - 1); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = csa(WARM_SHADOW, 0.28); ctx.beginPath(); ctx.moveTo(cx + 2 + lean, top + 6); ctx.lineTo(cx + hw - 2 + lean, top + 6); ctx.lineTo(cx + hw + 6 + lean, gY - 1); ctx.lineTo(cx + 2 + lean, gY - 1); ctx.closePath(); ctx.fill(); // shaded right
+    ctx.strokeStyle = csa(WARM_SHADOW, 0.3); ctx.lineWidth = 1.2; for (const fxo of [-9, 0, 9]) { ctx.beginPath(); ctx.moveTo(cx + fxo + lean, top + 30); ctx.lineTo(cx + fxo * 1.6 + lean, gY - 2); ctx.stroke(); } // folds
+  }
+  // ---- Torso (warm-lit body block) + shaded skirt + belt + lit/shade columns.
+  fillRect2(ctx, cx - hw + lean, top, hw * 2, 50, tunic);
+  ctx.fillStyle = csa(WARM_LIGHT, 0.16); ctx.fillRect(cx - hw + lean, top, hw * 0.55, 50);          // lit left flank
+  ctx.fillStyle = csa(WARM_SHADOW, 0.26); ctx.fillRect(cx + hw - hw * 0.4 + lean, top, hw * 0.4, 50); // shaded right flank
+  if (!o.robe) fillRect2(ctx, cx - hw + lean, top + 40, hw * 2, 10, dark);                            // skirt hem
+  fillRect2(ctx, cx - hw + lean, top + 22, hw * 2, 4, darken(dark, 0.15));                            // belt
+  fillRect2(ctx, cx - 3 + lean, top + 22, 6, 4, P.trim || 0xc9a84c);                                  // buckle
+  if (P.trim) { fillRect2(ctx, cx - hw + lean, top + 10, hw * 2, 2.5, P.trim); fillRect2(ctx, cx - 2 + lean, top, 4, 40, P.trim); } // gold tabard trim (V/centre)
+  // ---- Shoulders (pauldrons for armoured units).
+  if (o.pauldron) { ctx.fillStyle = css(P.helmet || 0x8a8f97); for (const sgn of [-1, 1]) { ctx.beginPath(); ctx.arc(cx + sgn * (hw - 1) + lean, top + 4, 8 * sc, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = csa(WARM_LIGHT, 0.25); ctx.beginPath(); ctx.arc(cx + sgn * (hw - 1) + lean - 2, top + 1, 3.5 * sc, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = css(P.helmet || 0x8a8f97); } }
+  // ---- Head + face.
+  const hX = cx + lean, hY = 56 + bob - (sc - 1) * 14, hr = 16 * sc;
+  headDisc(ctx, hX, hY, hr, P.skin);
+  if (o.beard) { ctx.fillStyle = css(o.beard); ctx.beginPath(); ctx.arc(hX, hY + hr * 0.35, hr * 0.85, 0.1 * Math.PI, 0.9 * Math.PI); ctx.lineTo(hX - hr * 0.5, hY + hr * 0.2); ctx.closePath(); ctx.fill(); }
+  disc(ctx, hX - 5 * sc, hY - 1, 2, 0x20140c);
+  disc(ctx, hX + 5 * sc, hY - 1, 2, o.glowEyes ? 0x66ccff : 0x20140c);
+  if (o.glowEyes) { ellipse(ctx, hX - 5 * sc, hY - 1, 3, 3, 0x66ccff, 0.4); ellipse(ctx, hX + 5 * sc, hY - 1, 3, 3, 0x66ccff, 0.4); }
+  ctx.strokeStyle = csa(WARM_SHADOW, 0.3); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(hX - 7 * sc, hY - 5); ctx.lineTo(hX - 2 * sc, hY - 4); ctx.moveTo(hX + 2 * sc, hY - 4); ctx.lineTo(hX + 7 * sc, hY - 5); ctx.stroke(); // brow
+  // ---- Headgear.
+  if (o.ears) { ctx.fillStyle = css(P.skin); for (const sgn of [-1, 1]) { ctx.beginPath(); ctx.moveTo(hX + sgn * 13 * sc, hY - 6); ctx.lineTo(hX + sgn * 28 * sc, hY - 16); ctx.lineTo(hX + sgn * 11 * sc, hY + 2); ctx.closePath(); ctx.fill(); } ctx.fillStyle = csa(WARM_SHADOW, 0.3); for (const sgn of [-1, 1]) { ctx.beginPath(); ctx.moveTo(hX + sgn * 18 * sc, hY - 10); ctx.lineTo(hX + sgn * 26 * sc, hY - 15); ctx.lineTo(hX + sgn * 16 * sc, hY - 6); ctx.closePath(); ctx.fill(); } }
+  if (o.helmet) {
+    ctx.fillStyle = css(P.helmet); ctx.beginPath(); ctx.arc(hX, hY - 2, hr + 1, Math.PI, 0); ctx.fill();
+    fillRect2(ctx, hX - hr - 1, hY - 4, (hr + 1) * 2, 5, P.helmet);                  // brim band
+    ctx.fillStyle = csa(WARM_LIGHT, 0.35); ctx.beginPath(); ctx.arc(hX - hr * 0.4, hY - 6, hr * 0.55, Math.PI * 1.05, Math.PI * 1.7); ctx.fill(); // dome highlight
+    if (o.greatHelm) { fillRect2(ctx, hX - hr, hY - 4, hr * 2, hr + 4, P.helmet); fillRect2(ctx, hX - hr, hY + 2, hr * 2, 3, 0x10161c); ctx.fillStyle = csa(WARM_LIGHT, 0.2); ctx.fillRect(hX - hr, hY - 4, 3, hr + 4); } // full great-helm + eye slit
+    else fillRect2(ctx, hX - 2, hY - 3, 4, 8, darken(P.helmet, 0.25));               // nasal guard
+    if (o.visor) fillRect2(ctx, hX - hr * 0.7, hY, hr * 1.4, 4, 0x14202c);            // visor slit
+    if (o.plume) { ctx.fillStyle = css(o.plume); ctx.beginPath(); ctx.moveTo(hX, hY - hr - 1); ctx.quadraticCurveTo(hX + 4, hY - hr - 14, hX + 12, hY - hr - 6); ctx.quadraticCurveTo(hX + 6, hY - hr - 4, hX, hY - hr - 1); ctx.fill(); }
+  }
+  if (o.hood) {
+    ctx.fillStyle = css(P.hood); ctx.beginPath(); ctx.arc(hX, hY - 2, hr + 3, Math.PI * 1.06, -Math.PI * 0.06); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(hX - hr - 3, hY - 2); ctx.lineTo(hX - hr + 2, hY + 14); ctx.lineTo(hX + hr - 2, hY + 14); ctx.lineTo(hX + hr + 3, hY - 2); ctx.closePath(); ctx.fill(); // cowl drape
+    ctx.fillStyle = csa(WARM_SHADOW, 0.4); ctx.beginPath(); ctx.arc(hX, hY + 1, hr - 1, Math.PI * 1.15, -Math.PI * 0.15); ctx.lineTo(hX + hr - 2, hY + 2); ctx.lineTo(hX - hr + 2, hY + 2); ctx.closePath(); ctx.fill(); // shaded face recess
+    headDisc(ctx, hX, hY + 2, hr - 3, P.skin); disc(ctx, hX - 4, hY + 1, 1.8, 0x20140c); disc(ctx, hX + 4, hY + 1, 1.8, o.glowEyes ? 0x66ccff : 0x20140c);
+    ctx.fillStyle = csa(WARM_LIGHT, 0.18); ctx.beginPath(); ctx.arc(hX - hr * 0.3, hY - 4, hr * 0.7, Math.PI * 1.1, Math.PI * 1.6); ctx.fill(); // lit hood crown
+  }
+  // ---- Shield on the left arm. round=small buckler for cheaper units.
+  if (o.shield && o.round) {
+    disc(ctx, cx - 21 + lean, 94 + bob, 10, P.shield);
+    ctx.strokeStyle = css(darken(P.shield, 0.35)); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx - 21 + lean, 94 + bob, 10, 0, Math.PI * 2); ctx.stroke();
+    disc(ctx, cx - 21 + lean, 94 + bob, 3, 0xcfcfcf); ellipse(ctx, cx - 24 + lean, 91 + bob, 3, 3, WARM_LIGHT, 0.4);
+  } else if (o.shield) {
+    const sX = cx - 24 + lean;
+    ctx.fillStyle = css(P.shield); ctx.beginPath(); ctx.moveTo(sX - 6, 78 + bob); ctx.lineTo(sX + 8, 78 + bob); ctx.lineTo(sX + 8, 100 + bob); ctx.lineTo(sX + 1, 110 + bob); ctx.lineTo(sX - 6, 100 + bob); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = css(0xc9a84c); ctx.lineWidth = 1.6; ctx.stroke();                                   // gold rim
+    ctx.fillStyle = csa(WARM_LIGHT, 0.2); ctx.beginPath(); ctx.moveTo(sX - 6, 78 + bob); ctx.lineTo(sX + 1, 78 + bob); ctx.lineTo(sX + 1, 104 + bob); ctx.lineTo(sX - 6, 100 + bob); ctx.closePath(); ctx.fill(); // lit half
+    if (o.cross) { fillRect2(ctx, sX - 1, 81 + bob, 3, 24, 0xe8c84a); fillRect2(ctx, sX - 5, 88 + bob, 11, 3, 0xe8c84a); } // gold cross emblem
+    else if (o.emblem) { disc(ctx, sX + 1, 90 + bob, 4, 0xe8c84a); } // boss/emblem
+  }
+  // ---- Weapon arm (ang in radians from shoulder, 0 = straight down toward +x).
+  const ssx = cx + 16 + lean, ssy = 84 + bob, ang = o.armAng != null ? o.armAng : Math.PI * 0.5;
+  limb(ctx, cx + 12 + lean, 76 + bob, 7 * sc, 26, tunic);                          // upper arm stub
+  const hx = ssx + Math.cos(ang) * 22 * sc, hy = ssy + Math.sin(ang) * 22 * sc;
+  ctx.strokeStyle = css(P.skin); ctx.lineWidth = 6 * sc; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(ssx, ssy); ctx.lineTo(hx, hy); ctx.stroke(); ctx.lineCap = 'butt';
   drawWeapon(ctx, o.weapon, hx, hy, ang, P, o);
 }
 
 function drawWeapon(ctx: any, w: string, hx: number, hy: number, ang: number, P: any, o: any) {
-  if (!w) return;
-  const ex = hx + Math.cos(ang), ey = hy + Math.sin(ang);
+  if (!w) { drawCarry(ctx, o); return; }
   if (w === 'sword' || w === 'bigsword') {
-    const len = w === 'bigsword' ? 46 : 32; const a = ang - Math.PI * 0.5; // blade points "up" from hand
-    ctx.strokeStyle = css(0xd2d6dc); ctx.lineWidth = w === 'bigsword' ? 6 : 4; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + Math.cos(a) * len, hy + Math.sin(a) * len); ctx.stroke();
-    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx - Math.cos(a) * 5, hy - Math.sin(a) * 5); ctx.lineTo(hx + Math.cos(a) * 5, hy + Math.sin(a) * 5); ctx.stroke();
+    const big = w === 'bigsword', len = big ? 50 : 34, a = ang - Math.PI * 0.5; // blade points "up" from hand
+    const dx = Math.cos(a), dy = Math.sin(a), px = Math.cos(a + Math.PI / 2), py = Math.sin(a + Math.PI / 2), bw = big ? 4 : 3;
+    const tx = hx + dx * len, ty = hy + dy * len;
+    // tapered steel blade (filled, lit edge) ending in a point.
+    ctx.fillStyle = css(0xc2c8d0); ctx.beginPath();
+    ctx.moveTo(hx + px * bw, hy + py * bw); ctx.lineTo(tx, ty); ctx.lineTo(hx - px * bw, hy - py * bw); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = css(0xeef2f6); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(hx - px * (bw - 1), hy - py * (bw - 1)); ctx.lineTo(tx, ty); ctx.stroke(); // bright edge
+    ctx.strokeStyle = csa(WARM_SHADOW, 0.4); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx + px, hy + py); ctx.lineTo(tx - dx * 5, ty - dy * 5); ctx.stroke(); // fuller
+    // gold crossguard + grip + pommel.
+    ctx.strokeStyle = css(0xc9a84c); ctx.lineWidth = big ? 5 : 4; ctx.beginPath(); ctx.moveTo(hx - px * (big ? 8 : 6), hy - py * (big ? 8 : 6)); ctx.lineTo(hx + px * (big ? 8 : 6), hy + py * (big ? 8 : 6)); ctx.stroke();
+    ctx.strokeStyle = css(0x4a3018); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - dx * (big ? 9 : 6), hy - dy * (big ? 9 : 6)); ctx.stroke();
+    disc(ctx, hx - dx * (big ? 11 : 8), hy - dy * (big ? 11 : 8), big ? 3.5 : 2.6, 0xc9a84c);
+  } else if (w === 'cleaver') {
+    // goblin warlord — big crude single-edged chopper.
+    const a = ang - Math.PI * 0.5, dx = Math.cos(a), dy = Math.sin(a), px = Math.cos(a + Math.PI / 2), py = Math.sin(a + Math.PI / 2);
+    ctx.strokeStyle = css(0x3a2a1a); ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(hx - dx * 6, hy - dy * 6); ctx.lineTo(hx + dx * 22, hy + dy * 22); ctx.stroke(); // haft
+    ctx.fillStyle = css(0x9aa0a6); ctx.beginPath();
+    ctx.moveTo(hx + dx * 18, hy + dy * 18); ctx.lineTo(hx + dx * 46 + px * 4, hy + dy * 46 + py * 4); ctx.lineTo(hx + dx * 44 - px * 18, hy + dy * 44 - py * 18); ctx.lineTo(hx + dx * 20 - px * 12, hy + dy * 20 - py * 12); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = css(0xe6e9ee); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(hx + dx * 44 - px * 18, hy + dy * 44 - py * 18); ctx.lineTo(hx + dx * 20 - px * 12, hy + dy * 20 - py * 12); ctx.stroke(); // edge glint
+    ctx.fillStyle = csa(0x6a1010, 0.5); ctx.beginPath(); ctx.arc(hx + dx * 30 - px * 9, hy + dy * 30 - py * 9, 4, 0, Math.PI * 2); ctx.fill(); // bloodstain
   } else if (w === 'axe') {
-    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx, hy + 10); ctx.lineTo(hx, hy - 22); ctx.stroke();
-    ctx.fillStyle = css(0xb8bcc2); ctx.beginPath(); ctx.moveTo(hx, hy - 22); ctx.lineTo(hx + 12, hy - 18); ctx.lineTo(hx + 10, hy - 6); ctx.lineTo(hx, hy - 12); ctx.closePath(); ctx.fill();
+    const a = ang - Math.PI * 0.5, dx = Math.cos(a), dy = Math.sin(a), px = Math.cos(a + Math.PI / 2), py = Math.sin(a + Math.PI / 2);
+    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx - dx * 8, hy - dy * 8); ctx.lineTo(hx + dx * 26, hy + dy * 26); ctx.stroke();
+    const ax = hx + dx * 24, ay = hy + dy * 24;
+    ctx.fillStyle = css(0xb0b6bd); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax + px * 13 + dx * 5, ay + py * 13 + dy * 5); ctx.lineTo(ax + px * 13 - dx * 7, ay + py * 13 - dy * 7); ctx.closePath(); ctx.fill(); // bearded blade
+    ctx.strokeStyle = css(0xe6e9ee); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(ax + px * 13 + dx * 5, ay + py * 13 + dy * 5); ctx.lineTo(ax + px * 13 - dx * 7, ay + py * 13 - dy * 7); ctx.stroke();
   } else if (w === 'pickaxe') {
     ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx, hy + 10); ctx.lineTo(hx, hy - 22); ctx.stroke();
-    ctx.strokeStyle = css(0x9aa0a6); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(hx - 12, hy - 18); ctx.quadraticCurveTo(hx, hy - 26, hx + 12, hy - 18); ctx.stroke();
+    ctx.strokeStyle = css(0x9aa0a6); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx - 13, hy - 16); ctx.quadraticCurveTo(hx, hy - 28, hx + 13, hy - 16); ctx.stroke();
+    ctx.strokeStyle = css(0xe6e9ee); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx - 13, hy - 16); ctx.quadraticCurveTo(hx, hy - 27, hx + 13, hy - 16); ctx.stroke();
   } else if (w === 'bow') {
     const pull = o.pull || 0; // 0..1 string draw
-    ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(hx, hy, 22, ang - 1.1, ang + 1.1); ctx.stroke();
-    const t1x = hx + Math.cos(ang - 1.1) * 22, t1y = hy + Math.sin(ang - 1.1) * 22, t2x = hx + Math.cos(ang + 1.1) * 22, t2y = hy + Math.sin(ang + 1.1) * 22;
-    const mx = hx - Math.cos(ang) * (6 - pull * 10), my = hy - Math.sin(ang) * (6 - pull * 10);
-    ctx.strokeStyle = '#eee'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(t1x, t1y); ctx.lineTo(mx, my); ctx.lineTo(t2x, t2y); ctx.stroke();
-    ctx.strokeStyle = css(0xeae0c8); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + Math.cos(ang) * 22, my + Math.sin(ang) * 22); ctx.stroke();
+    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(hx, hy, 24, ang - 1.15, ang + 1.15); ctx.stroke();
+    ctx.strokeStyle = csa(0xc89a5a, 0.7); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(hx, hy, 24, ang - 1.1, ang + 1.1); ctx.stroke(); // limb highlight
+    const t1x = hx + Math.cos(ang - 1.15) * 24, t1y = hy + Math.sin(ang - 1.15) * 24, t2x = hx + Math.cos(ang + 1.15) * 24, t2y = hy + Math.sin(ang + 1.15) * 24;
+    const mx = hx - Math.cos(ang) * (5 - pull * 12), my = hy - Math.sin(ang) * (5 - pull * 12);
+    ctx.strokeStyle = '#f0ece0'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(t1x, t1y); ctx.lineTo(mx, my); ctx.lineTo(t2x, t2y); ctx.stroke(); // string
+    // nocked arrow: shaft, steel head, fletches.
+    const tipx = mx + Math.cos(ang) * 30, tipy = my + Math.sin(ang) * 30;
+    ctx.strokeStyle = css(0xb89060); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(tipx, tipy); ctx.stroke();
+    ctx.fillStyle = css(0xd2d6dc); const pa = ang + Math.PI / 2; ctx.beginPath(); ctx.moveTo(tipx + Math.cos(ang) * 4, tipy + Math.sin(ang) * 4); ctx.lineTo(tipx + Math.cos(pa) * 2.4, tipy + Math.sin(pa) * 2.4); ctx.lineTo(tipx - Math.cos(pa) * 2.4, tipy - Math.sin(pa) * 2.4); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = css(0xc94a3a); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx - Math.cos(ang) * 3 + Math.cos(pa) * 3, my - Math.sin(ang) * 3 + Math.sin(pa) * 3); ctx.moveTo(mx, my); ctx.lineTo(mx - Math.cos(ang) * 3 - Math.cos(pa) * 3, my - Math.sin(ang) * 3 - Math.sin(pa) * 3); ctx.stroke(); // fletches
   } else if (w === 'staff') {
-    ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx, hy + 14); ctx.lineTo(hx, hy - 30); ctx.stroke();
-    if (o.healGlow) disc(ctx, hx, hy - 32, 4 + o.healGlow * 6, 0xfff2a8);
-    if (o.magic) { ctx.globalAlpha = 0.5; disc(ctx, hx, hy - 32, 7, o.magic); ctx.globalAlpha = 1; disc(ctx, hx, hy - 32, 3.5, o.magic); } // (Assets V2) shaman magic
+    const a = ang - Math.PI * 0.5, dx = Math.cos(a), dy = Math.sin(a);
+    const bx = hx - dx * 16, by = hy - dy * 16, topx = hx + dx * 34, topy = hy + dy * 34;
+    ctx.strokeStyle = css(o.crooked ? 0x4a3a22 : 0x8b5e3c); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(bx, by);
+    if (o.crooked) { ctx.quadraticCurveTo(hx + dx * 8 + 4, hy + dy * 8, topx, topy); } else ctx.lineTo(topx, topy);
+    ctx.stroke();
+    ctx.strokeStyle = csa(0xc89a5a, 0.5); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(topx, topy); ctx.stroke();
+    if (o.crooked) { ctx.strokeStyle = css(0x4a3a22); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(topx, topy); ctx.lineTo(topx + 5, topy - 6); ctx.lineTo(topx - 4, topy - 9); ctx.stroke(); } // gnarled tip
+    if (o.healGlow) { ellipse(ctx, topx, topy - 4, 5 + o.healGlow * 8, 5 + o.healGlow * 8, 0xfff2a8, 0.45); disc(ctx, topx, topy - 4, 3 + o.healGlow * 4, 0xfff8d8); ellipse(ctx, topx, topy - 4, 9 + o.healGlow * 6, 9 + o.healGlow * 6, 0x9be88a, 0.25); }
+    else if (o.magic) { ellipse(ctx, topx, topy - 3, 8, 8, o.magic, 0.4); disc(ctx, topx, topy - 3, 3.5, lighten(o.magic, 0.4)); ctx.fillStyle = csa(o.magic, 0.18); ctx.beginPath(); ctx.arc(topx, topy - 3, 12, 0, Math.PI * 2); ctx.fill(); }
+    else disc(ctx, topx, topy - 2, 3, 0xc9a84c); // plain pommel
   } else if (w === 'spear') {
-    // (Assets V2) Long thin shaft with a small triangular tip — pike reach.
-    const a = ang - Math.PI * 0.5, len = 54;
-    const ex = hx + Math.cos(a) * len, ey = hy + Math.sin(a) * len, bx = hx - Math.cos(a) * 12, by = hy - Math.sin(a) * 12;
+    // Long thin shaft with a leaf tip + buttcap — pike reach.
+    const a = ang - Math.PI * 0.5, len = 58;
+    const ex = hx + Math.cos(a) * len, ey = hy + Math.sin(a) * len, bx = hx - Math.cos(a) * 14, by = hy - Math.sin(a) * 14;
     ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.strokeStyle = csa(0xc89a5a, 0.6); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
     const px = Math.cos(a + Math.PI / 2), py = Math.sin(a + Math.PI / 2);
-    ctx.fillStyle = css(0xd2d6dc); ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(a) * 9 + px * 4, ey - Math.sin(a) * 9 + py * 4); ctx.lineTo(ex - Math.cos(a) * 9 - px * 4, ey - Math.sin(a) * 9 - py * 4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = css(0xd2d6dc); ctx.beginPath(); ctx.moveTo(ex + Math.cos(a) * 4, ey + Math.sin(a) * 4); ctx.lineTo(ex - Math.cos(a) * 10 + px * 4.5, ey - Math.sin(a) * 10 + py * 4.5); ctx.lineTo(ex - Math.cos(a) * 6, ey - Math.sin(a) * 6); ctx.lineTo(ex - Math.cos(a) * 10 - px * 4.5, ey - Math.sin(a) * 10 - py * 4.5); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = css(0xeef2f6); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(ex + Math.cos(a) * 4, ey + Math.sin(a) * 4); ctx.lineTo(ex - Math.cos(a) * 10 + px * 4.5, ey - Math.sin(a) * 10 + py * 4.5); ctx.stroke();
+    disc(ctx, bx, by, 2.4, 0x6b6b64); // butt cap
   } else if (w === 'club') {
-    const a = ang - Math.PI * 0.5;
-    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + Math.cos(a) * 20, hy + Math.sin(a) * 20); ctx.stroke();
-    disc(ctx, hx + Math.cos(a) * 22, hy + Math.sin(a) * 22, 6, 0x5c3a1e);
+    const a = ang - Math.PI * 0.5, dx = Math.cos(a), dy = Math.sin(a);
+    ctx.strokeStyle = css(0x5c3a1e); ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(hx - dx * 4, hy - dy * 4); ctx.lineTo(hx + dx * 18, hy + dy * 18); ctx.stroke(); ctx.lineCap = 'butt';
+    disc(ctx, hx + dx * 22, hy + dy * 22, 7, 0x6b4a28); disc(ctx, hx + dx * 22, hy + dy * 22, 7, 0x6b4a28);
+    ctx.fillStyle = csa(WARM_LIGHT, 0.25); ctx.beginPath(); ctx.arc(hx + dx * 20, hy + dy * 20, 3, 0, Math.PI * 2); ctx.fill();
+    for (const n of [-0.6, 0.4, 1.4]) { disc(ctx, hx + dx * 22 + Math.cos(a + n) * 5, hy + dy * 22 + Math.sin(a + n) * 5, 1.6, 0x9a8a6a); } // knobs
   }
-  // Carried resource (pawns) drawn over the shoulder.
-  if (o.carry) { const c = o.carry === 'wood' ? 0x8b5e3c : o.carry === 'gold' ? 0xe8c84a : 0xc0504a; fillRect2(ctx, 96 - 6, 64 + (o.bob || 0), 12, 8, c); }
+  drawCarry(ctx, o);
+}
+// Carried resource (pawns) drawn as a small crate/bundle over the shoulder.
+function drawCarry(ctx: any, o: any) {
+  if (!o.carry) return;
+  const b = o.bob || 0;
+  if (o.carry === 'wood') { for (const dy of [0, 4]) { fillRect2(ctx, 84, 60 + b + dy, 24, 4, 0x8b5e3c); fillRect2(ctx, 84, 60 + b + dy, 24, 1.2, 0xc89a5a); } disc(ctx, 84, 62 + b, 2.2, 0xcaa066); disc(ctx, 108, 62 + b, 2.2, 0xcaa066); }
+  else if (o.carry === 'gold') { fillRect2(ctx, 87, 58 + b, 18, 12, 0x6b4a28); fillRect2(ctx, 87, 58 + b, 18, 2, 0x8b5e3c); for (const dx of [90, 96, 102]) disc(ctx, dx, 58 + b, 2.4, 0xe8c84a); }
+  else { ellipse(ctx, 96, 62 + b, 11, 7, 0xb05442); ellipse(ctx, 92, 60 + b, 4, 3, WARM_LIGHT, 0.25); fillRect2(ctx, 95, 56 + b, 2, 4, 0x6b4a28); } // meat haunch
 }
 
 // Per-state pose generators ---------------------------------------------------
 const PAL: Record<string, any> = {
-  warriorB: { tunic: 0x2a4a9b, tunicDark: 0x1a306b, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x7a8088, shield: 0x2a4a9b },
-  warriorR: { tunic: 0x9b2a2a, tunicDark: 0x6b1a1a, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x5a4040, shield: 0x9b2a2a },
-  warriorY: { tunic: 0xb39a2a, tunicDark: 0x7a661a, legs: 0x4a3a1a, skin: 0xe2b78c, helmet: 0x6a5a30, shield: 0xb39a2a },
-  warriorP: { tunic: 0x6a3aa0, tunicDark: 0x44206b, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x5a4a78, shield: 0x6a3aa0 },
-  archer: { tunic: 0x3a6a3a, tunicDark: 0x244a24, legs: 0x4a3a22, skin: 0xe2b78c, hood: 0x2f5a2f },
-  archerR: { tunic: 0x7a3030, tunicDark: 0x521e1e, legs: 0x4a3a22, skin: 0xe2b78c, hood: 0x6a2424 },
-  monk: { tunic: 0x6b4a2a, tunicDark: 0x4a3018, legs: 0x4a3018, skin: 0xe2b78c, hood: 0x5c3e1e },
+  warriorB: { tunic: 0x2a4a9b, tunicDark: 0x1a306b, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x8a8f97, shield: 0x2a4a9b, trim: 0xc9a84c },
+  warriorR: { tunic: 0x9b2a2a, tunicDark: 0x6b1a1a, legs: 0x3a2a1a, skin: 0xd8a878, helmet: 0x6a5048, shield: 0x9b2a2a, trim: 0x8a7038 },
+  warriorY: { tunic: 0xb39a2a, tunicDark: 0x7a661a, legs: 0x4a3a1a, skin: 0xe2b78c, helmet: 0x7a6a40, shield: 0xb39a2a, trim: 0x6a5a28 },
+  warriorP: { tunic: 0x6a3aa0, tunicDark: 0x44206b, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x6a5a88, shield: 0x6a3aa0, trim: 0xb090e0 },
+  archer: { tunic: 0x3a6a3a, tunicDark: 0x244a24, legs: 0x4a3a22, skin: 0xe2b78c, hood: 0x2f5a2f, trim: 0x8a6a3a },
+  archerR: { tunic: 0x7a3030, tunicDark: 0x521e1e, legs: 0x4a3a22, skin: 0xd8a878, hood: 0x6a2424, trim: 0x5a3a2a },
+  monk: { tunic: 0x6b4a2a, tunicDark: 0x4a3018, legs: 0x4a3018, skin: 0xe2b78c, hood: 0x5c3e1e, trim: 0xc9a84c },
   pawn: { tunic: 0x7a5a3a, tunicDark: 0x523c24, legs: 0x4a3624, skin: 0xe2b78c },
-  goblin: { tunic: 0x3a5a24, tunicDark: 0x24401a, legs: 0x2a3a18, skin: 0x4a7a2a, hood: 0x2a401a },
+  goblin: { tunic: 0x3a5a24, tunicDark: 0x24401a, legs: 0x2a3a18, skin: 0x5a8a2a, hood: 0x2a401a },
   // (Assets V2) Spearman — lighter/cheaper blue armour than the warrior.
-  spearman: { tunic: 0x3a6ab0, tunicDark: 0x274a86, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x9aa6b2, shield: 0x3a6ab0 },
+  spearman: { tunic: 0x3a6ab0, tunicDark: 0x274a86, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x9aa6b2, shield: 0x3a6ab0, trim: 0xb8c0c8 },
   // (Assets V2) Goblin shaman — dark robes, sickly green skin.
-  goblinShaman: { tunic: 0x223018, tunicDark: 0x161f0f, legs: 0x1c2812, skin: 0x5a8a3a, hood: 0x182410 },
+  goblinShaman: { tunic: 0x223018, tunicDark: 0x161f0f, legs: 0x1c2812, skin: 0x6aaa3a, hood: 0x182410 },
   // (Assets V2) Goblin warlord — bigger, mismatched brown/gray war-gear.
-  goblinWarlord: { tunic: 0x4a3a26, tunicDark: 0x2e2416, legs: 0x2a2418, skin: 0x4a7a2a, helmet: 0x6b6b64, shield: 0x5c4a2e },
+  goblinWarlord: { tunic: 0x4a3a26, tunicDark: 0x2e2416, legs: 0x2a2418, skin: 0x5a8a2a, helmet: 0x6b6b64, shield: 0x5c4a2e, trim: 0x8a7038 },
 };
 
 function idlePose(t: number) { return { bob: Math.round(Math.sin(t * Math.PI * 2) * 1.5) }; }
 function runPose(t: number) { return { legPhase: Math.sin(t * Math.PI * 2), bob: -Math.abs(Math.round(Math.cos(t * Math.PI * 2) * 2)), lean: 2 }; }
 
+// Per-faction character overlay drawn on top of a recoloured warrior body so each
+// reads with distinct personality (the silhouette stays the warrior's).
+function factionMark(ctx: any, flavour: string, bob: number) {
+  const cx = 96, hY = 56 + bob;
+  if (flavour === 'red') { // battle-scarred: face scar + soot smears + nicked armour
+    ctx.strokeStyle = csa(0x7a1010, 0.8); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx + 2, hY - 6); ctx.lineTo(cx + 9, hY + 6); ctx.stroke();
+    ctx.fillStyle = csa(0x1a120c, 0.3); ctx.beginPath(); ctx.arc(cx - 8, 100 + bob, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = csa(0x1a120c, 0.25); ctx.beginPath(); ctx.arc(cx + 10, 110 + bob, 5, 0, Math.PI * 2); ctx.fill();
+  } else if (flavour === 'purple') { // faint arcane sigils drifting around the body
+    ctx.fillStyle = csa(0xb070ff, 0.16); ctx.beginPath(); ctx.arc(cx, 96 + bob, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = csa(0xc99aff, 0.85); for (const [x, y] of [[cx - 22, 80], [cx + 22, 86], [cx - 16, 116], [cx + 18, 120]] as any[]) { ctx.beginPath(); ctx.arc(x, y + bob, 1.4, 0, Math.PI * 2); ctx.fill(); }
+  } else if (flavour === 'yellow') { // crude: extra mismatched straps + a fur shoulder patch
+    ctx.fillStyle = csa(0x3a2c18, 0.5); ctx.fillRect(cx - 18, 96 + bob, 36, 3); ctx.fillRect(cx - 14, 104 + bob, 28, 2.5);
+    ctx.fillStyle = css(0x6a5a3a); ctx.beginPath(); ctx.arc(cx - 16, 78 + bob, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = csa(0x8a7a5a, 0.6); for (let k = 0; k < 5; k++) ctx.fillRect(cx - 22 + k * 2.6, 73 + bob, 1.2, 5);
+  }
+}
 // Generate the standard 4-state set (idle/run/attack/attack2) for a warrior-type.
 function warriorSheets(scene: any, P: any, keys: { idle: string; run: string; atk?: string; atk2?: string }, gear: any = {}) {
-  spriteSheet(scene, keys.idle, 8, (ctx, t) => figure(ctx, P, { ...gear, ...idlePose(t), weapon: gear.weapon || 'sword', armAng: Math.PI * 0.5 }));
-  spriteSheet(scene, keys.run, 6, (ctx, t) => figure(ctx, P, { ...gear, ...runPose(t), weapon: gear.weapon || 'sword', armAng: Math.PI * 0.55 }));
-  if (keys.atk) spriteSheet(scene, keys.atk, 4, (ctx, t) => figure(ctx, P, { ...gear, weapon: gear.weapon || 'sword', armAng: Math.PI * (0.95 - t * 0.7) })); // wind up -> swing
-  if (keys.atk2) spriteSheet(scene, keys.atk2, 4, (ctx, t) => figure(ctx, P, { ...gear, weapon: gear.weapon || 'sword', armAng: Math.PI * (0.25 + t * 0.3) })); // follow through
+  const fl = gear.flavour, wrap = (ctx: any, t: number, o: any) => { figure(ctx, P, o); if (fl) factionMark(ctx, fl, o.bob || 0); };
+  spriteSheet(scene, keys.idle, 8, (ctx, t) => wrap(ctx, t, { ...gear, ...idlePose(t), weapon: gear.weapon || 'sword', armAng: Math.PI * 0.5 }));
+  spriteSheet(scene, keys.run, 6, (ctx, t) => wrap(ctx, t, { ...gear, ...runPose(t), weapon: gear.weapon || 'sword', armAng: Math.PI * 0.55 }));
+  if (keys.atk) spriteSheet(scene, keys.atk, 4, (ctx, t) => wrap(ctx, t, { ...gear, weapon: gear.weapon || 'sword', armAng: Math.PI * (0.95 - t * 0.7) })); // wind up -> swing
+  if (keys.atk2) spriteSheet(scene, keys.atk2, 4, (ctx, t) => wrap(ctx, t, { ...gear, weapon: gear.weapon || 'sword', armAng: Math.PI * (0.25 + t * 0.3) })); // follow through
 }
 
 // ---- PHASE 4: player units -------------------------------------------------
 export function generateUnits(scene: any) {
-  // Warrior (blue) — sword + shield + helmet.
-  warriorSheets(scene, PAL.warriorB, { idle: 'blue_warrior_idle', run: 'blue_warrior_run', atk: 'blue_warrior_attack', atk2: 'blue_warrior_attack2' }, { helmet: true, shield: true });
-  // Knight (BattleScene 'blue_lancer') — heavier, caped, big sword.
-  spriteSheet(scene, 'blue_lancer', 8, (ctx, t) => figure(ctx, PAL.warriorB, { helmet: true, visor: true, shield: true, cross: true, cape: 0x2a4a9b, weapon: 'bigsword', ...idlePose(t), armAng: Math.PI * 0.5 }));
+  // Warrior (blue) — sword + kite shield (gold cross emblem) + nasal-guard helmet + tabard trim.
+  warriorSheets(scene, PAL.warriorB, { idle: 'blue_warrior_idle', run: 'blue_warrior_run', atk: 'blue_warrior_attack', atk2: 'blue_warrior_attack2' }, { helmet: true, shield: true, cross: true, pauldron: true });
+  // Knight (BattleScene 'blue_lancer') — larger, great-helm + plume, pauldrons, cape, two-handed sword.
+  spriteSheet(scene, 'blue_lancer', 8, (ctx, t) => figure(ctx, PAL.warriorB, { helmet: true, greatHelm: true, plume: 0xc94a3a, pauldron: true, shield: true, cross: true, cape: 0x2a4a9b, scale: 1.18, weapon: 'bigsword', ...idlePose(t), armAng: Math.PI * 0.5 }));
 
-  // Archer (blue) — bow + green hood, no shield.
-  spriteSheet(scene, 'blue_archer_idle', 6, (ctx, t) => figure(ctx, PAL.archer, { hood: true, weapon: 'bow', ...idlePose(t), armAng: 0 }));
-  spriteSheet(scene, 'blue_archer_run', 4, (ctx, t) => figure(ctx, PAL.archer, { hood: true, weapon: 'bow', ...runPose(t), armAng: 0.2 }));
-  spriteSheet(scene, 'blue_archer_shoot', 8, (ctx, t) => figure(ctx, PAL.archer, { hood: true, weapon: 'bow', armAng: 0, pull: t < 0.7 ? t / 0.7 : 0 })); // draw then release
+  // Archer (blue) — drawn bow, hooded cloak, back quiver with fletches.
+  spriteSheet(scene, 'blue_archer_idle', 6, (ctx, t) => figure(ctx, PAL.archer, { hood: true, quiver: true, weapon: 'bow', ...idlePose(t), armAng: 0 }));
+  spriteSheet(scene, 'blue_archer_run', 4, (ctx, t) => figure(ctx, PAL.archer, { hood: true, quiver: true, weapon: 'bow', ...runPose(t), armAng: 0.2 }));
+  spriteSheet(scene, 'blue_archer_shoot', 8, (ctx, t) => figure(ctx, PAL.archer, { hood: true, quiver: true, weapon: 'bow', armAng: 0, pull: t < 0.7 ? t / 0.7 : 0 })); // draw then release
 
-  // Monk — robe + hood + staff, no weapon dmg.
-  spriteSheet(scene, 'monk_idle', 6, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', ...idlePose(t), armAng: Math.PI * 0.5 }));
-  spriteSheet(scene, 'monk_run', 4, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', ...runPose(t), armAng: Math.PI * 0.55 }));
-  spriteSheet(scene, 'monk_heal', 11, (ctx, t) => figure(ctx, PAL.monk, { hood: true, weapon: 'staff', armAng: Math.PI * 0.2, healGlow: Math.sin(t * Math.PI) }));
+  // Monk — long hooded robe + tall staff; heal frames glow gold-green.
+  spriteSheet(scene, 'monk_idle', 6, (ctx, t) => figure(ctx, PAL.monk, { hood: true, robe: true, weapon: 'staff', ...idlePose(t), armAng: Math.PI * 0.5 }));
+  spriteSheet(scene, 'monk_run', 4, (ctx, t) => figure(ctx, PAL.monk, { hood: true, robe: true, weapon: 'staff', ...runPose(t), armAng: Math.PI * 0.55 }));
+  spriteSheet(scene, 'monk_heal', 11, (ctx, t) => figure(ctx, PAL.monk, { hood: true, robe: true, weapon: 'staff', armAng: Math.PI * 0.2, healGlow: Math.sin(t * Math.PI) }));
   // Heal effect — 11-frame one-shot: a rising green-gold glow + sparkles.
   spriteSheet(scene, 'heal_effect', 11, (ctx, t) => {
     ctx.globalAlpha = 0.6 * (1 - t * 0.7); disc(ctx, 96, 110 - t * 40, 22 + t * 14, 0x9be88a);
@@ -1156,129 +1300,197 @@ export function generateUnits(scene: any) {
 
 // A four-legged beast (wolf / boar) centred at x=96, feet ~y150.
 function beastFig(ctx: any, t: number, kind: 'wolf' | 'boar') {
-  const cx = 96, gY = 148, step = Math.sin(t * Math.PI * 2) * 4;
-  const body = kind === 'wolf' ? 0x55555c : 0x6b4a2a;
-  const belly = kind === 'wolf' ? 0x7a7a82 : 0x8a6238;
-  // legs
-  ctx.fillStyle = css(0x2a2a2e);
-  for (const [lx, ph] of [[-22, 1], [-8, -1], [8, 1], [22, -1]] as any[]) { ctx.fillRect(cx + lx, gY - 18, 6, 18 + ph * step); }
-  // body (elongated)
-  ctx.fillStyle = css(body); ctx.beginPath(); ctx.ellipse(cx, gY - 30, kind === 'wolf' ? 34 : 30, kind === 'wolf' ? 16 : 18, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = css(belly); ctx.beginPath(); ctx.ellipse(cx, gY - 22, kind === 'wolf' ? 26 : 22, 7, 0, 0, Math.PI * 2); ctx.fill();
+  const cx = 96, gY = 148, step = Math.sin(t * Math.PI * 2) * 4, wolf = kind === 'wolf';
+  const body = wolf ? 0x5a5a62 : 0x6b4a2a;
+  const belly = wolf ? 0x84848c : 0x8a6238;
+  const dark = darken(body, 0.3);
+  groundShadow(ctx, cx, gY + 1, wolf ? 36 : 34, wolf ? 9 : 9);
+  // legs (rounded, lit), front pair forward (+x).
+  for (const [lx, ph] of [[-22, 1], [-10, -1], [10, 1], [22, -1]] as any[]) { limb(ctx, cx + lx, gY - 18, 6, 18 + ph * step, dark); }
+  // body (elongated) with a back highlight + belly.
+  ellipse(ctx, cx, gY - 30, wolf ? 35 : 31, wolf ? 16 : 18, body);
+  ellipse(ctx, cx - 4, gY - 36, wolf ? 28 : 24, wolf ? 8 : 9, WARM_LIGHT, 0.14);       // lit back
+  ellipse(ctx, cx, gY - 22, wolf ? 27 : 23, 7, belly);
+  // fur strokes / bristly back
+  if (wolf) { ctx.strokeStyle = csa(dark, 0.7); ctx.lineWidth = 1.4; for (let i = -28; i < 24; i += 5) { ctx.beginPath(); ctx.moveTo(cx + i, gY - 38); ctx.lineTo(cx + i - 3, gY - 44 - Math.abs(i) * 0.04); ctx.stroke(); } }
+  else { ctx.strokeStyle = css(0x3a2a16); ctx.lineWidth = 2; for (let i = -22; i < 20; i += 4) { ctx.beginPath(); ctx.moveTo(cx + i, gY - 44); ctx.lineTo(cx + i + 1, gY - 52); ctx.stroke(); } } // bristles
   // head (front = +x)
-  const hx = cx + (kind === 'wolf' ? 32 : 30), hy = gY - (kind === 'wolf' ? 38 : 34);
-  disc(ctx, hx, hy, kind === 'wolf' ? 13 : 15, body);
-  if (kind === 'wolf') { ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(hx + 6, hy - 12); ctx.lineTo(hx + 12, hy - 22); ctx.lineTo(hx + 14, hy - 10); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(hx - 4, hy - 12); ctx.lineTo(hx - 2, hy - 22); ctx.lineTo(hx + 4, hy - 12); ctx.closePath(); ctx.fill(); disc(ctx, hx + 12, hy + 2, 4, belly); } // ears + snout
-  else { disc(ctx, hx + 12, hy + 2, 6, belly); ctx.fillStyle = '#eee'; ctx.fillRect(hx + 14, hy + 4, 4, 2); ctx.fillRect(hx + 14, hy - 2, 4, 2); } // boar snout + tusks
-  disc(ctx, hx + (kind === 'wolf' ? 4 : 6), hy - 2, 1.8, kind === 'wolf' ? 0xffd24a : 0x20140c); // eye
+  const hx = cx + (wolf ? 32 : 31), hy = gY - (wolf ? 38 : 34);
+  disc(ctx, hx, hy, wolf ? 13 : 15, body);
+  ellipse(ctx, hx - 3, hy - 4, wolf ? 6 : 7, wolf ? 5 : 6, WARM_LIGHT, 0.16);
+  if (wolf) {
+    ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(hx + 6, hy - 12); ctx.lineTo(hx + 12, hy - 24); ctx.lineTo(hx + 15, hy - 10); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(hx - 4, hy - 12); ctx.lineTo(hx - 2, hy - 23); ctx.lineTo(hx + 5, hy - 12); ctx.closePath(); ctx.fill(); // ears
+    ctx.fillStyle = css(belly); ctx.beginPath(); ctx.moveTo(hx + 8, hy - 2); ctx.lineTo(hx + 22, hy + 1); ctx.lineTo(hx + 22, hy + 6); ctx.lineTo(hx + 8, hy + 6); ctx.closePath(); ctx.fill(); // snout
+    disc(ctx, hx + 22, hy + 3, 2, 0x14100a); // nose
+    ctx.fillStyle = '#fff'; ctx.fillRect(hx + 13, hy + 5, 3, 3); ctx.fillRect(hx + 18, hy + 5, 3, 3); // fangs
+  } else {
+    disc(ctx, hx + 13, hy + 3, 7, belly); ctx.fillStyle = css(0x2a1c0e); ctx.beginPath(); ctx.arc(hx + 18, hy + 3, 2.4, 0, Math.PI * 2); ctx.fill(); // snout + nostril
+    ctx.fillStyle = '#f0ece0'; ctx.beginPath(); ctx.moveTo(hx + 16, hy + 8); ctx.lineTo(hx + 22, hy - 1); ctx.lineTo(hx + 19, hy + 9); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(hx + 14, hy + 8); ctx.lineTo(hx + 19, hy + 1); ctx.lineTo(hx + 17, hy + 9); ctx.closePath(); ctx.fill(); // up-curved tusks
+    ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(hx - 4, hy - 12); ctx.lineTo(hx - 1, hy - 20); ctx.lineTo(hx + 6, hy - 12); ctx.closePath(); ctx.fill(); // ear
+  }
+  // amber/dark eye + glow.
+  disc(ctx, hx + (wolf ? 3 : 6), hy - 2, 2, wolf ? 0xffb83a : 0x20140c);
+  if (wolf) ellipse(ctx, hx + 3, hy - 2, 3.4, 3.4, 0xffb83a, 0.3);
   // tail
-  ctx.strokeStyle = css(body); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(cx - 32, gY - 32); ctx.lineTo(cx - 42, gY - 38 + step); ctx.stroke();
+  ctx.strokeStyle = css(body); ctx.lineWidth = wolf ? 5 : 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(cx - 32, gY - 32); ctx.quadraticCurveTo(cx - 44, gY - 40, cx - 46, gY - 30 + step); ctx.stroke(); ctx.lineCap = 'butt';
 }
 
 // ---- PHASE 5: enemy + wildlife units ---------------------------------------
 export function generateEnemyUnits(scene: any) {
-  warriorSheets(scene, PAL.warriorR, { idle: 'warrior_idle', run: 'red_warrior_run', atk: 'red_warrior_attack', atk2: 'red_warrior_attack2' }, { helmet: true, shield: true });
-  warriorSheets(scene, PAL.warriorY, { idle: 'yellow_warrior_idle', run: 'yellow_warrior_run', atk: 'yellow_warrior_attack', atk2: 'yellow_warrior_attack2' }, { helmet: true, shield: true });
-  warriorSheets(scene, PAL.warriorP, { idle: 'purple_warrior_idle', run: 'purple_warrior_run', atk: 'purple_warrior_attack', atk2: 'purple_warrior_attack2' }, { helmet: true, shield: true });
-  // Goblins — green, ragged, club, oversized ears, hunched (lean).
-  warriorSheets(scene, PAL.goblin, { idle: 'goblin_idle', run: 'goblin_run', atk: 'goblin_attack', atk2: 'goblin_attack2' }, { weapon: 'club', ears: true, lean: 3 });
+  // Enemy warriors — same warrior silhouette, recoloured + faction character overlay.
+  warriorSheets(scene, PAL.warriorR, { idle: 'warrior_idle', run: 'red_warrior_run', atk: 'red_warrior_attack', atk2: 'red_warrior_attack2' }, { helmet: true, shield: true, emblem: true, pauldron: true, flavour: 'red' });
+  warriorSheets(scene, PAL.warriorY, { idle: 'yellow_warrior_idle', run: 'yellow_warrior_run', atk: 'yellow_warrior_attack', atk2: 'yellow_warrior_attack2' }, { helmet: true, shield: true, weapon: 'axe', flavour: 'yellow' });
+  warriorSheets(scene, PAL.warriorP, { idle: 'purple_warrior_idle', run: 'purple_warrior_run', atk: 'purple_warrior_attack', atk2: 'purple_warrior_attack2' }, { helmet: true, shield: true, emblem: true, glowEyes: true, flavour: 'purple' });
+  // Goblins — green, ragged, club, oversized ears, hunched (lean) + small scale.
+  warriorSheets(scene, PAL.goblin, { idle: 'goblin_idle', run: 'goblin_run', atk: 'goblin_attack', atk2: 'goblin_attack2' }, { weapon: 'club', ears: true, lean: 4, scale: 0.84 });
   // Red archer.
-  spriteSheet(scene, 'red_archer_idle', 6, (ctx, t) => figure(ctx, PAL.archerR, { hood: true, weapon: 'bow', ...idlePose(t), armAng: 0 }));
-  spriteSheet(scene, 'red_archer_shoot', 8, (ctx, t) => figure(ctx, PAL.archerR, { hood: true, weapon: 'bow', armAng: 0, pull: t < 0.7 ? t / 0.7 : 0 }));
+  spriteSheet(scene, 'red_archer_idle', 6, (ctx, t) => { figure(ctx, PAL.archerR, { hood: true, quiver: true, weapon: 'bow', ...idlePose(t), armAng: 0 }); factionMark(ctx, 'red', idlePose(t).bob); });
+  spriteSheet(scene, 'red_archer_shoot', 8, (ctx, t) => { figure(ctx, PAL.archerR, { hood: true, quiver: true, weapon: 'bow', armAng: 0, pull: t < 0.7 ? t / 0.7 : 0 }); factionMark(ctx, 'red', 0); });
   // Wildlife.
   spriteSheet(scene, 'wolf_idle', 6, (ctx, t) => beastFig(ctx, t, 'wolf'));
   spriteSheet(scene, 'boar_idle', 6, (ctx, t) => beastFig(ctx, t, 'boar'));
 }
 
 // ---- Assets V2: new units + wildlife ---------------------------------------
-// Two horn points rising off a helmet (goblin warlord). Head sits ~y56.
+// Two curved horns rising off a helmet (goblin warlord). Head sits ~y56.
 function horns(ctx: any) {
-  const cx = 96; ctx.fillStyle = css(0x9aa0a6);
-  ctx.beginPath(); ctx.moveTo(cx - 12, 46); ctx.lineTo(cx - 20, 30); ctx.lineTo(cx - 6, 44); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(cx + 12, 46); ctx.lineTo(cx + 20, 30); ctx.lineTo(cx + 6, 44); ctx.closePath(); ctx.fill();
+  const cx = 96, hY = 48;
+  for (const sgn of [-1, 1]) {
+    ctx.fillStyle = css(0xe8e0cf); ctx.beginPath();
+    ctx.moveTo(cx + sgn * 11, hY - 2); ctx.quadraticCurveTo(cx + sgn * 26, hY - 8, cx + sgn * 24, hY - 24);
+    ctx.quadraticCurveTo(cx + sgn * 18, hY - 12, cx + sgn * 8, hY - 6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = csa(WARM_SHADOW, 0.3); ctx.beginPath(); ctx.moveTo(cx + sgn * 18, hY - 10); ctx.quadraticCurveTo(cx + sgn * 24, hY - 18, cx + sgn * 23, hY - 23); ctx.lineTo(cx + sgn * 17, hY - 11); ctx.closePath(); ctx.fill();
+  }
 }
 
-// A mounted lancer: a brown horse with a seated warrior and a forward lance.
+// A mounted lancer: a brown warhorse with a seated armoured rider + forward lance.
 // Centred at x=96, hooves ~y150 (matches the humanoid figure baseline).
 function cavalryFig(ctx: any, bob: number, gait: number, thrust = 0) {
-  const cx = 96, gY = 150, body = 0x8b5e3c, dark = 0x5c3d1e, sway = gait * 4;
-  // legs (4 stubs, alternating with gait)
-  ctx.fillStyle = css(dark);
-  for (const [lx, ph] of [[-28, 1], [-16, -1], [16, 1], [28, -1]] as any[]) ctx.fillRect(cx + lx, gY - 24, 6, 24 + ph * sway);
-  // barrel body + belly
-  ctx.fillStyle = css(body); ctx.beginPath(); ctx.ellipse(cx, gY - 36, 40, 17, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = css(dark); ctx.beginPath(); ctx.ellipse(cx, gY - 29, 32, 8, 0, 0, Math.PI * 2); ctx.fill();
+  const cx = 96, gY = 150, body = 0x7a5230, dark = 0x4f351c, light = 0x9a6a40, sway = gait * 5;
+  groundShadow(ctx, cx, gY + 1, 44, 10);
+  // legs (4, rounded, alternating with gait) — back pair shaded.
+  for (const [lx, ph, c] of [[-28, 1, dark], [-18, -1, darken(dark, 0.15)], [14, 1, dark], [26, -1, darken(dark, 0.15)]] as any[]) limb(ctx, cx + lx, gY - 26, 7, 26 + ph * sway, c);
+  // tail (flowing)
+  ctx.strokeStyle = css(dark); ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(cx - 38, gY - 42); ctx.quadraticCurveTo(cx - 54, gY - 30, cx - 52, gY - 12 + sway); ctx.stroke(); ctx.lineCap = 'butt';
+  // barrel body + belly + lit back.
+  ellipse(ctx, cx, gY - 38, 41, 18, body);
+  ellipse(ctx, cx - 4, gY - 46, 32, 8, light, 0.5);
+  ellipse(ctx, cx, gY - 30, 33, 9, dark);
   // neck + head (front = +x)
-  ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(cx + 30, gY - 46); ctx.lineTo(cx + 46, gY - 68); ctx.lineTo(cx + 54, gY - 62); ctx.lineTo(cx + 40, gY - 40); ctx.closePath(); ctx.fill();
-  disc(ctx, cx + 52, gY - 66, 7, body);
-  ctx.fillStyle = css(0x20140c); ctx.fillRect(cx + 56, gY - 68, 2, 2); // eye
-  // mane + tail
-  ctx.strokeStyle = css(dark); ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(cx + 34, gY - 56); ctx.lineTo(cx + 30, gY - 44); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx - 38, gY - 46); ctx.lineTo(cx - 50, gY - 30 + sway); ctx.stroke();
-  // rider (seated warrior torso + head + helm)
-  const ry = gY - 62 + bob;
-  ctx.fillStyle = css(PAL.warriorB.tunic); ctx.fillRect(cx - 12, ry, 22, 26);
-  ctx.fillStyle = css(PAL.warriorB.tunicDark); ctx.fillRect(cx - 12, ry + 20, 22, 6);
-  disc(ctx, cx - 1, ry - 8, 12, PAL.warriorB.skin);
-  ctx.fillStyle = css(PAL.warriorB.helmet); ctx.beginPath(); ctx.arc(cx - 1, ry - 9, 13, Math.PI, 0); ctx.fill(); ctx.fillRect(cx - 14, ry - 11, 26, 3);
-  // lance extending forward over the horse's head
-  const lx0 = cx + 6, ly0 = ry + 4, lx1 = cx + 70 + thrust * 14, ly1 = ry - 6;
-  ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(lx0 - 18, ly0 + 6); ctx.lineTo(lx1, ly1); ctx.stroke();
-  ctx.fillStyle = css(0xd2d6dc); ctx.beginPath(); ctx.moveTo(lx1, ly1); ctx.lineTo(lx1 - 10, ly1 - 4); ctx.lineTo(lx1 - 10, ly1 + 4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(cx + 28, gY - 48); ctx.lineTo(cx + 44, gY - 72); ctx.lineTo(cx + 56, gY - 66); ctx.lineTo(cx + 42, gY - 40); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(cx + 50, gY - 70); ctx.lineTo(cx + 64, gY - 66); ctx.lineTo(cx + 62, gY - 58); ctx.lineTo(cx + 48, gY - 60); ctx.closePath(); ctx.fill(); // muzzle
+  ellipse(ctx, cx + 52, gY - 67, 5, 5, light, 0.4);
+  disc(ctx, cx + 62, gY - 62, 1.4, 0x14100a); // nostril
+  ctx.fillStyle = css(0x14100a); ctx.fillRect(cx + 52, gY - 70, 2, 2); // eye
+  ctx.fillStyle = css(dark); ctx.beginPath(); ctx.moveTo(cx + 44, gY - 72); ctx.lineTo(cx + 47, gY - 80); ctx.lineTo(cx + 50, gY - 71); ctx.closePath(); ctx.fill(); // ear
+  // mane along the neck.
+  ctx.strokeStyle = css(darken(dark, 0.1)); ctx.lineWidth = 2.4;
+  for (let i = 0; i < 6; i++) { const tt = i / 5; const mx = cx + 30 + tt * 14, my = gY - 50 - tt * 18; ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx - 6, my + 5); ctx.stroke(); }
+  // saddle / caparison.
+  ctx.fillStyle = css(PAL.warriorB.tunic); ctx.beginPath(); ctx.moveTo(cx - 14, gY - 40); ctx.lineTo(cx + 8, gY - 40); ctx.lineTo(cx + 4, gY - 26); ctx.lineTo(cx - 10, gY - 26); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = css(0xc9a84c); ctx.fillRect(cx - 12, gY - 28, 18, 2);
+  // rider (seated armoured warrior).
+  const ry = gY - 64 + bob;
+  ctx.fillStyle = css(PAL.warriorB.tunic); ctx.fillRect(cx - 12, ry, 22, 28);
+  ctx.fillStyle = csa(WARM_LIGHT, 0.15); ctx.fillRect(cx - 12, ry, 7, 28);
+  ctx.fillStyle = css(PAL.warriorB.tunicDark); ctx.fillRect(cx - 12, ry + 22, 22, 6);
+  ctx.fillStyle = css(0xc9a84c); ctx.fillRect(cx - 12, ry + 10, 22, 2); // trim
+  ctx.fillStyle = css(PAL.warriorB.helmet); ctx.beginPath(); ctx.arc(cx - 8, ry + 2, 8, 0, Math.PI * 2); ctx.fill(); // pauldron
+  headDisc(ctx, cx - 1, ry - 8, 12, PAL.warriorB.skin);
+  ctx.fillStyle = css(PAL.warriorB.helmet); ctx.beginPath(); ctx.arc(cx - 1, ry - 9, 13, Math.PI, 0); ctx.fill(); ctx.fillRect(cx - 14, ry - 11, 26, 4);
+  ctx.fillStyle = css(darken(PAL.warriorB.helmet, 0.25)); ctx.fillRect(cx - 3, ry - 11, 4, 7); // nasal guard
+  // lance extending forward over the horse's head with a pennon.
+  const lx1 = cx + 78 + thrust * 16, ly1 = ry - 10 - thrust * 4, lx0 = cx - 6, ly0 = ry + 8;
+  ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(lx0, ly0); ctx.lineTo(lx1, ly1); ctx.stroke();
+  ctx.fillStyle = css(0xd2d6dc); ctx.beginPath(); ctx.moveTo(lx1 + 4, ly1 - 1); ctx.lineTo(lx1 - 11, ly1 - 5); ctx.lineTo(lx1 - 11, ly1 + 4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = css(PAL.warriorB.tunic); const px = (lx0 + lx1) / 2, py = (ly0 + ly1) / 2; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - 14, py - 3); ctx.lineTo(px - 11, py + 4); ctx.lineTo(px - 14, py + 8); ctx.closePath(); ctx.fill(); // pennon
 }
 
 // A slim grazing deer (128x128 frame, hooves ~y100). Head angled down to graze.
 function deerFig(ctx: any, t: number) {
-  const cx = 60, gY = 102, b = Math.sin(t * Math.PI * 2) * 1.5, body = 0x9a6a44, dark = 0x6b4423;
-  ctx.fillStyle = css(dark);
-  for (const lx of [-20, -10, 8, 18]) ctx.fillRect(cx + lx, gY - 18, 3.5, 18);
-  ctx.fillStyle = css(body); ctx.beginPath(); ctx.ellipse(cx, gY - 24 + b, 24, 10, 0, 0, Math.PI * 2); ctx.fill();
-  // lowered head + neck (front +x)
-  ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(cx + 20, gY - 26 + b); ctx.lineTo(cx + 32, gY - 8 + b); ctx.lineTo(cx + 37, gY - 12 + b); ctx.lineTo(cx + 25, gY - 28 + b); ctx.closePath(); ctx.fill();
-  disc(ctx, cx + 35, gY - 12 + b, 5, body);
-  ctx.strokeStyle = css(dark); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx + 35, gY - 16 + b); ctx.lineTo(cx + 31, gY - 25 + b); ctx.moveTo(cx + 37, gY - 16 + b); ctx.lineTo(cx + 41, gY - 25 + b); ctx.stroke();
-  ctx.fillStyle = css(0x20140c); ctx.fillRect(cx + 36, gY - 13 + b, 1.5, 1.5);
-  ctx.fillStyle = '#efe9dc'; ctx.fillRect(cx - 24, gY - 26 + b, 3, 5); // white tail
+  const cx = 60, gY = 102, b = Math.sin(t * Math.PI * 2) * 1.5, body = 0xa6744a, dark = 0x6b4423, belly = 0xeae0d0;
+  groundShadow(ctx, cx + 2, gY + 1, 26, 6);
+  ctx.strokeStyle = css(dark); ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+  for (const lx of [-18, -8, 10, 20]) { ctx.beginPath(); ctx.moveTo(cx + lx, gY - 20 + b); ctx.lineTo(cx + lx, gY - 1); ctx.stroke(); }
+  ctx.lineCap = 'butt';
+  ellipse(ctx, cx, gY - 24 + b, 24, 11, body);
+  ellipse(ctx, cx, gY - 18 + b, 18, 5, belly);                                  // white belly
+  ellipse(ctx, cx - 4, gY - 30 + b, 16, 4, WARM_LIGHT, 0.16);                   // lit back
+  // raised graceful neck + head (front +x).
+  ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(cx + 18, gY - 30 + b); ctx.lineTo(cx + 30, gY - 50 + b); ctx.lineTo(cx + 36, gY - 48 + b); ctx.lineTo(cx + 25, gY - 28 + b); ctx.closePath(); ctx.fill();
+  disc(ctx, cx + 35, gY - 50 + b, 6, body);
+  ctx.fillStyle = css(belly); ctx.beginPath(); ctx.moveTo(cx + 38, gY - 52 + b); ctx.lineTo(cx + 45, gY - 50 + b); ctx.lineTo(cx + 40, gY - 46 + b); ctx.closePath(); ctx.fill(); // muzzle
+  ctx.fillStyle = css(dark); ctx.beginPath(); ctx.moveTo(cx + 30, gY - 54 + b); ctx.lineTo(cx + 28, gY - 60 + b); ctx.lineTo(cx + 34, gY - 54 + b); ctx.closePath(); ctx.fill(); // ear
+  // branched antlers.
+  ctx.strokeStyle = css(0xcaa066); ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  for (const sgn of [1, -0.3]) { const ax = cx + 35, ay = gY - 56 + b; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax + sgn * 5, ay - 10); ctx.lineTo(ax + sgn * 3, ay - 16); ctx.moveTo(ax + sgn * 5, ay - 10); ctx.lineTo(ax + sgn * 11, ay - 12); ctx.stroke(); }
+  ctx.lineCap = 'butt';
+  ctx.fillStyle = css(0x20140c); ctx.fillRect(cx + 36, gY - 51 + b, 1.6, 1.6); // eye
+  ctx.fillStyle = css(belly); ctx.beginPath(); ctx.moveTo(cx - 24, gY - 30 + b); ctx.lineTo(cx - 20, gY - 24 + b); ctx.lineTo(cx - 26, gY - 22 + b); ctx.closePath(); ctx.fill(); // white tail
 }
 
-// A massive dragon (160x120 frame), wings spread, fire glow under the maw.
+// A massive dragon (160x120 frame): serpentine scaled body, huge veined wings,
+// horned head, glowing eyes + fire at the maw, big ground shadow. Most impressive.
 function dragonFig(ctx: any) {
-  const cx = 80, cy = 58;
-  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(cx, 108, 58, 12, 0, 0, Math.PI * 2); ctx.fill(); // ground shadow
-  // wings (two large triangles up & back)
-  ctx.fillStyle = css(0x401018); ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx - 70, cy - 44); ctx.lineTo(cx - 30, cy + 14); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = css(0x521820); ctx.beginPath(); ctx.moveTo(cx + 6, cy); ctx.lineTo(cx + 70, cy - 44); ctx.lineTo(cx + 30, cy + 14); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = css(0x2a0a10); ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx - 50, cy - 30); ctx.moveTo(cx + 6, cy); ctx.lineTo(cx + 50, cy - 30); ctx.stroke();
-  // body (irregular dark-red polygon)
-  ctx.fillStyle = css(0x6a1c22); ctx.beginPath(); ctx.moveTo(cx - 18, cy - 4); ctx.lineTo(cx + 18, cy - 6); ctx.lineTo(cx + 30, cy + 18); ctx.lineTo(cx, cy + 34); ctx.lineTo(cx - 28, cy + 16); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = css(0x4a1218); ctx.beginPath(); ctx.moveTo(cx, cy + 6); ctx.lineTo(cx + 14, cy + 20); ctx.lineTo(cx, cy + 30); ctx.lineTo(cx - 12, cy + 20); ctx.closePath(); ctx.fill(); // belly scales
-  // tail
-  ctx.strokeStyle = css(0x6a1c22); ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(cx - 20, cy + 18); ctx.quadraticCurveTo(cx - 50, cy + 40, cx - 64, cy + 20); ctx.stroke();
-  ctx.fillStyle = css(0x521820); ctx.beginPath(); ctx.moveTo(cx - 64, cy + 20); ctx.lineTo(cx - 76, cy + 14); ctx.lineTo(cx - 70, cy + 28); ctx.closePath(); ctx.fill();
-  // neck + angular horned head (front +x)
-  ctx.fillStyle = css(0x6a1c22); ctx.beginPath(); ctx.moveTo(cx + 12, cy - 4); ctx.lineTo(cx + 40, cy - 22); ctx.lineTo(cx + 50, cy - 14); ctx.lineTo(cx + 22, cy + 6); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(cx + 44, cy - 24); ctx.lineTo(cx + 64, cy - 18); ctx.lineTo(cx + 58, cy - 6); ctx.lineTo(cx + 44, cy - 10); ctx.closePath(); ctx.fill(); // jaw
-  ctx.fillStyle = css(0x3a0e12); ctx.beginPath(); ctx.moveTo(cx + 46, cy - 24); ctx.lineTo(cx + 42, cy - 36); ctx.lineTo(cx + 52, cy - 26); ctx.closePath(); ctx.fill(); // horn
-  disc(ctx, cx + 52, cy - 16, 2.4, 0xff7a1a); disc(ctx, cx + 52, cy - 16, 1.2, 0xffe24a); // glowing eye
-  // fire glow under the maw
-  ctx.globalAlpha = 0.85; disc(ctx, cx + 64, cy - 4, 6, 0xff7a1a); ctx.globalAlpha = 1; disc(ctx, cx + 64, cy - 4, 3, 0xffd24a);
+  const cx = 80, cy = 56;
+  ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.beginPath(); ctx.ellipse(cx, 110, 62, 13, 0, 0, Math.PI * 2); ctx.fill(); // big ground shadow
+  // ---- WINGS (large leathery membranes with finger-bones + veins).
+  const wing = (sgn: number, shade: number) => {
+    const sx = cx + sgn * 6, sy = cy - 2;
+    const tipx = cx + sgn * 78, tipy = cy - 50, midx = cx + sgn * 50, midy = cy - 6, lowx = cx + sgn * 34, lowy = cy + 18;
+    ctx.fillStyle = css(shade); ctx.beginPath(); ctx.moveTo(sx, sy);
+    ctx.lineTo(tipx, tipy); ctx.lineTo(cx + sgn * 64, cy - 12); ctx.lineTo(midx, midy); ctx.lineTo(cx + sgn * 44, cy + 8); ctx.lineTo(lowx, lowy); ctx.closePath(); ctx.fill();
+    // bone fingers + leading edge.
+    ctx.strokeStyle = css(0x2a0a10); ctx.lineWidth = 2.6; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tipx, tipy); ctx.stroke();
+    ctx.strokeStyle = csa(0x3a1018, 0.8); ctx.lineWidth = 1.6;
+    for (const [ex, ey] of [[cx + sgn * 64, cy - 12], [midx, midy], [lowx, lowy]] as any[]) { ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke(); }
+    ctx.fillStyle = csa(WARM_LIGHT, 0.08); ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tipx, tipy); ctx.lineTo(cx + sgn * 60, cy - 18); ctx.closePath(); ctx.fill(); // membrane sheen
+  };
+  wing(-1, 0x4a1018); wing(1, 0x5c1c24);
+  // ---- TAIL (curving, with arrow barb).
+  ctx.strokeStyle = css(0x6a1c22); ctx.lineWidth = 11; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(cx - 16, cy + 18); ctx.quadraticCurveTo(cx - 54, cy + 44, cx - 70, cy + 20); ctx.stroke(); ctx.lineCap = 'butt';
+  ctx.fillStyle = css(0x4a1218); ctx.beginPath(); ctx.moveTo(cx - 70, cy + 20); ctx.lineTo(cx - 84, cy + 12); ctx.lineTo(cx - 80, cy + 22); ctx.lineTo(cx - 86, cy + 26); ctx.closePath(); ctx.fill();
+  // ---- BODY (serpentine, scaled).
+  ctx.fillStyle = css(0x6a1c22); ctx.beginPath(); ctx.moveTo(cx - 22, cy - 2); ctx.lineTo(cx + 20, cy - 8); ctx.lineTo(cx + 34, cy + 18); ctx.lineTo(cx + 2, cy + 38); ctx.lineTo(cx - 32, cy + 16); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = csa(WARM_LIGHT, 0.1); ctx.beginPath(); ctx.moveTo(cx - 22, cy - 2); ctx.lineTo(cx + 20, cy - 8); ctx.lineTo(cx + 8, cy + 2); ctx.lineTo(cx - 24, cy + 4); ctx.closePath(); ctx.fill(); // lit upper body
+  // scale texture (overlapping arcs).
+  ctx.strokeStyle = csa(0x3a0e12, 0.7); ctx.lineWidth = 1.2;
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) { const sxp = cx - 24 + c * 12 + (r % 2) * 6, syp = cy + 2 + r * 7; ctx.beginPath(); ctx.arc(sxp, syp, 4, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke(); }
+  // belly plates.
+  ctx.fillStyle = css(0x8a3a32); for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.ellipse(cx - 6 + i * 6, cy + 26 - i * 2, 7, 3, 0, 0, Math.PI * 2); ctx.fill(); }
+  // dorsal spines.
+  ctx.fillStyle = css(0x3a0e12); for (const [sxp, syp, h] of [[cx - 18, cy - 2, 8], [cx - 6, cy - 6, 10], [cx + 8, cy - 8, 9]] as any[]) { ctx.beginPath(); ctx.moveTo(sxp - 3, syp); ctx.lineTo(sxp, syp - h); ctx.lineTo(sxp + 3, syp); ctx.closePath(); ctx.fill(); }
+  // ---- NECK + HORNED HEAD (front +x).
+  ctx.fillStyle = css(0x6a1c22); ctx.beginPath(); ctx.moveTo(cx + 14, cy - 4); ctx.lineTo(cx + 42, cy - 26); ctx.lineTo(cx + 54, cy - 16); ctx.lineTo(cx + 24, cy + 6); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = css(0x7a2a30); ctx.beginPath(); ctx.moveTo(cx + 44, cy - 28); ctx.lineTo(cx + 70, cy - 20); ctx.lineTo(cx + 66, cy - 6); ctx.lineTo(cx + 44, cy - 8); ctx.closePath(); ctx.fill(); // skull
+  ctx.fillStyle = css(0x5a161c); ctx.beginPath(); ctx.moveTo(cx + 56, cy - 12); ctx.lineTo(cx + 72, cy - 8); ctx.lineTo(cx + 66, cy + 2); ctx.lineTo(cx + 54, cy - 2); ctx.closePath(); ctx.fill(); // lower jaw
+  // horns (swept back).
+  ctx.strokeStyle = css(0x2a0a10); ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(cx + 50, cy - 26); ctx.quadraticCurveTo(cx + 52, cy - 40, cx + 40, cy - 44); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx + 58, cy - 24); ctx.quadraticCurveTo(cx + 62, cy - 38, cx + 54, cy - 44); ctx.stroke(); ctx.lineCap = 'butt';
+  // teeth.
+  ctx.fillStyle = '#f0ece0'; for (const tx of [58, 63, 68]) { ctx.beginPath(); ctx.moveTo(cx + tx, cy - 8); ctx.lineTo(cx + tx + 2, cy - 3); ctx.lineTo(cx + tx + 4, cy - 8); ctx.closePath(); ctx.fill(); }
+  // glowing eye.
+  ellipse(ctx, cx + 54, cy - 18, 4, 4, 0xff8a1a, 0.6); disc(ctx, cx + 54, cy - 18, 2.4, 0xffe24a); disc(ctx, cx + 54, cy - 18, 1, 0xffffff);
+  // ---- FIRE at the maw.
+  ellipse(ctx, cx + 76, cy - 2, 12, 8, 0xff7a1a, 0.35); ellipse(ctx, cx + 74, cy - 2, 7, 5, 0xffae3a, 0.7); disc(ctx, cx + 72, cy - 2, 3, 0xffe24a);
+  for (const [fx, fy] of [[cx + 84, cy - 6], [cx + 88, cy + 2], [cx + 82, cy + 4]] as any[]) disc(ctx, fx, fy, 1.6, 0xff9a2a);
 }
 
 export function generateV2Units(scene: any) {
-  // Spearman — warrior with a long pike + small round buckler, lighter armour.
-  warriorSheets(scene, PAL.spearman, { idle: 'spearman_idle', run: 'spearman_run', atk: 'spearman_attack', atk2: 'spearman_attack2' }, { helmet: true, shield: true, round: true, weapon: 'spear' });
+  // Spearman — tallest braced stance: long pike held high + small round buckler.
+  warriorSheets(scene, PAL.spearman, { idle: 'spearman_idle', run: 'spearman_run', atk: 'spearman_attack', atk2: 'spearman_attack2' }, { helmet: true, shield: true, round: true, weapon: 'spear', scale: 1.1, armAng: Math.PI * 0.5 });
   // Cavalry — mounted lancer (idle bob, run gait, attack thrust).
   spriteSheet(scene, 'cavalry_idle', 8, (ctx, t) => cavalryFig(ctx, idlePose(t).bob, 0));
   spriteSheet(scene, 'cavalry_run', 6, (ctx, t) => cavalryFig(ctx, 0, Math.sin(t * Math.PI * 2)));
   spriteSheet(scene, 'cavalry_attack', 4, (ctx, t) => cavalryFig(ctx, 0, 0.4, t));
-  // Goblin shaman — robed, hooded, staff with a purple magical glow.
-  spriteSheet(scene, 'goblin_shaman', 6, (ctx, t) => figure(ctx, PAL.goblinShaman, { hood: true, ears: true, weapon: 'staff', magic: 0xb060ff, ...idlePose(t), armAng: Math.PI * 0.5 }));
-  spriteSheet(scene, 'goblin_shaman_run', 6, (ctx, t) => figure(ctx, PAL.goblinShaman, { hood: true, ears: true, weapon: 'staff', magic: 0xb060ff, ...runPose(t), armAng: Math.PI * 0.55 }));
-  // Goblin warlord — bigger, horned helm, oversized cleaver.
-  spriteSheet(scene, 'goblin_warlord', 6, (ctx, t) => { figure(ctx, PAL.goblinWarlord, { helmet: true, ears: true, weapon: 'bigsword', ...idlePose(t), armAng: Math.PI * 0.5 }); horns(ctx); });
-  spriteSheet(scene, 'goblin_warlord_run', 6, (ctx, t) => { figure(ctx, PAL.goblinWarlord, { helmet: true, ears: true, weapon: 'bigsword', ...runPose(t), armAng: Math.PI * 0.55 }); horns(ctx); });
+  // Goblin shaman — dark robe, hood, crooked staff with a purple arcane glow + aura.
+  const shamanAura = (ctx: any, b: number) => { ctx.fillStyle = csa(0xb060ff, 0.12); ctx.beginPath(); ctx.arc(96, 96 + b, 30, 0, Math.PI * 2); ctx.fill(); };
+  spriteSheet(scene, 'goblin_shaman', 6, (ctx, t) => { const b = idlePose(t).bob; shamanAura(ctx, b); figure(ctx, PAL.goblinShaman, { hood: true, robe: true, ears: true, glowEyes: true, weapon: 'staff', crooked: true, magic: 0xb060ff, scale: 0.9, bob: b, armAng: Math.PI * 0.5 }); });
+  spriteSheet(scene, 'goblin_shaman_run', 6, (ctx, t) => { shamanAura(ctx, runPose(t).bob); figure(ctx, PAL.goblinShaman, { hood: true, robe: true, ears: true, glowEyes: true, weapon: 'staff', crooked: true, magic: 0xb060ff, scale: 0.9, ...runPose(t), armAng: Math.PI * 0.55 }); });
+  // Goblin warlord — largest goblin, horned helm, mismatched armour, big cleaver.
+  spriteSheet(scene, 'goblin_warlord', 6, (ctx, t) => { figure(ctx, PAL.goblinWarlord, { helmet: true, ears: true, pauldron: true, weapon: 'cleaver', scale: 1.12, ...idlePose(t), armAng: Math.PI * 0.5 }); horns(ctx); });
+  spriteSheet(scene, 'goblin_warlord_run', 6, (ctx, t) => { figure(ctx, PAL.goblinWarlord, { helmet: true, ears: true, pauldron: true, weapon: 'cleaver', scale: 1.12, ...runPose(t), armAng: Math.PI * 0.55 }); horns(ctx); });
   // Deer — peaceful grazer (128px frame like the boar).
   objSheet(scene, 'deer_idle', 6, 128, 128, (ctx, t) => deerFig(ctx, t));
   // Dragon — single huge frame, spawned over the kingdom during the disaster.
