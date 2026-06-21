@@ -3383,12 +3383,14 @@ export class IsometricScene extends GameScene {
       if (ctx.kind === 'aicastle' && ctx.ref) { ctx.ref.regrouping = true; ctx.ref.rebuildTimer = 5 * this.DAY_SECONDS; this.logEvent(`Defeated ${ctx.ref.cfg.name}'s army`, 'green'); }
       if (ctx.enemyArmyRef && this.armyMgr.armies.includes(ctx.enemyArmyRef)) { this.armyMgr.removeArmy(ctx.enemyArmyRef); if (ctx.faction) { const k = this.kingdoms.find((x) => x.cfg.key === ctx.faction); if (k) { k.regrouping = true; k.rebuildTimer = 5 * this.DAY_SECONDS; } } }
       this.threatWarning('Your army was victorious!', 0x7cfc7c, true);
+      if (this.leaders && ctx.faction) this.leaders.say(ctx.faction, 'defeated'); // (V2 P4 #2) beaten foe reacts
     } else {
       this._lastBattleLostDay = this.gameDay;
       this.armyMgr.addMorale(army, -25);
       const c = this.buildings.castle;
       if (c) this.armyMgr.marchTo(army, c.col + 2, c.row + 2, { returning: true });
       this.threatWarning('Your army was defeated.', 0xff6b6b, true);
+      if (this.leaders && ctx.faction) this.leaders.say(ctx.faction, 'losing'); // (V2 P4 #2) victor taunts
     }
     if (this.armyMgr.totalUnits(army) === 0) this.armyMgr.disband(army);
     if (res && res.commanderDied) this.onCommanderFell(ctx); // (V2 P5)

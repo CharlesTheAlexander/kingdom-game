@@ -30,19 +30,30 @@ export class Narrative {
 
   onNewDay() {
     const s = this.scene;
-    // CONQUEST PATH — beats as each faction's castle falls.
-    for (const k of (s.kingdoms || [])) if (!k.castleAlive) this.fire('conquer_' + k.cfg.key, this.conquestBeat(k.cfg.key));
     const ks = s.kingdoms || [];
-    if (ks.length && ks.every((k: any) => !k.castleAlive)) this.fire('conquer_all', 'The continent bows. You are The Unifier — found your Empire.', 'gold');
-    // DIPLOMACY PATH — the first faction to join willingly.
+    // CONQUEST PATH — 5 beats: each fall, a first blood beat, halfway, total.
+    const fallen = ks.filter((k: any) => !k.castleAlive);
+    for (const k of fallen) this.fire('conquer_' + k.cfg.key, this.conquestBeat(k.cfg.key));
+    if (fallen.length >= 1) this.fire('conquest_first', `The age of the Unifier begins — ${fallen[0].cfg.name} is the first to kneel.`);
+    if (ks.length && fallen.length >= Math.ceil(ks.length / 2)) this.fire('conquest_half', 'Half the continent flies your banner. The other thrones tremble.');
+    if (ks.length && fallen.length === ks.length) this.fire('conquer_all', 'The continent bows. You are The Unifier — found your Empire.', 'gold');
+    // DIPLOMACY PATH — 5 beats: first ally, first trade, the council, all-allied.
     if (s.diplomacy) {
-      const allied = ks.some((k: any) => k.castleAlive && (s.diplomacy.isAllied ? s.diplomacy.isAllied(k.cfg.key) : s.diplomacy.get(k.cfg.key) >= 80));
-      if (allied) this.fire('first_alliance', 'Word spreads that a new kind of ruler has risen — one who unites by choice.');
+      const allies = ks.filter((k: any) => k.castleAlive && (s.diplomacy.isAllied ? s.diplomacy.isAllied(k.cfg.key) : s.diplomacy.get(k.cfg.key) >= 80));
+      const traders = ks.filter((k: any) => s.diplomacy.tr && s.diplomacy.tr(k.cfg.key).trade);
+      if (traders.length) this.fire('first_trade', `Caravans from ${traders[0].cfg.name} now route through your markets.`);
+      if (allies.length) this.fire('first_alliance', 'Word spreads that a new kind of ruler has risen — one who unites by choice.');
+      if (s.greatCouncil && s.greatCouncil.hasGrandHall && s.greatCouncil.hasGrandHall()) this.fire('council_held', 'The Great Council convened in your hall — the moment the world changed without a sword drawn.');
+      const liveK = ks.filter((k: any) => k.castleAlive);
+      if (liveK.length >= 1 && liveK.every((k: any) => (s.diplomacy.isAllied ? s.diplomacy.isAllied(k.cfg.key) : s.diplomacy.get(k.cfg.key) >= 80))) this.fire('all_allied', 'Every crown on the continent calls you friend. A confederation is born.', 'gold');
     }
-    // LEGACY PATH — population and culture.
+    // LEGACY PATH — 5 beats: pop 50, pop 100, grand hall, stage 7, all research.
     const pop = s.population ? s.population.count : 0;
+    if (pop >= 50) this.fire('pop50', 'Your village has become a true city — its name carried by every traveller.');
     if (pop >= 100) this.fire('pop100', 'Your city is spoken of in distant lands.');
     if (s.buildings && s.buildings.buildings.some((b: any) => b.alive && b.typeKey === 'grandhall')) this.fire('grandhall_built', 'Scholars and artists travel weeks to see your Grand Hall.');
+    if (s.currentStage && s.currentStage() >= 7) this.fire('stage_castle', 'Your seat is a mighty castle now — a beacon of order in a fractured age.');
+    if (s.research && s.research.completed && s.research.completed.size >= 9) this.fire('research_all', 'Your scholars have mastered every known art. The old empire would be envious.', 'gold');
     // THE TRUTH — ruin fragments.
     if (s.ruins) {
       const ex = s.ruins.list.filter((r: any) => r.explored);

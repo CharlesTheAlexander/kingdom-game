@@ -112,6 +112,7 @@ export class Diplomacy {
     this.tr(key).alliance = true; this.nap[key] = true; this.ally[key] = true;
     // (BUG 2) Any army that faction had marching on us turns around immediately.
     if (this.scene.recallFactionArmies) this.scene.recallFactionArmies(key);
+    if (this.scene.leaders) this.scene.leaders.say(key, 'peace'); // (V2 P4 #2)
     this.scene.logEvent && this.scene.logEvent(`Military alliance with ${this.kname(key)}`, 'green');
     this.scene.refreshPanel();
   }
