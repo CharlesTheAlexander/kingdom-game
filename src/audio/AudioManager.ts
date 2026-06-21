@@ -27,12 +27,14 @@
 
 // Placeholder no-op so future imports don't break. Logs nothing in production.
 export class AudioManager {
-  constructor(scene) {
+  scene: any;
+
+  constructor(scene: any) {
     this.scene = scene;
   }
 
   // eslint-disable-next-line no-unused-vars
-  play(event) {
+  play(event: string) {
     // TODO: map `event` -> a loaded sound and play it. No-op for now.
   }
 }

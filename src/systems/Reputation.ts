@@ -2,28 +2,31 @@
 // kingdom's title and unlock passive effects at 50+.
 
 export class Reputation {
-  constructor(scene) {
+  scene: any;
+  scores: Record<string, number>;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.scores = { conqueror: 0, merchant: 0, protector: 0, destroyer: 0 };
   }
 
-  add(type, n) {
+  add(type: string, n: number) {
     if (this.scores[type] == null) return;
     const before = this.scores[type];
     this.scores[type] = Math.max(0, Math.min(100, before + n));
     if (before < 50 && this.scores[type] >= 50) this.scene.logEvent && this.scene.logEvent(`Reputation milestone: ${type} 50+`, 'green');
   }
 
-  highest() {
-    let best = null, bv = 49; // need 50+ to earn a title
+  highest(): string | null {
+    let best: string | null = null, bv = 49; // need 50+ to earn a title
     for (const [k, v] of Object.entries(this.scores)) if (v > bv) { bv = v; best = k; }
     return best;
   }
 
-  title(name) {
+  title(name: string): string | null {
     const h = this.highest();
     if (!h) return null;
-    return { conqueror: `The ${name} Conquerors`, merchant: `The ${name} Trading Company`, protector: `The Shield of ${name}`, destroyer: `The ${name} Scourge` }[h];
+    return (({ conqueror: `The ${name} Conquerors`, merchant: `The ${name} Trading Company`, protector: `The Shield of ${name}`, destroyer: `The ${name} Scourge` }) as Record<string, string>)[h];
   }
 
   // Extra market bonus from Merchant reputation (read by the Market panel).
@@ -37,11 +40,11 @@ export class Reputation {
   }
 
   serialize() { return { ...this.scores }; }
-  restore(d) { if (d) this.scores = { conqueror: 0, merchant: 0, protector: 0, destroyer: 0, ...d }; }
+  restore(d: any) { if (d) this.scores = { conqueror: 0, merchant: 0, protector: 0, destroyer: 0, ...d }; }
 }
 
 // Trait definitions — id → {name, icon-colour, desc, bonuses, oneTime(scene)}.
-export const TRAITS = {
+export const TRAITS: Record<string, any> = {
   warlord: { name: 'Warlord', color: 0xc0392b, desc: ['Troops cost 20% less food.', 'Army cap +3.'], bonuses: { foodMult: 0.8, armyCap: 6 } },
   merchant: { name: 'Merchant', color: 0xf1c40f, desc: ['Market trades 25% better.', 'Gold income +15%.'], bonuses: { marketMult: 1.25, goldMult: 1.15 } },
   builder: { name: 'Builder', color: 0xe67e22, desc: ['Buildings cost 15% less wood.', 'Instant placement.'], bonuses: { woodCostMult: 0.85 } },

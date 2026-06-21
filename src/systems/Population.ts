@@ -3,7 +3,16 @@
 // population number, one happiness value, recomputed each game-day.
 
 export class Population {
-  constructor(scene) {
+  scene: any;
+  count: number;
+  happiness: number;
+  prodMult: number;
+  _growthAcc: number;
+  modifiers: any[];
+  tempMods: any[];
+  peak: number;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.count = 10;
     this.happiness = 60;
@@ -15,12 +24,12 @@ export class Population {
   }
 
   // (Session-1) A timed happiness modifier — festivals, curses, parades, etc.
-  addTempMod(label, value, days) {
+  addTempMod(label: string, value: number, days: number) {
     const until = (this.scene.gameDay || 0) + days;
     this.tempMods.push({ label, value, untilDay: until });
   }
 
-  capacity() {
+  capacity(): number {
     const houses = this.scene.buildings ? this.scene.buildings.countOfType('house') : 0;
     return 10 + houses * 4; // base 10, +4 per House
   }
@@ -32,7 +41,7 @@ export class Population {
     const food = s.resources ? s.resources.food : 0;
 
     // --- Happiness: recompute from a neutral baseline + active modifiers ------
-    const mods = [];
+    const mods: any[] = [];
     if (food > 100) mods.push({ label: 'Food surplus', value: 15 });
     if (food <= 0) mods.push({ label: 'Starving', value: -30 });
     const day = s.gameDay || 0;
@@ -85,5 +94,5 @@ export class Population {
   }
 
   serialize() { return { count: this.count, happiness: this.happiness, growthAcc: this._growthAcc, peak: this.peak, tempMods: this.tempMods }; }
-  restore(d) { if (!d) return; this.count = d.count; this.happiness = d.happiness; this._growthAcc = d.growthAcc || 0; this.peak = d.peak || this.count; this.tempMods = d.tempMods || []; }
+  restore(d: any) { if (!d) return; this.count = d.count; this.happiness = d.happiness; this._growthAcc = d.growthAcc || 0; this.peak = d.peak || this.count; this.tempMods = d.tempMods || []; }
 }

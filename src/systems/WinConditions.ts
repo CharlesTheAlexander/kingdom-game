@@ -14,14 +14,18 @@ export const CONQUEST_FRACTION = 0.75;
 export const ALLY_RELATIONS = 80;
 
 export class WinConditions {
-  constructor(scene) {
+  scene: any;
+  legacyHappyDays: number;
+  triggered: boolean;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.legacyHappyDays = 0; // consecutive days at happiness >= 80
     this.triggered = false;   // a win has already been shown (won't nag again)
   }
 
   // Total settlements on the map = neutral/player settlements + AI castles.
-  totalSettlements() {
+  totalSettlements(): number {
     const s = this.scene;
     const neutral = s.settlements && s.settlements.list ? s.settlements.list.length : 0;
     const ai = (s.kingdoms || []).length;
@@ -37,7 +41,7 @@ export class WinConditions {
   }
 
   // Returns a win-path name or null. Pure (no side effects) so it's testable.
-  check() {
+  check(): string | null {
     const s = this.scene;
     const total = this.totalSettlements();
     if (total > 0 && this.playerControlled() / total >= CONQUEST_FRACTION) return 'Conquest';
@@ -67,5 +71,5 @@ export class WinConditions {
   }
 
   serialize() { return { legacyHappyDays: this.legacyHappyDays, triggered: this.triggered }; }
-  restore(d) { if (!d) return; this.legacyHappyDays = d.legacyHappyDays || 0; this.triggered = !!d.triggered; }
+  restore(d: any) { if (!d) return; this.legacyHappyDays = d.legacyHappyDays || 0; this.triggered = !!d.triggered; }
 }

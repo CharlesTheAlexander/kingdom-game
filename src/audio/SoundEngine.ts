@@ -12,6 +12,13 @@ const NOTE = { C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.0, A4: 44
 const UI = 0.3, COMBAT = 0.5, WORLD = 0.4, BIG = 0.7;
 
 class SoundEngine {
+  ctx: AudioContext | null;
+  master: GainNode | null;
+  volume: number;
+  muted: boolean;
+  _ambients: Record<string, { stop: () => void }>;
+  _last?: Record<string, number>;
+
   constructor() {
     this.ctx = null;
     this.master = null;
@@ -20,9 +27,9 @@ class SoundEngine {
     this._ambients = {};   // name -> { stop() }
   }
 
-  _ensure() {
+  _ensure(): boolean {
     if (this.ctx) return true;
-    const AC = window.AudioContext || window.webkitAudioContext;
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
     if (!AC) return false;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
@@ -42,13 +49,13 @@ class SoundEngine {
     const v = this.muted ? 0 : this.volume;
     this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.01);
   }
-  setVolume(v) { this.volume = Math.max(0, Math.min(1, v)); this._applyMaster(); }
-  toggleMute() { this.muted = !this.muted; this._applyMaster(); return this.muted; }
+  setVolume(v: number) { this.volume = Math.max(0, Math.min(1, v)); this._applyMaster(); }
+  toggleMute(): boolean { this.muted = !this.muted; this._applyMaster(); return this.muted; }
 
   // --- synthesis primitives ------------------------------------------------
 
   // A single oscillator note with a fast-attack / exponential-decay envelope.
-  tone(freq, dur, { type = 'sine', vol = 0.3, when = 0, slideTo = null, attack = 0.005 } = {}) {
+  tone(freq: number, dur: number, { type = 'sine', vol = 0.3, when = 0, slideTo = null, attack = 0.005 }: any = {}) {
     if (!this.ctx) return;
     const t0 = this.ctx.currentTime + when;
     const osc = this.ctx.createOscillator();
@@ -65,7 +72,7 @@ class SoundEngine {
   }
 
   // A burst of filtered white noise (for clangs, whooshes, drums, growls).
-  noise(dur, { vol = 0.3, when = 0, type = 'highpass', freq = 1000, sweepTo = null } = {}) {
+  noise(dur: number, { vol = 0.3, when = 0, type = 'highpass', freq = 1000, sweepTo = null }: any = {}) {
     if (!this.ctx) return;
     const t0 = this.ctx.currentTime + when;
     const n = Math.max(1, Math.floor(this.ctx.sampleRate * dur));
@@ -86,14 +93,14 @@ class SoundEngine {
     src.stop(t0 + dur + 0.02);
   }
 
-  arp(freqs, noteDur, { type = 'triangle', vol = 0.3, gap = null } = {}) {
+  arp(freqs: number[], noteDur: number, { type = 'triangle', vol = 0.3, gap = null }: any = {}) {
     const step = gap || noteDur * 0.6;
     freqs.forEach((f, i) => this.tone(f, noteDur, { type, vol, when: i * step }));
   }
 
   // --- event dispatcher ----------------------------------------------------
 
-  play(event) {
+  play(event: string) {
     if (!this.ctx || this.muted) return;
     switch (event) {
       // UI (0.3)
@@ -146,7 +153,7 @@ class SoundEngine {
 
   // Like play(), but ignores repeats of the same event within `ms` so a clash of
   // many units doesn't stack into a roar.
-  playThrottled(event, ms = 110) {
+  playThrottled(event: string, ms = 110) {
     if (!this.ctx || this.muted) return;
     const now = this.ctx.currentTime * 1000;
     this._last = this._last || {};
@@ -157,13 +164,13 @@ class SoundEngine {
 
   // --- looping ambient beds (Phase 4 weather) ------------------------------
 
-  startAmbient(name, kind, vol = 0.1) {
+  startAmbient(name: string, kind: string, vol = 0.1) {
     if (!this.ctx || this._ambients[name]) return;
     const g = this.ctx.createGain();
     g.gain.value = 0;
     g.gain.setTargetAtTime(vol, this.ctx.currentTime, 2); // gentle fade-in (Audit FIX 7: per-ambient volume)
     g.connect(this.master);
-    let node;
+    let node: any;
     if (kind === 'wind') {
       // Low-passed brown-ish noise with a slow wandering filter = wind.
       const n = Math.floor(this.ctx.sampleRate * 2);
@@ -196,7 +203,7 @@ class SoundEngine {
     };
   }
 
-  stopAmbient(name) {
+  stopAmbient(name: string) {
     const a = this._ambients[name];
     if (a) { a.stop(); delete this._ambients[name]; }
   }
