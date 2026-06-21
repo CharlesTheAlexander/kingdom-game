@@ -1691,7 +1691,22 @@ export class IsometricScene extends GameScene {
     els.forEach((o) => o.destroy()); this._kingEls = null;
     this.updateKingdomTitle();
     this.logEvent && this.logEvent(`${this.kingdomName} founded under ${this.rulerName} (${t ? t.name : '—'})`, 'green');
-    if (!this._noIntro) this.showWelcomePanel();
+    // (Phase 11) First-play intro cutscene. On the very first new game (the
+    // 'kingdom_intro_seen' flag unset) play the illustrated intro, then show the
+    // welcome panel when it finishes. On every later play, the welcome panel
+    // shows immediately exactly as before.
+    if (!this._noIntro) {
+      let seen = true;
+      try { seen = !!localStorage.getItem('kingdom_intro_seen'); } catch (e) {}
+      if (!seen) {
+        this.scene.launch('IntroCutsceneScene', {
+          kingdomName: this.kingdomName,
+          onComplete: () => { if (this.scene && this.scene.isActive()) this.showWelcomePanel(); },
+        });
+      } else {
+        this.showWelcomePanel();
+      }
+    }
   }
 
   // ============================================================ SAVE / LOAD UI

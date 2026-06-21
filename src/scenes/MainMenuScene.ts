@@ -77,6 +77,7 @@ export class MainMenuScene extends Phaser.Scene {
       ['New Kingdom', () => this.newKingdom(), true],
       ['Continue', () => this.continueGame(), hasSave],
       ['Load Game', () => this.openLoad(), hasSave],
+      ['Watch Intro', () => this.watchIntro(), true],
       ['Settings', () => this.openSettings(), true],
       ['Credits', () => this.openCredits(), true],
     ];
@@ -176,6 +177,19 @@ export class MainMenuScene extends Phaser.Scene {
     const r = SaveManager.preparePending(0);
     if (!r.ok) { this.toast(r.error || 'No save to continue.'); return; }
     this.startGame();
+  }
+
+  // (Phase 11) Replay the intro cutscene standalone from the menu. Sleeps the
+  // menu, launches the cutscene on top with a placeholder kingdom name, and
+  // wakes the menu back up when the cutscene finishes or is skipped. This does
+  // NOT depend on the 'kingdom_intro_seen' flag — it always plays.
+  watchIntro() {
+    try { sfx.unlock(); } catch (e) {}
+    this.scene.sleep();
+    this.scene.launch('IntroCutsceneScene', {
+      kingdomName: 'Eldoria',
+      onComplete: () => { try { this.scene.wake(); } catch (e) {} },
+    });
   }
 
   // ---- load / settings / credits sub-panels -------------------------------
