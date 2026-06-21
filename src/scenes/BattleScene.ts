@@ -143,6 +143,7 @@ class BUnit {
     if (this._selRing) { this._selRing.destroy(); this._selRing = null; } // (Loop 1)
     this.scene.tweens.add({ targets: this.shadow, alpha: 0, duration: 500, onComplete: () => this.shadow.destroy() });
     this.spr.setTintFill(0xff3333);
+    this.scene.deathWispFx(this.x, this.y, this.side === 'player'); // (Visual P7) rising soul wisp
     this.scene.tweens.add({ targets: this.spr, alpha: 0, angle: this.side === 'player' ? 30 : -30, y: this.y + 6, duration: 600, onComplete: () => this.spr.destroy() });
   }
   sync() {
@@ -187,6 +188,7 @@ export class BattleScene extends Phaser.Scene {
     this.faction = this.cfg.enemyFaction || 'red';
 
     registerUnitAnimations(this); // (Polish Phase 1) ensure walk/attack/shoot anims exist
+    this.ensureFxTextures(); // (Visual P7) generate-once particle pixels
     this.drawBattlefield();
 
     this.units = [];
@@ -632,6 +634,110 @@ export class BattleScene extends Phaser.Scene {
     }
   }
 
+  // ---- (Visual P7) Combat particle VFX -------------------------------------
+  // Tiny generate-once pixels so every combat burst can use a real particle
+  // emitter (batched, cheap) instead of dozens of tweened circles.
+  ensureFxTextures() {
+    if (!this.textures.exists('fx_px')) {
+      const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
+      g.fillStyle(0xffffff, 1); g.fillRect(0, 0, 3, 3); g.generateTexture('fx_px', 3, 3); g.destroy();
+    }
+    if (!this.textures.exists('fx_soft')) {
+      // Soft round glow for sparks / heal motes (radial falloff).
+      const tex = this.textures.createCanvas('fx_soft', 12, 12) as any;
+      if (tex) {
+        const ctx = tex.getContext();
+        const grad = ctx.createRadialGradient(6, 6, 0, 6, 6, 6);
+        grad.addColorStop(0, 'rgba(255,255,255,1)');
+        grad.addColorStop(0.4, 'rgba(255,255,255,0.7)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad; ctx.fillRect(0, 0, 12, 12); tex.refresh();
+      }
+    }
+  }
+
+  // Northgard-style sword hit: a bright warm spark burst + a quick expanding ring.
+  swordHitFx(x: number, y: number) {
+    const burst = this.add.particles(x, y, 'fx_soft', {
+      lifespan: 320, speed: { min: 60, max: 170 }, angle: { min: 0, max: 360 },
+      scale: { start: 0.7, end: 0 }, alpha: { start: 1, end: 0 },
+      tint: [0xfff3c0, 0xffd24a, 0xffae42], quantity: 7, blendMode: 'ADD',
+      gravityY: 120, emitting: false,
+    }).setDepth(29);
+    burst.explode(7, x, y);
+    this.time.delayedCall(360, () => burst.destroy());
+    // Bright spark -> warm fade expanding ring.
+    const ring = this.add.circle(x, y, 4, 0xffe9a8, 0).setStrokeStyle(2.5, 0xffd24a, 0.95).setDepth(28);
+    this.tweens.add({ targets: ring, scale: 3.4, alpha: 0, duration: 280, ease: 'Cubic.out', onComplete: () => ring.destroy() });
+  }
+
+  // Arrow hit: a tiny pale impact + a couple of drifting feather flecks.
+  arrowHitFx(x: number, y: number) {
+    const burst = this.add.particles(x, y, 'fx_px', {
+      lifespan: 260, speed: { min: 30, max: 90 }, angle: { min: 0, max: 360 },
+      scale: { start: 1, end: 0 }, alpha: { start: 0.9, end: 0 },
+      tint: [0xe8e8e8, 0xcfd2da], quantity: 4, emitting: false,
+    }).setDepth(29);
+    burst.explode(4, x, y);
+    this.time.delayedCall(300, () => burst.destroy());
+    // A couple of feather flecks that flutter down.
+    for (let i = 0; i < 2; i++) {
+      const f = this.add.rectangle(x, y, 5, 2, 0xf2ede0, 0.95).setDepth(28).setRotation(Phaser.Math.FloatBetween(-1, 1));
+      this.tweens.add({
+        targets: f, x: x + Phaser.Math.Between(-12, 12), y: y + Phaser.Math.Between(8, 22),
+        angle: Phaser.Math.Between(-120, 120), alpha: 0, duration: 520, ease: 'Sine.in',
+        onComplete: () => f.destroy(),
+      });
+    }
+  }
+
+  // Monk heal: a golden mote beam from healer to target + a soft settling burst.
+  healBeamFx(hx: number, hy: number, tx: number, ty: number) {
+    const beam = this.add.particles(0, 0, 'fx_soft', {
+      lifespan: 420, scale: { start: 0.55, end: 0 }, alpha: { start: 0.9, end: 0 },
+      tint: [0xfff0b0, 0xffe066, 0x9fe6a0], quantity: 1, frequency: 24,
+      blendMode: 'ADD', emitting: false,
+    }).setDepth(27);
+    // Emit a short ribbon of motes travelling along the heal line.
+    let t = 0; const steps = 6;
+    const timer = this.time.addEvent({ delay: 28, repeat: steps - 1, callback: () => {
+      t += 1; const f = t / steps;
+      beam.emitParticleAt(Phaser.Math.Linear(hx, tx, f), Phaser.Math.Linear(hy, ty, f) - 8, 1);
+    } });
+    // Soft golden settle burst on the target.
+    const settle = this.add.particles(tx, ty - 6, 'fx_soft', {
+      lifespan: 480, speed: { min: 12, max: 36 }, angle: { min: 200, max: 340 },
+      scale: { start: 0.6, end: 0 }, alpha: { start: 0.95, end: 0 },
+      tint: [0x9fe6a0, 0xffe066], quantity: 5, blendMode: 'ADD', emitting: false,
+    }).setDepth(27);
+    settle.explode(5, tx, ty - 6);
+    this.time.delayedCall(560, () => { timer.remove(); beam.destroy(); settle.destroy(); });
+  }
+
+  // Cavalry charge: a trailing dust cloud kicked up behind the rider.
+  chargeDustFx(x: number, y: number, dir: number) {
+    const dust = this.add.particles(x - dir * 10, y + 16, 'fx_soft', {
+      lifespan: 520, speedX: { min: -dir * 70, max: -dir * 20 }, speedY: { min: -30, max: 6 },
+      scale: { start: 0.5, end: 1.6 }, alpha: { start: 0.5, end: 0 },
+      tint: [0xc8b48c, 0xa8946c, 0xd8c8a4], quantity: 6, emitting: false,
+    }).setDepth(9);
+    dust.explode(6);
+    this.time.delayedCall(560, () => dust.destroy());
+  }
+
+  // Unit death: a brief flash already exists (die tints red); add a faint soul
+  // wisp that rises and fades.
+  deathWispFx(x: number, y: number, friendly: boolean) {
+    const wisp = this.add.particles(x, y - 6, 'fx_soft', {
+      lifespan: 760, speedX: { min: -14, max: 14 }, speedY: { min: -52, max: -28 },
+      scale: { start: 0.7, end: 0 }, alpha: { start: 0.55, end: 0 },
+      tint: friendly ? [0xbfe0ff, 0xeaf3ff] : [0xe6c0c0, 0xf0dada],
+      quantity: 4, blendMode: 'ADD', emitting: false,
+    }).setDepth(13);
+    wisp.explode(4);
+    this.time.delayedCall(820, () => wisp.destroy());
+  }
+
   // (V2 Phase 4) 1.5x when attacker counters defender, 0.6x when countered, else 1.
   counterMul(atk: string, def: string) {
     if (COUNTER[atk] === def) return 1.5;
@@ -801,7 +907,7 @@ export class BattleScene extends Phaser.Scene {
       const w = this.healTarget(u);
       if (w) {
         if (Phaser.Math.Distance.Between(u.x, u.y, w.x, w.y) > 30) { this.moveTo(u, w.x, w.y, u.speed * moraleMul, dt); playLoop(u.spr, u.anims.run || u.anims.idle); }
-        else { w.hp = Math.min(w.maxHp, w.hp + u.heal * dt); w.hpFill.width = w.hpW * (w.hp / w.maxHp); if (u.atkCd <= 0) { u.atkCd = 1; playOnce(u.spr, 'monk_heal', u.anims.idle); } else playLoop(u.spr, u.anims.idle); }
+        else { w.hp = Math.min(w.maxHp, w.hp + u.heal * dt); w.hpFill.width = w.hpW * (w.hp / w.maxHp); if (u.atkCd <= 0) { u.atkCd = 1; playOnce(u.spr, 'monk_heal', u.anims.idle); this.healBeamFx(u.x, u.y - 8, w.x, w.y - 8); this.dmgNumber(w.x, w.y - 30, `+${Math.round(u.heal)}`, '#9fe6a0'); /* (Visual P7) golden heal beam + HP float */ } else playLoop(u.spr, u.anims.idle); }
       } else playLoop(u.spr, u.anims.idle);
       u.sync(); return;
     }
@@ -818,12 +924,12 @@ export class BattleScene extends Phaser.Scene {
           // (V2 P3 balance) Cavalry charge: 2x first strike (was 3x — 3x one-shot
           // archers). Spearmen are a HARD counter: their pike wall negates the
           // charge entirely, so cavalry must not open on them.
-          if (u.type === 'cavalry' && !u._charged) { if (foe.type !== 'spearmen') power *= 2; u._charged = true; sfx.playThrottled('cavalry_charge', 400); /* (V2 P4 #8) hooves */ }
+          if (u.type === 'cavalry' && !u._charged) { if (foe.type !== 'spearmen') power *= 2; u._charged = true; sfx.playThrottled('cavalry_charge', 400); /* (V2 P4 #8) hooves */ this.chargeDustFx(u.x, u.y, foe.x > u.x ? 1 : -1); /* (Visual P7) charge dust */ }
           this.counterArrow(u, cm); // teach the matchup
           if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(power * this.terrainDefMul(o)); } }
           else foe.takeDamage(power * this.terrainDefMul(foe));
-          if (u.range > 0) { this.projectile(u.x, u.y, foe.x, foe.y); sfx.playThrottled('arrow_shoot', 120); }
-          else sfx.playThrottled('sword_hit', 130);
+          if (u.range > 0) { this.projectile(u.x, u.y, foe.x, foe.y); sfx.playThrottled('arrow_shoot', 120); this.arrowHitFx(foe.x, foe.y - 12); /* (Visual P7) */ }
+          else { sfx.playThrottled('sword_hit', 130); this.swordHitFx(foe.x, foe.y - 12); /* (Visual P7) warm spark + ring */ }
           playOnce(u.spr, u.anims.atk, u.anims.idle); // (Polish Phase 1) swing / shoot
         } else {
           playLoop(u.spr, u.anims.idle);

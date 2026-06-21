@@ -271,6 +271,7 @@ export class IsometricScene extends GameScene {
     this.makeVignette();
     this.createDayNightOverlay();
     this.createWeather(); // (Polish Phase 4) snow / rain particles
+    this.ensureFxTextures(); // (Visual P7) generate-once particle pixels for world VFX
 
     this.buildings.place('castle', Math.floor(N / 2), Math.floor(N / 2));
     this.decorateBuilding(this.buildings.castle);
@@ -363,6 +364,10 @@ export class IsometricScene extends GameScene {
     this._beforeUnload = () => { try { SaveManager.save(this, 0); } catch (err) {} };
     window.addEventListener('beforeunload', this._beforeUnload);
     this.events.once('shutdown', () => window.removeEventListener('beforeunload', this._beforeUnload));
+
+    // (Visual P7) Catch heroes that join via an event popup mid-day (not just on
+    // the daily tick). this.time events are auto-cleared on scene shutdown.
+    this.time.addEvent({ delay: 1500, loop: true, callback: () => this.checkHeroFx() });
 
     // (Save system) If a load is pending (set by requestLoad → scene.restart),
     // reconstruct the saved state now that the fresh scene exists.
@@ -2222,6 +2227,7 @@ export class IsometricScene extends GameScene {
     if (b._snowCap) { b._snowCap.destroy(); b._snowCap = null; }
     this.hideBuildingName && this.hideBuildingName(b);
     if (this.floatText) this.floatText(b.x, b.y - 30, '💨 rubble', '#9a8f80');
+    this.razeFxAt(b.x, b.y); // (Visual P7) flame burst + chips + smoke at the raze site
     b.destroy();
     if (this.selectedBuilding === b) { this.selectedBuilding = null; this.clearSelection(); }
     if (this.territory) this.territory.recompute();
@@ -2293,7 +2299,7 @@ export class IsometricScene extends GameScene {
       const by = castle.y - castle.baseScale * next.castleScale * 48;
       this.castleBarBg.y = by;
       this.castleBarFill.y = by;
-      this.sparkleAt(castle.x, castle.y);
+      this.tierUpFx(castle.x, castle.y); // (Visual P7) showpiece gold burst + confetti + flash
     }
     if (next.wall) this.drawWall(next.wall, next.moat, next.towers);
     if (this.territory) this.territory.addTierBonus();
@@ -2462,6 +2468,172 @@ export class IsometricScene extends GameScene {
     else this.time.delayedCall(300, () => d.destroy());
   }
 
+  // ---- (Visual P7) Generate-once particle pixels for world VFX -------------
+  ensureFxTextures() {
+    if (!this.textures.exists('wfx_px')) {
+      const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
+      g.fillStyle(0xffffff, 1); g.fillRect(0, 0, 3, 3); g.generateTexture('wfx_px', 3, 3); g.destroy();
+    }
+    if (!this.textures.exists('wfx_soft')) {
+      const tex = this.textures.createCanvas('wfx_soft', 14, 14) as any;
+      if (tex) {
+        const ctx = tex.getContext();
+        const grad = ctx.createRadialGradient(7, 7, 0, 7, 7, 7);
+        grad.addColorStop(0, 'rgba(255,255,255,1)');
+        grad.addColorStop(0.4, 'rgba(255,255,255,0.65)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad; ctx.fillRect(0, 0, 14, 14); tex.refresh();
+      }
+    }
+  }
+
+  // ---- (Visual P7) World event VFX ----------------------------------------
+
+  // Burning building: a flickering flame cluster + rising smoke + drifting embers.
+  // Used by razeFxAt (and safe to call standalone). Returns nothing — all
+  // emitters self-destruct so there are no leaks.
+  fireFxAt(x, y) {
+    if (!this.textures.exists('wfx_soft')) this.ensureFxTextures();
+    // Flame cluster: warm motes licking upward.
+    const flame = this.add.particles(x, y - 4, 'wfx_soft', {
+      lifespan: 480, speedY: { min: -70, max: -34 }, speedX: { min: -16, max: 16 },
+      scale: { start: 0.9, end: 0 }, alpha: { start: 0.95, end: 0 },
+      tint: [0xffd24a, 0xff8a2a, 0xff5a2a], quantity: 5, frequency: 40,
+      blendMode: 'ADD', maxParticles: 70,
+    }).setDepth(34);
+    // Rising smoke.
+    const smoke = this.add.particles(x, y - 10, 'wfx_soft', {
+      lifespan: 1100, speedY: { min: -50, max: -24 }, speedX: { min: -20, max: 20 },
+      scale: { start: 0.5, end: 2.0 }, alpha: { start: 0.4, end: 0 },
+      tint: [0x4a4038, 0x6a6058], quantity: 2, frequency: 90, maxParticles: 40,
+    }).setDepth(33);
+    // A few embers popping out.
+    const embers = this.add.particles(x, y - 4, 'wfx_px', {
+      lifespan: 700, speed: { min: 30, max: 90 }, angle: { min: 230, max: 310 },
+      scale: { start: 1, end: 0 }, alpha: { start: 1, end: 0 },
+      tint: [0xffd24a, 0xff8a2a], quantity: 3, frequency: 110, gravityY: 60,
+      blendMode: 'ADD', maxParticles: 30,
+    }).setDepth(35);
+    // Burn for ~900ms then stop emitting and clean up after the tail clears.
+    this.time.delayedCall(900, () => { flame.stop(); smoke.stop(); embers.stop(); });
+    this.time.delayedCall(2200, () => { flame.destroy(); smoke.destroy(); embers.destroy(); });
+  }
+
+  // Building destruction/raze: a quick flame burst + smoke puff + embers + dust.
+  razeFxAt(x, y) {
+    if (!this.textures.exists('wfx_soft')) this.ensureFxTextures();
+    this.dustAt(x, y + 6);
+    // Brief flame flash.
+    const flash = this.add.particles(x, y, 'wfx_soft', {
+      lifespan: 420, speed: { min: 40, max: 130 }, angle: { min: 200, max: 340 },
+      scale: { start: 1.1, end: 0 }, alpha: { start: 1, end: 0 },
+      tint: [0xffd24a, 0xff7a2a, 0xff5a2a], quantity: 14, blendMode: 'ADD', emitting: false,
+    }).setDepth(34);
+    flash.explode(14, x, y);
+    // Wood/stone chips flying out.
+    const chips = this.add.particles(x, y, 'wfx_px', {
+      lifespan: 620, speed: { min: 60, max: 170 }, angle: { min: 0, max: 360 },
+      scale: { start: 1.4, end: 0.4 }, alpha: { start: 1, end: 0 },
+      tint: [0x8a6a44, 0x6a5030, 0xa8a098, 0x7c746c], quantity: 12, gravityY: 240, emitting: false,
+    }).setDepth(33);
+    chips.explode(12, x, y);
+    // Rising smoke puff.
+    const smoke = this.add.particles(x, y - 6, 'wfx_soft', {
+      lifespan: 1000, speedY: { min: -46, max: -20 }, speedX: { min: -18, max: 18 },
+      scale: { start: 0.6, end: 2.2 }, alpha: { start: 0.5, end: 0 },
+      tint: [0x4a4038, 0x6a6058], quantity: 8, emitting: false,
+    }).setDepth(32);
+    smoke.explode(8, x, y - 6);
+    this.time.delayedCall(1300, () => { flash.destroy(); chips.destroy(); smoke.destroy(); });
+  }
+
+  // Hero arrival: a warm light column rising from the castle + settling sparkles.
+  heroArrivalFx(x, y) {
+    if (!this.textures.exists('wfx_soft')) this.ensureFxTextures();
+    // Warm light column.
+    const col = this.add.rectangle(x, y - 60, 26, 130, 0xffe9a8, 0).setOrigin(0.5, 1).setDepth(36).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: col, fillAlpha: { from: 0, to: 0.55 }, scaleX: { from: 0.4, to: 1 }, duration: 280, yoyo: true, hold: 240, ease: 'Sine.out', onComplete: () => col.destroy() });
+    // Settling sparkles falling into place around the arrival point.
+    const motes = this.add.particles(x, y - 70, 'wfx_soft', {
+      lifespan: 900, speedY: { min: 30, max: 70 }, speedX: { min: -28, max: 28 },
+      scale: { start: 0.7, end: 0 }, alpha: { start: 0.95, end: 0 },
+      tint: [0xfff3c0, 0xffd24a, 0xffe066], quantity: 3, frequency: 50,
+      blendMode: 'ADD', maxParticles: 40,
+    }).setDepth(37);
+    this.time.delayedCall(500, () => motes.stop());
+    this.time.delayedCall(1500, () => motes.destroy());
+    // Reuse the existing celebratory star burst.
+    if (this.sparkleAt) this.sparkleAt(x, y);
+  }
+
+  // Hero death: a larger blue-white soul wisp rising + a brief desaturation pulse.
+  heroDeathFx(x, y) {
+    if (!this.textures.exists('wfx_soft')) this.ensureFxTextures();
+    const wisp = this.add.particles(x, y, 'wfx_soft', {
+      lifespan: 1300, speedY: { min: -64, max: -34 }, speedX: { min: -18, max: 18 },
+      scale: { start: 1.0, end: 0 }, alpha: { start: 0.7, end: 0 },
+      tint: [0xbfe0ff, 0xeaf3ff, 0xcfd8ff], quantity: 6, frequency: 70,
+      blendMode: 'ADD', maxParticles: 50,
+    }).setDepth(37);
+    this.time.delayedCall(700, () => wisp.stop());
+    this.time.delayedCall(2100, () => wisp.destroy());
+    // Brief desaturation/grief pulse over the screen.
+    const pulse = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x6a7280, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(95);
+    this.tweens.add({ targets: pulse, fillAlpha: { from: 0, to: 0.22 }, duration: 320, yoyo: true, hold: 180, ease: 'Sine.inOut', onComplete: () => pulse.destroy() });
+  }
+
+  // Settlement tier-up showpiece: escalating gold burst + confetti + warm flash.
+  tierUpFx(x, y) {
+    if (!this.textures.exists('wfx_soft')) this.ensureFxTextures();
+    // Warm screen flash.
+    const flash = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0xffe9a8, 0).setOrigin(0, 0).setScrollFactor(0).setDepth(94).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: flash, fillAlpha: { from: 0.35, to: 0 }, duration: 420, ease: 'Cubic.out', onComplete: () => flash.destroy() });
+    // Big gold burst from the keep.
+    const burst = this.add.particles(x, y - 20, 'wfx_soft', {
+      lifespan: 900, speed: { min: 80, max: 260 }, angle: { min: 200, max: 340 },
+      scale: { start: 1.1, end: 0 }, alpha: { start: 1, end: 0 },
+      tint: [0xfff3c0, 0xffd24a, 0xffae42], quantity: 26, gravityY: 160, blendMode: 'ADD', emitting: false,
+    }).setDepth(38);
+    burst.explode(26, x, y - 20);
+    // Confetti rain that settles around the settlement.
+    const confetti = this.add.particles(x, y - 90, 'wfx_px', {
+      lifespan: 1500, speedY: { min: 40, max: 130 }, speedX: { min: -90, max: 90 },
+      scale: { start: 1.6, end: 0.6 }, alpha: { start: 1, end: 0 }, rotate: { min: 0, max: 360 },
+      tint: [0xffd24a, 0x4ad66b, 0x66ddff, 0xff6b6b, 0xffffff], quantity: 6, frequency: 40, maxParticles: 90,
+    }).setDepth(37);
+    this.time.delayedCall(700, () => confetti.stop());
+    // A couple of escalating firework pops above the keep.
+    for (let i = 0; i < 2; i++) {
+      this.time.delayedCall(220 + i * 260, () => {
+        const fx = x + Phaser.Math.Between(-50, 50), fy = y - 110 - i * 26;
+        const pop = this.add.particles(fx, fy, 'wfx_soft', {
+          lifespan: 700, speed: { min: 60, max: 150 }, angle: { min: 0, max: 360 },
+          scale: { start: 0.8, end: 0 }, alpha: { start: 1, end: 0 },
+          tint: [0xffd24a, 0x66ddff, 0xff6b6b, 0xffffff][i % 4], quantity: 18, gravityY: 90, blendMode: 'ADD', emitting: false,
+        }).setDepth(38);
+        pop.explode(18, fx, fy);
+        this.time.delayedCall(760, () => pop.destroy());
+      });
+    }
+    this.time.delayedCall(1600, () => { burst.destroy(); confetti.destroy(); });
+    if (this.sparkleAt) this.sparkleAt(x, y);
+  }
+
+  // (Visual P7) Detect roster changes (heroes join via an event popup, or fall in
+  // battle) and play the matching FX at the castle. Purely visual — reads counts,
+  // changes no game state. Polled daily and on a slow timer so popup-accepts catch.
+  checkHeroFx() {
+    if (!this.heroes || !this.heroes.roster) return;
+    const live = this.heroes.roster.filter((h: any) => h.isAlive).length;
+    const fallen = this.heroes.roster.filter((h: any) => !h.isAlive).length;
+    if (this._heroLiveCount === undefined) { this._heroLiveCount = live; this._heroFallenCount = fallen; return; }
+    const c = this.buildings && this.buildings.castle;
+    if (live > this._heroLiveCount && c) this.heroArrivalFx(c.x, c.y);
+    if (fallen > this._heroFallenCount && c) this.heroDeathFx(c.x, c.y);
+    this._heroLiveCount = live;
+    this._heroFallenCount = fallen;
+  }
+
   spawnShot(x1, y1, x2, y2) {
     const g = this.add.graphics().setDepth(30);
     g.lineStyle(2, 0xffe066, 1).lineBetween(x1, y1, x2, y2);
@@ -2479,6 +2651,21 @@ export class IsometricScene extends GameScene {
     const flash = this.add.rectangle(b.x, b.y, 44, 44, 0xffffff, 0.7).setDepth(30);
     this.tweens.add({ targets: flash, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
     this.dustAt(b.x, b.y + 10);
+    // (Visual P7) Construction burst: wood/stone chips fly out, then a settling gold sparkle.
+    if (!this.textures.exists('wfx_soft')) this.ensureFxTextures();
+    const chips = this.add.particles(b.x, b.y + 4, 'wfx_px', {
+      lifespan: 520, speed: { min: 50, max: 140 }, angle: { min: 0, max: 360 },
+      scale: { start: 1.4, end: 0.4 }, alpha: { start: 1, end: 0 },
+      tint: [0x8a6a44, 0x6a5030, 0xa8a098, 0xc8b48c], quantity: 10, gravityY: 240, emitting: false,
+    }).setDepth(33);
+    chips.explode(10, b.x, b.y + 4);
+    const settle = this.add.particles(b.x, b.y - 14, 'wfx_soft', {
+      lifespan: 700, speedY: { min: 14, max: 40 }, speedX: { min: -22, max: 22 },
+      scale: { start: 0.7, end: 0 }, alpha: { start: 0.95, end: 0 },
+      tint: [0xfff3c0, 0xffd24a, 0xffe066], quantity: 8, blendMode: 'ADD', emitting: false,
+    }).setDepth(34);
+    settle.explode(8, b.x, b.y - 14);
+    this.time.delayedCall(820, () => { chips.destroy(); settle.destroy(); });
   }
 
   // ---- Phase 2 / 7: wildlife hooks + threat warning banners ----------------
@@ -4589,6 +4776,7 @@ export class IsometricScene extends GameScene {
     if (this.banking) this.banking.onNewDay(); // (Completion Phase 3) interest + loan handling
     if (this.greatCouncil) this.greatCouncil.onNewDay(); // (Completion Phase 4) council effects
     if (this.heroes) this.heroes.checkArrivals(); // (V2 Phase 3) hero arrivals
+    this.checkHeroFx(); // (Visual P7) celebrate arrivals / mourn deaths visually (no logic change)
     if (this.maintenance) this.maintenance.onNewDay(); // (V2 Phase 6) aging + disasters
     if (this.court) this.court.onNewDay(); // (V2 Phase 7) royal court weekly reports
     if (this.succession) this.succession.onNewDay(); // (V2 Phase 8) heir raising + natural death
