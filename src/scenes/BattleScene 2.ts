@@ -106,8 +106,6 @@ class BUnit {
     this.spr.setTintFill(0xff5555);
     this.scene.time.delayedCall(60, () => { if (this.alive) this.spr.clearTint(); });
     this.scene.dmgNumber(this.x, this.y - 24, Math.round(a), this.side === 'player' ? '#ff6b6b' : '#ffffff');
-    this.scene.impactAt(this.x, this.y - 12); // (Feel pass) blood/impact specks
-    if (a >= 22) this.scene.cameras.main.shake(90, 0.004 + Math.min(0.006, a / 4000)); // (Feel pass) big-hit shake
     if (this.hp <= 0) this.die();
   }
   die() {
@@ -520,14 +518,6 @@ export class BattleScene extends Phaser.Scene {
     this.tweens.addCounter({ from: 0, to: 1, duration: 700, onUpdate: (tw) => { const t = tw.getValue(); draw(x0 + (dir === 'L' ? -1 : 1) * t * 120); g.setAlpha(1 - t); }, onComplete: () => g.destroy() });
   }
 
-  // (Feel pass) A small burst of red impact specks at a hit location.
-  impactAt(x, y) {
-    for (let i = 0; i < 4; i++) {
-      const d = this.add.circle(x, y, Phaser.Math.Between(1, 3), 0xb02a2a).setDepth(29);
-      this.tweens.add({ targets: d, x: x + Phaser.Math.Between(-14, 14), y: y + Phaser.Math.Between(-10, 6), alpha: 0, duration: 360, onComplete: () => d.destroy() });
-    }
-  }
-
   dmgNumber(x, y, n, color) {
     const t = this.add.text(x, y, `${n}`, { fontFamily: 'monospace', fontSize: '14px', color, fontStyle: 'bold', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(30);
     this.tweens.add({ targets: t, y: y - 28, alpha: 0, duration: 900, onComplete: () => t.destroy() });
@@ -752,15 +742,6 @@ export class BattleScene extends Phaser.Scene {
     // Loot from defeated enemies (victory only).
     const enemyDead = (this.cfg.enemyArmy || []).reduce((s, g) => s + g.count, 0);
     const loot = victory ? { gold: enemyDead * 8, iron: this.faction === 'goblin' ? enemyDead * 2 : 0 } : null;
-
-    // (Feel pass) Victory confetti rains down; defeat washes the screen gray.
-    if (victory) {
-      if (!this.textures.exists('confetti_px')) { const cg = this.make.graphics({ x: 0, y: 0, add: false } as any); cg.fillStyle(0xffffff, 1); cg.fillRect(0, 0, 4, 4); cg.generateTexture('confetti_px', 4, 4); cg.destroy(); }
-      this.add.particles(0, -10, 'confetti_px', { x: { min: 0, max: GAME_W }, y: -10, lifespan: 2600, speedY: { min: 120, max: 260 }, speedX: { min: -40, max: 40 }, scale: { min: 0.8, max: 2 }, rotate: { min: 0, max: 360 }, tint: [0xffd24a, 0x4ad66b, 0x66ddff, 0xff6b6b, 0xffffff], quantity: 4, frequency: 30, duration: 1500 }).setDepth(72);
-    } else if (!retreated) {
-      const gray = this.add.rectangle(0, 0, GAME_W, GAME_H, 0x202028, 0).setOrigin(0, 0).setDepth(69);
-      this.tweens.add({ targets: gray, fillAlpha: 0.4, duration: 700 });
-    }
 
     // Phase 3: full-screen outcome overlay.
     const survCount = Object.values(survivors).reduce((s, n) => s + n, 0);

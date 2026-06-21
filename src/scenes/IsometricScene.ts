@@ -1965,6 +1965,7 @@ export class IsometricScene extends GameScene {
     if (!this.resources.spend(next.cost)) return;
     this.tierIndex += 1;
     sfx.play('tier_upgrade'); // (Polish Phase 2)
+    this.cameras.main.shake(380, 0.008); // (Feel pass) dramatic settlement-upgrade shake
 
     const castle = this.buildings.castle;
     if (castle) {
@@ -3492,6 +3493,15 @@ export class IsometricScene extends GameScene {
     const [col, a] = map[s] || [0x000000, 0];
     this.seasonOverlay.fillColor = col;
     this.tweens.add({ targets: this.seasonOverlay, alpha: a, duration: 800 });
+    // (Feel pass) A brief full-screen colour wash when the season actually changes.
+    if (s !== this._lastSeasonWash) {
+      this._lastSeasonWash = s;
+      if (this._seasonWashDone) {
+        const wash = this.add.rectangle(0, 0, GAME_W, GAME_H, col, 0.35).setOrigin(0, 0).setScrollFactor(0).setDepth(95);
+        this.tweens.add({ targets: wash, alpha: 0, duration: 1800, onComplete: () => wash.destroy() });
+      }
+      this._seasonWashDone = true; // skip the very first call (initial season)
+    }
   }
 
   // ---- (Polish Phase 4) Seasonal weather: snow in Winter, rain in Spring/Autumn
