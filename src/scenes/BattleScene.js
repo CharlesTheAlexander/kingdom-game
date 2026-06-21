@@ -255,6 +255,28 @@ export class BattleScene extends Phaser.Scene {
     }
     // Vignette.
     this.add.rectangle(0, 0, GAME_W, GAME_H, 0x000000, 0.16).setOrigin(0, 0).setDepth(-10);
+
+    // (Loop 2, Feature #2) Terrain bonus zones — drawn so the player can read them.
+    // High ground: a brighter elevated band across the top of the field.
+    this._hiY = HORIZON + (GAME_H - HORIZON) * 0.22;     // above this = high ground
+    this._riverY = GAME_H - 70;                            // below this = river crossing
+    this.add.rectangle(0, HORIZON, GAME_W, this._hiY - HORIZON, 0xffffff, 0.06).setOrigin(0, 0).setDepth(-17);
+    this.add.text(GAME_W / 2, HORIZON + 6, 'High Ground  ·  +20% damage', { fontFamily: 'monospace', fontSize: '11px', color: '#e8e0cc' }).setOrigin(0.5, 0).setAlpha(0.45).setDepth(-16);
+    // River crossing: a blue band along the bottom edge.
+    this.add.rectangle(0, this._riverY, GAME_W, GAME_H - this._riverY, 0x2a5a8a, 0.32).setOrigin(0, 0).setDepth(-17);
+    this.add.text(GAME_W / 2, this._riverY + 4, 'River Crossing  ·  −20% damage', { fontFamily: 'monospace', fontSize: '11px', color: '#cfe0ff' }).setOrigin(0.5, 0).setAlpha(0.55).setDepth(-16);
+  }
+
+  // (Feature #2) Attacker damage multiplier by terrain position.
+  terrainAtkMul(u) {
+    if (this._hiY && u.y < this._hiY) return 1.2;       // high ground
+    if (this._riverY && u.y > this._riverY) return 0.8; // crossing the river
+    return 1;
+  }
+  // (Feature #2) Defender takes less when standing in forest (an obstacle cluster).
+  terrainDefMul(u) {
+    for (const o of this.obstacles) if (Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) < o.r + 6) return 0.7;
+    return 1;
   }
 
   scatterObstacles(terrain) {
@@ -582,9 +604,10 @@ export class BattleScene extends Phaser.Scene {
       if (u.cmd === 'hold' || u.range > 0 || u.hold || true) {
         if (u.atkCd <= 0) {
           u.atkCd = 0.5;
-          const power = u.dmg * 0.5 * (u.count || 1); // (BUG 12) block damage scales with its count
-          if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(power); } }
-          else foe.takeDamage(power);
+          // (BUG 12) block damage scales with count; (Feature #2) terrain modifiers.
+          const power = u.dmg * 0.5 * (u.count || 1) * this.terrainAtkMul(u);
+          if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(power * this.terrainDefMul(o)); } }
+          else foe.takeDamage(power * this.terrainDefMul(foe));
           if (u.range > 0) { this.projectile(u.x, u.y, foe.x, foe.y); sfx.playThrottled('arrow_shoot', 120); }
           else sfx.playThrottled('sword_hit', 130);
           playOnce(u.spr, u.anims.atk, u.anims.idle); // (Polish Phase 1) swing / shoot
