@@ -107,6 +107,27 @@ export class Building {
     if (this.type.attack || !this.type.produces || this.type.produces === 'soldiers') return;
     // (Session-1 Phase 5) Tax revolt → workers strike, no production today.
     if (scene && scene._strikeUntil && scene.gameDay < scene._strikeUntil) return;
+    // (Completion Phase 2) Manufacturing: consume a raw resource to make refined
+    // goods. 1 worker = 1 output per 2 raw; 2 workers = 1 output per 1 raw.
+    // Produced on a daily cadence (every ~DAY_SECONDS ticks) so rates read "/day".
+    if (this.type.refineFrom) {
+      if (this.workers <= 0) return;
+      const period = (scene && scene.DAY_SECONDS) || 300;
+      this.prodTimer += 1;
+      if (this.prodTimer < period) return;
+      this.prodTimer = 0;
+      const rawPerUnit = this.workers >= 2 ? 1 : 2;
+      const units = this.workers; // 1 or 2 refined goods per day
+      let made = 0;
+      for (let i = 0; i < units; i++) {
+        if ((resources[this.type.refineFrom] || 0) < rawPerUnit) break;
+        resources[this.type.refineFrom] -= rawPerUnit;
+        resources.add(this.type.produces, 1);
+        made++;
+      }
+      if (made > 0 && scene && scene.floatText) scene.floatText(this.x, this.y - 30, `+${made} ${this.type.produces === 'cutStone' ? 'cut stone' : 'planks'}`, '#c9a86a');
+      return;
+    }
     const interval = this.type.interval || 1;
     this.prodTimer += 1;
     if (this.prodTimer < interval) return;
@@ -135,18 +156,34 @@ export class Building {
     }
   }
 
-  // Building upgrades cost GOLD only (see BuildingTypes.upgradeCost).
-  canUpgrade(resources) {
-    return this.level < MAX_LEVEL && resources.gold >= this.nextUpgradeCost();
+  // (Completion Phase 2) High-tier upgrades also require refined goods, so the
+  // Sawmill/Stonecutter become necessary mid-game. Keyed by the TARGET level.
+  extraUpgradeCost(): Record<string, number> {
+    const next = this.level + 1;
+    const c: Record<string, number> = {};
+    if (this.typeKey === 'barracks' && next === 4) c.planks = 20;
+    if (this.typeKey === 'barracks' && next === 5) c.planks = 30;
+    if (this.typeKey === 'library' || this.typeKey === 'market') c.planks = 10;
+    return c;
   }
 
-  nextUpgradeCost() {
+  // Building upgrades cost GOLD (+ refined goods at higher tiers).
+  canUpgrade(resources: any): boolean {
+    if (this.level >= MAX_LEVEL || resources.gold < this.nextUpgradeCost()) return false;
+    const extra = this.extraUpgradeCost();
+    for (const [r, amt] of Object.entries(extra)) if ((resources[r] || 0) < amt) return false;
+    return true;
+  }
+
+  nextUpgradeCost(): number {
     return upgradeCost(this.type, this.level);
   }
 
-  upgrade(resources) {
+  upgrade(resources: any): boolean {
     if (!this.canUpgrade(resources)) return false;
     resources.gold -= this.nextUpgradeCost();
+    const extra = this.extraUpgradeCost();
+    for (const [r, amt] of Object.entries(extra)) resources[r] -= amt;
     this.level += 1;
     this.maxHp = Math.round(this.type.hp * (1 + (this.level - 1) * 0.5));
     this.hp = this.maxHp;

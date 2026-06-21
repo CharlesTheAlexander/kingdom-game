@@ -79,6 +79,18 @@ export const BuildingTypes: Record<string, BuildingType> = {
     footprint: 2, placeable: true, stageUnlock: 3,
     desc: '+10 battle morale. Recruit a mercenary (50g / 3 days). Needs 1 worker.',
   },
+  // (Completion Phase 2) Manufacturing — refine raw materials into goods that
+  // advanced upgrades require. Handled specially in Building.produce().
+  sawmill: {
+    key: 'sawmill', name: 'Sawmill', cost: { wood: 60, stone: 20 }, maxWorkers: 2, hp: 100,
+    produces: 'planks', refineFrom: 'wood', production: true, placeable: true, stageUnlock: 2, tex: 'lumberyard',
+    desc: 'Converts Wood into Planks. 1 worker: 1 plank/2 wood/day. 2: 1 plank/1 wood/day.',
+  },
+  stonecutter: {
+    key: 'stonecutter', name: 'Stonecutter', cost: { stone: 40, gold: 30 }, maxWorkers: 2, hp: 100,
+    produces: 'cutStone', refineFrom: 'stone', production: true, placeable: true, stageUnlock: 2, tex: 'mine',
+    desc: 'Cuts Stone into Cut Stone. 1 worker: 1/2 stone/day. 2: 1/1 stone/day.',
+  },
   wall: {
     key: 'wall', name: 'Wall', cost: { stone: 20 }, maxWorkers: 0, hp: 100,
     wall: true, placeable: true, noCap: true, anywhere: true, stageUnlock: 3,
@@ -89,7 +101,7 @@ export const BuildingTypes: Record<string, BuildingType> = {
 // Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now
 // grow automatically by settlement tier. The wall type def is kept above only so
 // old saves containing a placed Wall still load without error.
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'library'];
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'library', 'sawmill', 'stonecutter'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 // (Loop 3, Feature #3) Buildings upgrade through 5 levels. Output scales on a

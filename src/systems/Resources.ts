@@ -8,6 +8,8 @@ export class Resources {
   gold: number;
   iron: number;
   equipment: number;
+  planks: number;
+  cutStone: number;
   workersCap: number;
   soldiers: number;
   // Allows dynamic resource access (this[res]) used by canAfford/spend/add.
@@ -21,6 +23,8 @@ export class Resources {
     this.gold = 150;
     this.iron = 0; // (Phase 5) special resource — from expeditions / goblin camps
     this.equipment = 0; // (Phase 2) crafted by the Blacksmith, consumed training Knights
+    this.planks = 0; // (Completion Phase 2) refined at the Sawmill from wood
+    this.cutStone = 0; // (Completion Phase 2) refined at the Stonecutter from stone
     this.workersCap = 3; // population cap (raised by Houses); pawns spawn up to this
     this.soldiers = 0; // driven by the live warrior count (Phase 4)
   }

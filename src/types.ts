@@ -11,6 +11,8 @@ export interface ResourceState {
   gold: number;
   iron: number;
   equipment: number;
+  planks: number;
+  cutStone: number;
 }
 
 // A cost / partial bundle of resources (any subset of the six).
@@ -26,6 +28,7 @@ export interface BuildingType {
   maxWorkers?: number;
   workerCost?: number;
   interval?: number;
+  refineFrom?: keyof ResourceState | string;
   produces?: keyof ResourceState | string;
   rate?: number;
   workerRates?: number[];

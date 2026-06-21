@@ -200,9 +200,9 @@ export class IsometricScene extends GameScene {
       { name: 'Small Town', stage: 4, maxBuildings: 20, cost: { gold: 400, wood: 200, stone: 150 }, tex: 'castle_town', castleScale: 1.3, wall: 'wood', announce: 'Your village has grown into a Town!' },
       { name: 'Medium Town', stage: 5, maxBuildings: 24, cost: { gold: 600, wood: 250, stone: 200 }, tex: 'castle_town', castleScale: 1.4, wall: 'stonebase' },
       { name: 'Large Town', stage: 6, maxBuildings: 28, cost: { gold: 900, wood: 300, stone: 350, iron: 50 }, tex: 'castle_town', castleScale: 1.5, wall: 'stone' },
-      { name: 'Small Castle', stage: 7, maxBuildings: 32, cost: { gold: 1200, wood: 400, stone: 500, iron: 100 }, tex: 'castle_castle', castleScale: 1.6, wall: 'stone', moat: true, announce: 'Your town has become a Castle!' },
-      { name: 'Medium Castle', stage: 8, maxBuildings: 36, cost: { gold: 1800, stone: 500, iron: 200 }, tex: 'castle_castle', castleScale: 1.8, wall: 'stone', moat: true, towers: true },
-      { name: 'Large Castle', stage: 9, maxBuildings: 40, cost: { gold: 2500, stone: 600, iron: 300 }, tex: 'castle_castle', castleScale: 2.0, wall: 'stone', moat: true, towers: true, announce: 'Your kingdom stands as a mighty Castle!' },
+      { name: 'Small Castle', stage: 7, maxBuildings: 32, cost: { gold: 1200, wood: 400, stone: 500, iron: 100, cutStone: 20 }, tex: 'castle_castle', castleScale: 1.6, wall: 'stone', moat: true, announce: 'Your town has become a Castle!' },
+      { name: 'Medium Castle', stage: 8, maxBuildings: 36, cost: { gold: 1800, stone: 500, iron: 200, cutStone: 20 }, tex: 'castle_castle', castleScale: 1.8, wall: 'stone', moat: true, towers: true },
+      { name: 'Large Castle', stage: 9, maxBuildings: 40, cost: { gold: 2500, stone: 600, iron: 300, cutStone: 20 }, tex: 'castle_castle', castleScale: 2.0, wall: 'stone', moat: true, towers: true, announce: 'Your kingdom stands as a mighty Castle!' },
     ];
     this.tierIndex = 0;
 
@@ -2203,6 +2203,9 @@ export class IsometricScene extends GameScene {
     chip('wood', CHX + 6, 2, 86, 'WOOD', 'icon_wood'); chip('stone', CHX + 96, 2, 86, 'STONE', null, I.stone);
     chip('food', CHX + 186, 2, 86, 'FOOD', 'icon_food'); chip('gold', CHX + 276, 2, 86, 'GOLD', 'icon_gold');
     chip('iron', CHX + 366, 2, 86, 'IRON', null, I.iron);
+    // (Completion Phase 2) refined goods
+    chip('planks', CHX + 456, 2, 96, 'PLANKS', 'icon_planks');
+    chip('cutStone', CHX + 556, 2, 110, 'CUT STONE', 'icon_cutstone');
     // Row 2 — military / time.
     chip('equipment', CHX + 6, 29, 86, 'EQUIP', null, I.equip);
     chip('workers', CHX + 96, 29, 104, 'WORKERS', null, I.workers);
@@ -2258,6 +2261,7 @@ export class IsometricScene extends GameScene {
     };
     set('wood', Math.floor(r.wood)); set('stone', Math.floor(r.stone)); set('food', Math.floor(r.food));
     set('gold', Math.floor(r.gold)); set('iron', Math.floor(r.iron || 0)); set('equipment', Math.floor(r.equipment || 0));
+    set('planks', Math.floor(r.planks || 0)); set('cutStone', Math.floor(r.cutStone || 0)); // (Completion P2)
     this.chips.workers.value.setText(`${this.buildings.workersUsed()}/${r.workersCap}`);
     // (BUG 1) Show the true total (pool + training + expeditions + armies) vs cap.
     this.chips.soldiers.value.setText(`${this.soldierTotal()}/${this.soldierCap()}`);

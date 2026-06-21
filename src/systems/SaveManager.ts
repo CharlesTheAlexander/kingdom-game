@@ -21,7 +21,7 @@ export function capture(scene: any) {
       tierIndex: scene.tierIndex,
       gamePlayMs: scene.gamePlayMs || 0,
     },
-    resources: { wood: r.wood, stone: r.stone, food: r.food, gold: r.gold, iron: r.iron, equipment: r.equipment, workersCap: r.workersCap },
+    resources: { wood: r.wood, stone: r.stone, food: r.food, gold: r.gold, iron: r.iron, equipment: r.equipment, planks: r.planks, cutStone: r.cutStone, workersCap: r.workersCap },
     castle: scene.buildings.castle ? { hp: Math.round(scene.buildings.castle.hp), level: scene.buildings.castle.level } : null,
     buildings: scene.buildings.serialize ? scene.buildings.serialize().filter((b) => b.type !== 'castle') : [],
     troops: scene.troops.serialize ? scene.troops.serialize() : [],
