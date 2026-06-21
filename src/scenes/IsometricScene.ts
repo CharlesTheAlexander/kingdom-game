@@ -83,6 +83,7 @@ import { Caravans } from '../systems/Caravans.js';
 import { findPath } from '../systems/Pathfinding.js';
 import { registerUnitAnimations } from '../systems/Animations.js';
 import { sfx } from '../audio/SoundEngine.js';
+import { showTransition } from './TransitionOverlay.js';
 import * as SaveManager from '../systems/SaveManager.js';
 import { Population } from '../systems/Population.js';
 import { ArmyManager } from '../systems/ArmyManager.js';
@@ -378,18 +379,32 @@ export class IsometricScene extends GameScene {
     }
   }
 
+  // (Polish Phase 10) Wrap an existing scene launch with a brief, skippable
+  // loading card. The `doLaunch` closure is the EXACT original launch+pause logic
+  // — semantics are unchanged; we only paint a card over the world first and run
+  // the launch at the card's midpoint. The card lives on this (about-to-pause)
+  // scene, so its fade-out timer won't fire while paused; instead we clean it up
+  // on the next RESUME (when the target scene closes). Fully leak-safe: a one-shot
+  // RESUME handler plus the overlay's own SHUTDOWN/DESTROY teardown.
+  _launchWithTransition(title: string, subtitle: string, tint: number, doLaunch: () => void) {
+    let launched = false;
+    const fire = () => { if (launched) return; launched = true; try { doLaunch(); } catch (e) { try { this.scene.resume(); } catch (e2) {} } };
+    let handle: any = null;
+    const onResume = () => { try { handle && handle.cleanup(); } catch (e) {} };
+    this.events.once(Phaser.Scenes.Events.RESUME, onResume);
+    handle = showTransition(this, { title, subtitle, tint, hold: 850, onMid: fire });
+  }
+
   openContinent() {
     if (this.isGameOver || this._menuOpen) return;
     // (Bug 3) Guard double-launch and wrap the transition: if launching the
     // continent ever throws, make sure we don't end up paused with no scene up.
     if (this.scene.isActive('ContinentScene')) return;
     try { SaveManager.save(this, 0); } catch (e) {} // (Save system) auto-save before transition
-    try {
+    this._launchWithTransition('THE CONTINENT', 'Unrolling the great map…', 0x8fb87a, () => {
       this.scene.launch('ContinentScene');
       this.scene.pause();
-    } catch (e) {
-      try { this.scene.resume(); } catch (e2) {}
-    }
+    });
   }
 
   // ---- BUG 1 FIX: dedicated UI camera that never zooms/pans -----------------
@@ -2289,6 +2304,7 @@ export class IsometricScene extends GameScene {
     if (!this.resources.spend(next.cost)) return;
     this.tierIndex += 1;
     sfx.play('tier_upgrade'); // (Polish Phase 2)
+    try { sfx.play('settlement_upgrade'); } catch (e) {} // (Polish Phase 10) triumphant horn over the chime
     this.cameras.main.shake(380, 0.008); // (Feel pass) dramatic settlement-upgrade shake
 
     const castle = this.buildings.castle;
@@ -3710,13 +3726,15 @@ export class IsometricScene extends GameScene {
     for (const e of enemies) e.destroy();
     this.troops.removeAll();
     this.deselectAllUnits();
-    this.scene.launch('BattleScene', {
-      playerArmy, enemyArmy, terrainType: this.battleTerrain(), enemyFaction: faction,
-      context, playerDefending: !!(context && context.defending), taverMoraleBonus: this.hasTavern && this.hasTavern(),
-      defenderWalls: !!(context && !context.defending && (context.kind === 'settlement' || context.kind === 'castle')), // (Phase 7)
-      onComplete: (res) => this.onBattleComplete(res),
+    this._launchWithTransition('TO BATTLE', 'Marshalling the host…', 0xd06a4a, () => {
+      this.scene.launch('BattleScene', {
+        playerArmy, enemyArmy, terrainType: this.battleTerrain(), enemyFaction: faction,
+        context, playerDefending: !!(context && context.defending), taverMoraleBonus: this.hasTavern && this.hasTavern(),
+        defenderWalls: !!(context && !context.defending && (context.kind === 'settlement' || context.kind === 'castle')), // (Phase 7)
+        onComplete: (res) => this.onBattleComplete(res),
+      });
+      this.scene.pause();
     });
-    this.scene.pause();
     return true;
   }
 
@@ -3809,17 +3827,19 @@ export class IsometricScene extends GameScene {
     this._inBattle = true;
     try { SaveManager.save(this, 0); } catch (e) {}
     this._battleArmy = playerArmy;
-    this.scene.launch('BattleScene', {
-      playerArmy: playerArmy.units.map((u) => ({ type: u.type, count: u.count, battles: u.battles || 0 })),
-      enemyArmy: enemyUnits.map((u) => ({ type: u.type, count: u.count })),
-      terrainType: this.battleTerrain(), enemyFaction: ctx.faction || 'red',
-      commander: { name: this.rulerName, trait: this.kingTrait }, // (V2 P5) King/Queen leads in person
-      weather: this._weather || 'clear', // (V2 P4 #4) carry the weather onto the battlefield
-      context: ctx, playerDefending: !!ctx.defending,
-      defenderWalls: !!(ctx && !ctx.defending && (ctx.kind === 'settlement' || ctx.kind === 'castle')), // (Phase 7)
-      onComplete: (res) => this.onArmyBattleComplete(playerArmy, res, ctx),
+    this._launchWithTransition('TO BATTLE', 'Marshalling the host…', 0xd06a4a, () => {
+      this.scene.launch('BattleScene', {
+        playerArmy: playerArmy.units.map((u) => ({ type: u.type, count: u.count, battles: u.battles || 0 })),
+        enemyArmy: enemyUnits.map((u) => ({ type: u.type, count: u.count })),
+        terrainType: this.battleTerrain(), enemyFaction: ctx.faction || 'red',
+        commander: { name: this.rulerName, trait: this.kingTrait }, // (V2 P5) King/Queen leads in person
+        weather: this._weather || 'clear', // (V2 P4 #4) carry the weather onto the battlefield
+        context: ctx, playerDefending: !!ctx.defending,
+        defenderWalls: !!(ctx && !ctx.defending && (ctx.kind === 'settlement' || ctx.kind === 'castle')), // (Phase 7)
+        onComplete: (res) => this.onArmyBattleComplete(playerArmy, res, ctx),
+      });
+      this.scene.pause();
     });
-    this.scene.pause();
   }
 
   onArmyBattleComplete(army, res, ctx) {
@@ -3916,26 +3936,28 @@ export class IsometricScene extends GameScene {
     this._inBattle = true;
     try { SaveManager.save(this, 0); } catch (e) {}
     this.troops.removeAll();
-    this.scene.launch('BattleScene', {
-      playerArmy: defenders, enemyArmy: aiArmy.units.map((u) => ({ type: u.type, count: u.count })),
-      terrainType: this.battleTerrain(), enemyFaction: aiArmy.faction, context: { defending: true },
-      playerDefending: true, taverMoraleBonus: this.hasTavern && this.hasTavern(),
-      onComplete: (res) => {
-        this.onBattleComplete(res); // restores player survivors to the troop pool
-        if (res && res.victory) {
-          if (this.armyMgr.armies.includes(aiArmy)) this.armyMgr.removeArmy(aiArmy);
-          const k = this.kingdoms.find((x) => x.cfg.key === aiArmy.faction);
-          if (k) { k.regrouping = true; k.rebuildTimer = 5 * this.DAY_SECONDS; }
-          if (this.reputation) this.reputation.add('protector', 10);
-          this.logEvent(`Repelled ${aiArmy.name}`, 'green');
-        } else {
-          // Survivors of the AI army retreat to their own castle.
-          const kk = this.kingdoms.find((x) => x.cfg.key === aiArmy.faction);
-          if (kk && this.armyMgr.armies.includes(aiArmy)) this.armyMgr.marchTo(aiArmy, kk.castleCol, kk.castleRow, {});
-        }
-      },
+    this._launchWithTransition('DEFEND THE REALM', 'To the walls!', 0xd06a4a, () => {
+      this.scene.launch('BattleScene', {
+        playerArmy: defenders, enemyArmy: aiArmy.units.map((u) => ({ type: u.type, count: u.count })),
+        terrainType: this.battleTerrain(), enemyFaction: aiArmy.faction, context: { defending: true },
+        playerDefending: true, taverMoraleBonus: this.hasTavern && this.hasTavern(),
+        onComplete: (res) => {
+          this.onBattleComplete(res); // restores player survivors to the troop pool
+          if (res && res.victory) {
+            if (this.armyMgr.armies.includes(aiArmy)) this.armyMgr.removeArmy(aiArmy);
+            const k = this.kingdoms.find((x) => x.cfg.key === aiArmy.faction);
+            if (k) { k.regrouping = true; k.rebuildTimer = 5 * this.DAY_SECONDS; }
+            if (this.reputation) this.reputation.add('protector', 10);
+            this.logEvent(`Repelled ${aiArmy.name}`, 'green');
+          } else {
+            // Survivors of the AI army retreat to their own castle.
+            const kk = this.kingdoms.find((x) => x.cfg.key === aiArmy.faction);
+            if (kk && this.armyMgr.armies.includes(aiArmy)) this.armyMgr.marchTo(aiArmy, kk.castleCol, kk.castleRow, {});
+          }
+        },
+      });
+      this.scene.pause();
     });
-    this.scene.pause();
   }
 
   // Total estimated AI strength (used by the scouting intel reveal).
@@ -4335,7 +4357,63 @@ export class IsometricScene extends GameScene {
     for (let i = 0; i < 4; i++) this._clouds.push({ x: Phaser.Math.Between(0, GAME_W), y: Phaser.Math.Between(46, Math.round(GAME_H * 0.18)), s: Phaser.Math.FloatBetween(0.7, 1.4), v: Phaser.Math.FloatBetween(3, 8) });
     this.skyG = this.add.graphics().setScrollFactor(0).setDepth(36);
     this.createAmbientParticles(); // (Visual P5) subtle always-on ambient life
+    this.createNightGlow(); // (Polish Phase 10) warm window-light glow at night
     this.updateSeason();
+  }
+
+  // (Polish Phase 10) Night settlement warmth: a soft additive amber glow that
+  // pools around each building once dusk falls, as if windows and hearths are lit.
+  // Purely cosmetic — it reads `this._nightness` and the existing building list; it
+  // never touches placement, grid, or building logic. World-space (pans with the
+  // camera), depth 4.5 so it sits just under the building sprite (depth 5) and over
+  // the shadow (depth 4). Glow images are pooled and only rebuilt when the building
+  // count changes, and alpha is only rewritten when night-ness shifts noticeably.
+  createNightGlow() {
+    if (!this.textures.exists('night_glow')) {
+      const tex = this.textures.createCanvas('night_glow', 96, 96);
+      const ctx = tex.getContext();
+      const grad = ctx.createRadialGradient(48, 48, 4, 48, 48, 48);
+      grad.addColorStop(0, 'rgba(255,196,110,0.85)');
+      grad.addColorStop(0.45, 'rgba(255,168,72,0.4)');
+      grad.addColorStop(1, 'rgba(255,150,50,0)');
+      ctx.fillStyle = grad; ctx.fillRect(0, 0, 96, 96); tex.refresh();
+    }
+    this._nightGlowLayer = this.add.container(0, 0).setDepth(4.5).setAlpha(0);
+    this._nightGlowLayer.setBlendMode(Phaser.BlendModes.ADD as any);
+    this._nightGlowPool = [];
+    this._nightGlowCount = -1;
+    this._nightGlowAlpha = -1;
+  }
+
+  updateNightGlow(night: number) {
+    const layer = this._nightGlowLayer; if (!layer) return;
+    // Fully off in daylight — skip all work (the common case).
+    if (night <= 0.02) { if (this._nightGlowAlpha !== 0) { layer.setAlpha(0); this._nightGlowAlpha = 0; } return; }
+    const alive = (this.buildings && this.buildings.buildings ? this.buildings.buildings : []).filter((b: any) => b && b.alive);
+    // Rebuild the glow images only when the alive-building count actually changes.
+    if (alive.length !== this._nightGlowCount) {
+      this._nightGlowCount = alive.length;
+      const pool = this._nightGlowPool;
+      while (pool.length < alive.length) {
+        const im = this.add.image(0, 0, 'night_glow').setBlendMode(Phaser.BlendModes.ADD as any);
+        layer.add(im); pool.push(im);
+      }
+      for (let i = 0; i < pool.length; i++) {
+        const im = pool[i]; const b = alive[i];
+        if (b) {
+          const scale = b.typeKey === 'castle' ? 1.9 : 1.0;
+          im.setVisible(true).setPosition(b.x, b.y + 6).setScale(scale);
+        } else { im.setVisible(false); }
+      }
+    } else {
+      // Same count, keep positions fresh (cheap; buildings rarely move but castle
+      // can rescale on tier-up). Only sync if we actually have glows.
+      const pool = this._nightGlowPool;
+      for (let i = 0; i < alive.length && i < pool.length; i++) { pool[i].setPosition(alive[i].x, alive[i].y + 6); }
+    }
+    // Modulate the whole layer's alpha with night-ness; only rewrite on change.
+    const a = Math.round(night * 0.55 * 100) / 100;
+    if (a !== this._nightGlowAlpha) { layer.setAlpha(a); this._nightGlowAlpha = a; }
   }
 
   // (Polish Phase 3) Smooth atmosphere colour + darkness across the full day:
@@ -4382,6 +4460,7 @@ export class IsometricScene extends GameScene {
       if (this._seasonWashDone) {
         const wash = this.add.rectangle(0, 0, GAME_W, GAME_H, col, 0.35).setOrigin(0, 0).setScrollFactor(0).setDepth(95);
         this.tweens.add({ targets: wash, alpha: 0, duration: 1800, onComplete: () => wash.destroy() });
+        try { sfx.play('season_change'); } catch (e) {} // (Polish Phase 10) airy season-turn chime
       }
       this._seasonWashDone = true; // skip the very first call (initial season)
     }
@@ -4538,6 +4617,7 @@ export class IsometricScene extends GameScene {
     this._nightness = night;
     this.drawSkyGradient(phase, night); // (Visual P5) layered sky band (bucketed)
     this.drawSkyBodies(phase, night);
+    this.updateNightGlow(night); // (Polish Phase 10) warm building glow at night
     this.updateAtmosphereFx(phase, night); // (Visual P5) fog drift, lightning, ambient
     if (this.hud && this.hud.day) this.hud.day.setText(`Day ${this.gameDay}`);
   }

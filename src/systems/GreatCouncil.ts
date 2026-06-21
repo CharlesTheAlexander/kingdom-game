@@ -38,8 +38,12 @@ export class GreatCouncil {
     // (V2 Phase 2) Open the rendered Council hall scene instead of a flat panel.
     const parts = this.participants().map((k: any) => k.cfg.key);
     const highKing = !!(s.reputation && s.reputation.scores.conqueror >= 75);
-    try { s.scene.launch('CouncilScene', { participants: parts, highKing }); s.scene.pause(); }
-    catch (e) { this.openPanel(); } // fallback to the legacy panel
+    const doLaunch = () => { s.scene.launch('CouncilScene', { participants: parts, highKing }); s.scene.pause(); };
+    try {
+      // (Polish Phase 10) Brief loading card before the council hall, when available.
+      if (s._launchWithTransition) s._launchWithTransition('THE GREAT COUNCIL', 'The kings convene…', 0xc9a14a, doLaunch);
+      else doLaunch();
+    } catch (e) { this.openPanel(); } // fallback to the legacy panel
   }
 
   // ---- proposals ----------------------------------------------------------

@@ -13,14 +13,19 @@ export class MainMenuScene extends Phaser.Scene {
   constructor() { super('MainMenuScene'); }
 
   create() {
-    // Dark base + sky gradient.
+    // (Polish Phase 10) Atmospheric dusk sky gradient — deep navy up top warming to
+    // a faint amber haze near the horizon, so the drifting world reads against a sky.
     this.add.rectangle(0, 0, GAME_W, GAME_H, 0x0b0f17, 1).setOrigin(0, 0);
-    for (let i = 0; i < 8; i++) this.add.rectangle(0, i * (GAME_H / 8), GAME_W, GAME_H / 8 + 1, Phaser.Display.Color.GetColor(14 + i * 2, 18 + i * 3, 28 + i * 5), 1).setOrigin(0, 0);
+    for (let i = 0; i < 14; i++) {
+      const t = i / 13;
+      const r = Math.round(12 + t * 44), g = Math.round(16 + t * 36), bl = Math.round(30 + t * 26);
+      this.add.rectangle(0, i * (GAME_H / 14), GAME_W, GAME_H / 14 + 1, Phaser.Display.Color.GetColor(r, g, bl), 1).setOrigin(0, 0);
+    }
 
     // --- Slowly panning isometric terrain backdrop ---------------------------
     AssetGenerator.generateTerrain(this); // creates iso_* keys for the backdrop
     const HW = 32, HH = 16;
-    const band = this.add.container(0, GAME_H * 0.52).setAlpha(0.55);
+    const band = this.add.container(0, GAME_H * 0.54).setAlpha(0.6);
     const keys = ['iso_grass', 'iso_grass2', 'iso_grass3', 'iso_forest1', 'iso_forest3', 'iso_water', 'iso_mtn'];
     for (let r = 0; r < 16; r++) for (let c = 0; c < 60; c++) {
       const x = (c - r) * HW, y = (c + r) * HH * 0.5;
@@ -29,7 +34,13 @@ export class MainMenuScene extends Phaser.Scene {
     }
     band.x = -200;
     this.tweens.add({ targets: band, x: -1400, duration: 60000, repeat: -1, yoyo: true, ease: 'Sine.easeInOut' });
-    this.add.rectangle(0, 0, GAME_W, GAME_H, 0x0b0f17, 0.45).setOrigin(0, 0); // darken for contrast
+    // Dusk wash + a warm low-horizon glow + a vignette to frame the menu.
+    this.add.rectangle(0, 0, GAME_W, GAME_H, 0x0b0f17, 0.42).setOrigin(0, 0);
+    this.add.rectangle(0, GAME_H * 0.62, GAME_W, GAME_H * 0.45, 0xff8a3a, 0.06).setOrigin(0, 0).setBlendMode(Phaser.BlendModes.ADD);
+    this.makeVignette();
+
+    // --- Ambient sky touches: drifting clouds + a couple of birds ------------
+    this.makeAtmosphere();
 
     // --- Falling leaves (procedural particles) -------------------------------
     if (!this.textures.exists('menu_leaf')) {
@@ -40,11 +51,24 @@ export class MainMenuScene extends Phaser.Scene {
       x: { min: 0, max: GAME_W }, y: -10, lifespan: 9000, speedY: { min: 18, max: 44 }, speedX: { min: -20, max: 20 },
       scale: { min: 0.6, max: 1.4 }, rotate: { min: 0, max: 360 }, alpha: { start: 0.8, end: 0.2 }, frequency: 380, quantity: 1,
     }).setDepth(5);
+    // Faint warm embers rising near the horizon for hearth-at-dusk warmth.
+    this.add.particles(0, GAME_H * 0.72, 'menu_leaf', {
+      x: { min: 0, max: GAME_W }, y: { min: -10, max: 20 }, lifespan: 6000, speedY: { min: -30, max: -12 }, speedX: { min: -8, max: 8 },
+      scale: { min: 0.2, max: 0.5 }, alpha: { start: 0.5, end: 0 }, tint: 0xffb060, frequency: 700, quantity: 1, blendMode: 'ADD',
+    }).setDepth(5);
 
-    // --- Title ---------------------------------------------------------------
-    const tx = GAME_W / 2;
-    this.add.text(tx, GAME_H * 0.16, 'KINGDOM', { fontFamily: 'serif', fontSize: '88px', color: '#e8c66a', fontStyle: 'bold', stroke: '#1a1206', strokeThickness: 10 }).setOrigin(0.5).setDepth(10);
-    this.add.text(tx, GAME_H * 0.16 + 64, 'A REALM TO FORGE', { fontFamily: 'monospace', fontSize: '18px', color: '#cbb787', letterSpacing: 6 } as any).setOrigin(0.5).setDepth(10);
+    // --- Title: carved stone/gold with a soft pulsing glow -------------------
+    const tx = GAME_W / 2, ty = GAME_H * 0.17;
+    // Glow layer (a blurred-feeling duplicate behind the crisp title), pulsing.
+    const glow = this.add.text(tx, ty, 'KINGDOM', { fontFamily: 'serif', fontSize: '92px', color: '#ffdf8a', fontStyle: 'bold' }).setOrigin(0.5).setDepth(9).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.28).setScale(1.02);
+    this.tweens.add({ targets: glow, alpha: { from: 0.18, to: 0.42 }, scale: { from: 1.01, to: 1.05 }, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    // Deep carved shadow then the gold face.
+    this.add.text(tx + 3, ty + 4, 'KINGDOM', { fontFamily: 'serif', fontSize: '88px', color: '#120c04', fontStyle: 'bold' }).setOrigin(0.5).setDepth(9.5);
+    const title = this.add.text(tx, ty, 'KINGDOM', { fontFamily: 'serif', fontSize: '88px', color: '#e8c66a', fontStyle: 'bold', stroke: '#1a1206', strokeThickness: 10 }).setOrigin(0.5).setDepth(10);
+    title.setShadow(0, 2, '#6b4a16', 4, false, true);
+    // Gold rule + subtitle.
+    this.add.rectangle(tx, ty + 56, 360, 2, 0xc9a14a, 0.8).setDepth(10);
+    this.add.text(tx, ty + 70, 'A REALM TO FORGE', { fontFamily: 'monospace', fontSize: '18px', color: '#cbb787', letterSpacing: 6 } as any).setOrigin(0.5).setDepth(10);
 
     // --- Menu ----------------------------------------------------------------
     this.panel = null;
@@ -63,20 +87,84 @@ export class MainMenuScene extends Phaser.Scene {
     this.cameras.main.fadeIn(500, 0, 0, 0);
   }
 
+  // (Polish Phase 10) Soft dark vignette frame drawn once into a texture.
+  makeVignette() {
+    if (!this.textures.exists('menu_vignette')) {
+      const tex = this.textures.createCanvas('menu_vignette', GAME_W, GAME_H);
+      const ctx = tex.getContext();
+      const grad = ctx.createRadialGradient(GAME_W / 2, GAME_H / 2, GAME_H * 0.32, GAME_W / 2, GAME_H / 2, GAME_H * 0.78);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.62)');
+      ctx.fillStyle = grad; ctx.fillRect(0, 0, GAME_W, GAME_H); tex.refresh();
+    }
+    this.add.image(0, 0, 'menu_vignette').setOrigin(0, 0).setDepth(6);
+  }
+
+  // (Polish Phase 10) Drifting clouds and a small flock of birds that loop across.
+  makeAtmosphere() {
+    if (!this.textures.exists('menu_cloud')) {
+      const tex = this.textures.createCanvas('menu_cloud', 160, 70);
+      const ctx = tex.getContext();
+      ctx.fillStyle = 'rgba(180,190,210,0.5)';
+      const blob = (x: number, y: number, r: number) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); };
+      blob(50, 42, 26); blob(82, 36, 32); blob(112, 44, 24); blob(70, 50, 28);
+      tex.refresh();
+    }
+    for (let i = 0; i < 4; i++) {
+      const c = this.add.image(Phaser.Math.Between(-80, GAME_W), Phaser.Math.Between(40, GAME_H * 0.32), 'menu_cloud')
+        .setDepth(4).setAlpha(Phaser.Math.FloatBetween(0.25, 0.5)).setScale(Phaser.Math.FloatBetween(0.7, 1.4));
+      this.tweens.add({ targets: c, x: c.x + GAME_W + 200, duration: Phaser.Math.Between(60000, 110000), repeat: -1, onRepeat: () => { c.x = -200; c.y = Phaser.Math.Between(40, GAME_H * 0.32); } });
+    }
+    // A small "V" of birds: two flapping chevrons that cross the sky on a long loop.
+    if (!this.textures.exists('menu_bird')) {
+      const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
+      g.lineStyle(2, 0x2a2f3a, 1); g.beginPath(); g.moveTo(0, 6); g.lineTo(6, 0); g.lineTo(12, 6); g.strokePath();
+      g.generateTexture('menu_bird', 12, 8); g.destroy();
+    }
+    const flock = this.add.container(-60, GAME_H * 0.22).setDepth(5).setAlpha(0.7);
+    for (let i = 0; i < 3; i++) flock.add(this.add.image(i * 16, (i % 2) * 7, 'menu_bird').setScale(Phaser.Math.FloatBetween(0.7, 1)));
+    flock.list.forEach((b: any, i: number) => this.tweens.add({ targets: b, y: b.y - 3, duration: 360 + i * 40, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }));
+    const flyFlock = () => {
+      flock.setPosition(-60, Phaser.Math.Between(GAME_H * 0.12, GAME_H * 0.3));
+      this.tweens.add({ targets: flock, x: GAME_W + 80, duration: Phaser.Math.Between(26000, 40000), onComplete: () => this.time.delayedCall(Phaser.Math.Between(8000, 16000), flyFlock) });
+    };
+    this.time.delayedCall(3000, flyFlock);
+  }
+
+  // (Polish Phase 10) Medieval "carved tablet" menu button: a layered stone slab
+  // with a gold rim, hover glow, and a pressed (inset) state. Handlers/flow are
+  // unchanged — `fn` is still called on pointerdown exactly as before.
   menuButton(cx: number, cy: number, w: number, h: number, label: string, fn: () => void, enabled: boolean) {
-    const fill = enabled ? 0x1c2740 : 0x191c24;
-    const b = this.add.rectangle(cx, cy, w, h, fill, 0.96).setDepth(11).setStrokeStyle(2, enabled ? 0xc9a14a : 0x3a3f4a, enabled ? 0.9 : 0.5);
-    const t = this.add.text(cx, cy, label, { fontFamily: 'monospace', fontSize: '20px', color: enabled ? '#f0e6d0' : '#5a6072', fontStyle: 'bold' }).setOrigin(0.5).setDepth(12);
-    if (!enabled) return;
-    b.setInteractive({ useHandCursor: true });
-    b.on('pointerover', () => { b.setFillStyle(0x2a3a5c, 1); b.setScale(1.04); t.setScale(1.04); });
-    b.on('pointerout', () => { b.setFillStyle(fill, 0.96); b.setScale(1); t.setScale(1); });
-    b.on('pointerdown', () => { try { sfx.unlock(); sfx.play('ui_click'); } catch (e) {} fn(); });
-    return b;
+    const c = this.add.container(cx, cy).setDepth(11);
+    // Drop shadow, dark stone base, lighter top bevel, inner inset, gold rim.
+    const shadow = this.add.rectangle(0, 4, w, h, 0x000000, 0.45);
+    const base = this.add.rectangle(0, 0, w, h, enabled ? 0x2a2114 : 0x1a1a20, 1).setStrokeStyle(2, enabled ? 0xc9a14a : 0x3a3f4a, enabled ? 0.95 : 0.5);
+    const bevel = this.add.rectangle(0, -h / 2 + 5, w - 8, 6, enabled ? 0x4a3a1e : 0x26262e, 0.7);
+    const inset = this.add.rectangle(0, 0, w - 12, h - 12, enabled ? 0x1f1810 : 0x161620, 0.9).setStrokeStyle(1, enabled ? 0x6b5224 : 0x2a2a32, 0.6);
+    const t = this.add.text(0, 0, label, { fontFamily: 'serif', fontSize: '21px', color: enabled ? '#f0e6d0' : '#5a6072', fontStyle: 'bold' }).setOrigin(0.5);
+    t.setShadow(0, 1, '#000000', 2, false, true);
+    // Hover glow rim (additive, hidden until hover).
+    const glow = this.add.rectangle(0, 0, w + 6, h + 6, 0xffd27a, 0.0).setStrokeStyle(3, 0xffd27a, 0.0).setBlendMode(Phaser.BlendModes.ADD);
+    c.add([shadow, base, bevel, inset, glow, t]);
+    if (!enabled) return c;
+    base.setInteractive(new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true } as any);
+    base.on('pointerover', () => { this.tweens.add({ targets: c, scaleX: 1.04, scaleY: 1.04, duration: 120 }); glow.setStrokeStyle(3, 0xffd27a, 0.9); base.setFillStyle(0x3a2c18, 1); try { sfx.unlock(); sfx.play('building_select'); } catch (e) {} });
+    base.on('pointerout', () => { this.tweens.add({ targets: c, scaleX: 1, scaleY: 1, duration: 120 }); glow.setStrokeStyle(3, 0xffd27a, 0.0); base.setFillStyle(0x2a2114, 1); c.y = cy; });
+    base.on('pointerup', () => { c.y = cy; inset.setFillStyle(0x1f1810, 0.9); });
+    base.on('pointerdown', () => {
+      c.y = cy + 2; inset.setFillStyle(0x140f08, 1); // pressed: inset darkens, tablet sinks
+      try { sfx.unlock(); sfx.play('ui_click'); } catch (e) {}
+      fn();
+    });
+    return c;
   }
 
   // ---- transitions --------------------------------------------------------
-  startGame() { this.cameras.main.fadeOut(350, 0, 0, 0); this.time.delayedCall(380, () => this.scene.start('IsometricScene')); }
+  startGame() {
+    try { sfx.unlock(); sfx.play('menu_confirm'); } catch (e) {} // (Polish Phase 10) warm confirm
+    this.cameras.main.fadeOut(350, 0, 0, 0);
+    this.time.delayedCall(380, () => this.scene.start('IsometricScene'));
+  }
 
   newKingdom() {
     // Fresh game → force king creation (clear the one-time king flag + any pending save).

@@ -866,3 +866,62 @@ removed.
 headless playthrough + a snow battle (veteran cavalry, spearmen, commander) ran
 at ~34 FPS with **zero console errors/warnings**. Live URL after push:
 https://charlesalexander.github.io/kingdom-game/
+
+---
+
+## THE VISUAL OVERHAUL (10 Phases)
+
+A full procedural visual+audio overhaul, built entirely with Phaser 3
+Graphics/Canvas and the Web Audio API — **zero external assets, zero PNGs**.
+No gameplay rule, resource/worker/army/building logic, save format, or win
+condition was changed; every phase is additive art/audio over the existing
+simulation. A companion reference, `VISUAL_SYSTEMS_DOC.md`, maps each system to
+its code location.
+
+- **P1 — Terrain.** Organic iso-tile blending, multi-variant grass/forest/water/
+  mountain, hand-placed jitter so the grid never reads as a checkerboard.
+- **P2 — Buildings.** Complete building art rebuild with base shadows, slight
+  hand-placed tilt/offset, condition/level pips, worker-status icons.
+- **P3 — Units.** All unit sprites rebuilt (warriors, archers, monks, knights,
+  cavalry, spearmen, mercenaries, enemy goblins/wolves/dragon).
+- **P4 — World objects.** Trees, rocks, resource nodes, wildlife and decorative
+  environment scattered across the map.
+- **P5 — Sky / day-night / weather.** Layered atmospheric sky band, smooth
+  dawn→day→dusk→night colour grading, sun/moon/stars/clouds, snow/rain/fog
+  emitters, lightning, seasonal colour grading, and always-on ambient particles.
+- **P6 — UI.** "Physical object" parchment/stone panel painters, carved tabs,
+  sprite buttons, sound control, statistics panel.
+- **P7 — Particles / VFX.** Combat hit/arrow/death effects, building-placed and
+  tier-up bursts, fire, explosions, float-text feedback.
+- **P8 — Continent map.** Illustrated cartographic continent view (parchment,
+  inked borders, faction territories, routes).
+- **P9 — Battle.** Full BattleScene visual overhaul — terrain, formations,
+  weather on the field, cavalry dust, victory flourish.
+- **P10 — Integration & polish (this phase).** Cross-cutting polish, additive:
+  - **Main menu:** atmospheric drifting iso-world backdrop with a dusk gradient,
+    warm-horizon glow and a vignette; a carved stone/gold **KINGDOM** title with a
+    soft pulsing glow; **carved-tablet menu buttons** (gold rim, hover glow, sunk
+    pressed state); ambient clouds, a looping bird flock, falling leaves and
+    rising embers. All existing handlers/flow (New Kingdom / Continue / Load /
+    Settings / Credits) are unchanged.
+  - **Scene transitions / loading card:** a small reusable, self-cleaning,
+    skippable loading "tablet" (banner, circular loader, rotating medieval quote)
+    shown for World→Battle, World→Continent and World→Council. Implemented as
+    `src/scenes/TransitionOverlay.ts` and invoked from the **existing** launch
+    sites via a thin `IsometricScene._launchWithTransition()` wrapper that does
+    not change what the launches do.
+  - **Sound:** new oscillator cues wired into existing hooks — `season_change`
+    (season-turn chime), `settlement_upgrade` (tier-up horn), `transition`
+    (scene whoosh), `menu_confirm` (menu start).
+  - **Night warmth:** a cheap additive amber glow that pools around buildings as
+    night falls (`createNightGlow`/`updateNightGlow`), driven by the existing
+    `_nightness` value; off entirely in daylight, rebuilt only on building-count
+    change. No building/placement logic touched.
+  - **Performance:** profiled a full settlement (≈49 buildings) + active battle +
+    snow weather + night glow at **min 32 / avg 35 FPS** (target 30+). The glow
+    and ambient systems are self-gating to keep per-frame cost negligible.
+
+**Verification (Phase 10):** `tsc --noEmit` 0 errors · `npm run build` clean ·
+headless playthrough (upgraded menu → New Kingdom → 6 buildings → 30-day
+`onNewDay` loop returns `ok` → battle / continent / council all transition
+cleanly) at **34–46 FPS** with **zero console errors and zero warnings**.

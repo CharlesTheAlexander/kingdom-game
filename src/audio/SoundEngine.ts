@@ -180,6 +180,25 @@ class SoundEngine {
       case 'building_fire': // a crackle
         for (let i = 0; i < 5; i++) this.noise(0.04, { vol: 0.22, type: 'highpass', freq: 2600, when: i * 0.05 });
         break;
+
+      // (Polish Phase 10) New visual-moment cues -------------------------------
+      case 'season_change': // an airy two-note chime that marks a turning season
+        this.tone(NOTE.A4, 0.5, { type: 'sine', vol: 0.28 });
+        this.tone(NOTE.E5, 0.6, { type: 'sine', vol: 0.22, when: 0.14 });
+        this.tone(NOTE.A4 * 2, 0.7, { type: 'triangle', vol: 0.12, when: 0.28 });
+        break;
+      case 'settlement_upgrade': // a short triumphant horn for a settlement growing
+        this.tone(NOTE.C4, 0.22, { type: 'sawtooth', vol: 0.4 });
+        this.tone(NOTE.G4, 0.3, { type: 'sawtooth', vol: 0.4, when: 0.16 });
+        this.tone(NOTE.C5, 0.42, { type: 'triangle', vol: 0.32, when: 0.34 });
+        break;
+      case 'transition': // a soft low whoosh for a scene transition
+        this.noise(0.45, { vol: 0.22, type: 'lowpass', freq: 900, sweepTo: 180 });
+        this.tone(220, 0.4, { type: 'sine', vol: 0.18, slideTo: 90 });
+        break;
+      case 'menu_confirm': // a warm rising confirm for a major menu choice
+        this.arp([NOTE.C4, NOTE.G4, NOTE.C5], 0.18, { type: 'triangle', vol: 0.4, gap: 0.07 });
+        break;
       default: break;
     }
   }
