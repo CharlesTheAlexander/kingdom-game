@@ -25,6 +25,9 @@
 // ============================================================================
 
 import type { WorldState, Faction, Settlement } from './WorldGenerator.js';
+import type { SettlementState } from './SettlementState.js';
+import { makeSettlementState } from './SettlementState.js';
+import { Biome } from '../data/Biomes.js';
 
 /** Supply state, surfaced as a coloured dot in the HUD/minimap. */
 export type SupplyState = 'green' | 'yellow' | 'red';
@@ -99,6 +102,16 @@ class GameWorldState {
   /** Which settlement the player is "inside" (per-settlement view), or null. */
   currentSettlementId: string | null = null;
 
+  /** Per-settlement persisted state, keyed by settlement id. Lazily created on
+   *  first entry (see settlementState()). The home castle is one of these. This
+   *  whole map is JSON-friendly so Phase 12's SaveManager can serialize it. */
+  settlementStates: Record<string, SettlementState> = {};
+
+  /** A simple notification queue the per-settlement view drains on entry, and a
+   *  hook later phases can push "something happened elsewhere" messages into
+   *  even while the player is inside a town. Each is {text, color}. */
+  pendingNotifications: Array<{ text: string; color: number }> = [];
+
   /** Battle hand-off context, or null when not in a battle. */
   pendingBattle: PendingBattle | null = null;
 
@@ -147,6 +160,33 @@ class GameWorldState {
     return String(this.world.settlements.indexOf(s));
   }
 
+  /** Lazily fetch (creating on first call) the persisted per-settlement state for
+   *  a settlement id. This is the bridge the per-settlement view (IsometricScene)
+   *  reads on entry and writes on leave. Returns null only if the id is unknown. */
+  settlementState(id: string | null): SettlementState | null {
+    if (id == null) return null;
+    const existing = this.settlementStates[id];
+    if (existing) return existing;
+    const s = this.settlementById(id);
+    if (!s) return null;
+    const playerOwned = s.kind === 'player_castle';
+    const st = makeSettlementState({
+      id,
+      name: s.name,
+      faction: s.faction || (playerOwned ? 'player' : 'neutral'),
+      biome: (s.biome as Biome) ?? Biome.PLAINS,
+      playerOwned,
+      day: this.day,
+    });
+    this.settlementStates[id] = st;
+    return st;
+  }
+
+  /** Push a notification the per-settlement view (or continent) can surface. */
+  notify(text: string, color = 0xc9a14a): void {
+    this.pendingNotifications.push({ text, color });
+  }
+
   // --------------------------------------------------------------------------
   // Lifecycle
   // --------------------------------------------------------------------------
@@ -169,6 +209,8 @@ class GameWorldState {
     this.currentSettlementId = null;
     this.pendingBattle = null;
     this.aiParties = [];
+    this.settlementStates = {};
+    this.pendingNotifications = [];
     this.spawnAIParties();
     this.started = true;
   }
@@ -241,6 +283,8 @@ class GameWorldState {
       gold: this.gold,
       day: this.day,
       currentSettlementId: this.currentSettlementId,
+      // Per-settlement persisted states (Phase 3). Plain JSON; Phase 12 reloads.
+      settlementStates: this.settlementStates,
       started: this.started,
     };
   }

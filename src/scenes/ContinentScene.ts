@@ -165,6 +165,11 @@ export class ContinentScene extends Phaser.Scene {
     // Clean shutdown.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.onShutdown());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.onShutdown());
+
+    // (Phase 3) Resume cleanly when the player leaves a settlement (we slept on
+    // entry). on() not once() because the player may enter/leave many times.
+    this.events.on(Phaser.Scenes.Events.WAKE, () => this.onWake());
+    this.events.on(Phaser.Scenes.Events.RESUME, () => this.onWake());
   }
 
   // =========================================================================
@@ -858,56 +863,48 @@ export class ContinentScene extends Phaser.Scene {
     yes.on('pointerup', () => { this._uiClick = true; closeModal(); this.enterSettlement(s); });
   }
 
-  // Enter a settlement: store its id in shared state and launch the per-settlement
-  // view (IsometricScene stand-in this phase). The stand-in's existing return path
-  // (its menu/back) lands the player back on MainMenu→Continue; to guarantee a
-  // clean RETURN to the continent we instead sleep this scene and resume on wake.
+  // Enter a settlement: store its id in shared state and launch the REAL
+  // per-settlement view (IsometricScene, Phase 3). We SLEEP the continent so it
+  // keeps its full state (camera, fog, AI) and resumes instantly on return; the
+  // settlement scene wakes us via leaveToContinent(). Sleeping (not pausing) frees
+  // the GPU while inside the town yet preserves all display objects.
   enterSettlement(s: Settlement) {
-    GameWorld.currentSettlementId = GameWorld.settlementId(s);
-    // Prefer the real IsometricScene if it can boot clean; we launch it on top
-    // and SLEEP the continent. A small Return overlay in the stand-in (or its own
-    // exit) wakes us. To keep Phase 2 robustly boot-clean, we use a lightweight
-    // in-scene overlay as the settlement view and a guaranteed Return button.
-    this.openSettlementStandIn(s);
+    if (this._closing || this._enteringSettlement) return;
+    const id = GameWorld.settlementId(s);
+    GameWorld.currentSettlementId = id;
+    this._enteringSettlement = true;
+    // Detach chunk images before sleeping so a later texture eviction can't leave
+    // a dangling frame under the canvas renderer while we are away.
+    this.detachChunkImages();
+    this.cameras.main.fadeOut(260, 0, 0, 0);
+    this.time.delayedCall(280, () => {
+      this._enteringSettlement = false;
+      // Launch the local settlement view on top, then put the continent to sleep.
+      this.scene.launch('IsometricScene', { settlementId: id });
+      this.scene.sleep();
+    });
   }
 
-  // A lightweight, guaranteed-boot-clean per-settlement overlay. (Phase 3 turns
-  // this into a real local IsometricScene view; doing the full IsometricScene
-  // boot here risks console errors mid-phase, so we ship the safe overlay that
-  // still demonstrates the enter/leave round-trip via shared state.)
-  openSettlementStandIn(s: Settlement) {
-    if (this._settlementOverlay) return;
-    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 60);
-    const els: any[] = [];
-    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x120c08, 1).setOrigin(0, 0).setInteractive()));
-    // Simple illustrated "inside the settlement" panel.
-    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x1a1208, 1).setOrigin(0, 0)));
-    for (let i = 0; i < 16; i++) {
-      const t = i / 15;
-      els.push(fix(this.add.rectangle(0, i * (GAME_H / 16), GAME_W, GAME_H / 16 + 1, Phaser.Display.Color.GetColor(Math.round(30 + t * 40), Math.round(22 + t * 28), Math.round(14 + t * 16)), 1).setOrigin(0, 0)));
-    }
-    els.push(fix(this.add.text(GAME_W / 2, GAME_H * 0.34, s.name, { fontFamily: 'serif', fontSize: '46px', color: '#e8c66a', fontStyle: 'bold', stroke: '#1a1206', strokeThickness: 8 }).setOrigin(0.5)));
-    const status = s.kind === 'player_castle' ? 'Your settlement' : s.kind === 'ai_castle' ? 'An enemy stronghold' : 'A neutral settlement';
-    els.push(fix(this.add.text(GAME_W / 2, GAME_H * 0.45, status, { fontFamily: 'Georgia, serif', fontSize: '18px', color: '#cfc1a6' }).setOrigin(0.5)));
-    els.push(fix(this.add.text(GAME_W / 2, GAME_H * 0.52, 'Per-settlement view arrives in Phase 3.', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#9a8d72', fontStyle: 'italic' }).setOrigin(0.5)));
-
-    const by = GAME_H * 0.66;
-    const btn = fix(this.add.rectangle(GAME_W / 2, by, 240, 46, 0x6b4a26).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
-    els.push(btn, fix(this.add.text(GAME_W / 2, by, 'Leave settlement', { fontFamily: 'Georgia, serif', fontSize: '16px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5)));
-    btn.on('pointerover', () => btn.setFillStyle(0x82602f));
-    btn.on('pointerout', () => btn.setFillStyle(0x6b4a26));
-    const leave = () => {
-      els.forEach(o => o.destroy());
-      this._settlementOverlay = null;
-      GameWorld.currentSettlementId = null;
-    };
-    btn.on('pointerdown', () => { this._uiClick = true; });
-    btn.on('pointerup', () => { this._uiClick = true; leave(); });
-    this._settlementOverlay = leave;
+  // When the continent WAKES (player left a settlement, or returned from a scene),
+  // re-attach chunk images, recentre on the player, and fade back in.
+  onWake() {
+    this._closing = false;
+    this._enteringSettlement = false;
+    // Recentre on the player (they may have moved to the settlement's tile).
+    const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
+    this.cameras.main.centerOn(pp.x, pp.y);
+    this.refreshChunks();
+    this.revealAroundPlayer();
+    this.rebuildFog();
+    this.updateHud();
+    this.cameras.main.fadeIn(260, 12, 18, 26);
   }
 
-  // PUBLIC test hook: programmatically leave any open settlement overlay.
-  leaveSettlement() { if (this._settlementOverlay) this._settlementOverlay(); }
+  // PUBLIC test hook: leave the active settlement view (delegates to the scene).
+  leaveSettlement() {
+    const iso: any = this.scene.get('IsometricScene');
+    if (iso && this.scene.isActive('IsometricScene') && iso.leaveToContinent) iso.leaveToContinent();
+  }
 
   // =========================================================================
   // BATTLE trigger

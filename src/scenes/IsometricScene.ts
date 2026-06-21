@@ -96,15 +96,23 @@ import { WanderingFactions } from '../systems/WanderingFactions.js';
 import { Discovery } from '../systems/Discovery.js';
 import { KingdomStats } from '../systems/KingdomStats.js';
 import { BuildingTypes, BUILD_ORDER, formatCost } from '../data/BuildingTypes.js';
+import { GameWorld } from '../systems/GameWorld.js';
+import { generateWorld } from '../systems/WorldGenerator.js';
+import { Biome } from '../data/Biomes.js';
 
 // ---- Isometric world constants -------------------------------------------
-const N = 200;           // 200x200 tile grid (the huge continent)
+// PHASE 3 (Bannerlord rebuild): IsometricScene is now a PER-SETTLEMENT view, so
+// the grid is a small LOCAL map (~40×40) for ONE settlement rather than the old
+// 200×200 continent — the continent now lives in ContinentScene + GameWorld. The
+// art pipeline and isometric renderer are unchanged; only the SIZE and WHAT-map
+// shrank. 40 tiles gives a ~20×20 buildable core plus a wilderness/resource ring.
+const N = 40;            // 40x40 LOCAL settlement map (was the 200x200 continent)
 const HW = 32;           // half tile width  (screenX step = col-row * 32)
 const HH = 16;           // half tile height (screenY step = col+row * 16)
 const OX = (N - 1) * HW; // origin offset so col-row = -(N-1) lands at x = 0
 const OY = 120;          // origin offset (headroom for back-row building tops)
-const WORLD_W = (N - 1) * HW * 2 + 128; // camera world bounds (~12864)
-const WORLD_H = (N - 1) * HH * 2 + 260;  // (~6628)
+const WORLD_W = (N - 1) * HW * 2 + 128; // camera world bounds
+const WORLD_H = (N - 1) * HH * 2 + 260;
 // Depth = (col+row) * DMUL. With col+row up to 398 we keep DMUL small so the
 // whole world band stays below ~24 and the HUD (28+) renders on top. Terrain is
 // a single Blitter layer well below everything (TERRAIN_DEPTH), so only moving
@@ -141,6 +149,45 @@ export class IsometricScene extends GameScene {
     // before the SceneManager reads it, giving this scene its own unique key.
     super();
     this.sys.settings.key = 'IsometricScene';
+  }
+
+  // ---- Per-settlement context (Phase 3) ------------------------------------
+  // Phaser calls init(data) before create(). ContinentScene starts this scene
+  // with { settlementId }; we also fall back to GameWorld.currentSettlementId.
+  // We resolve the SettlementState here so create() can build the right LOCAL
+  // map and restore saved buildings. A defensive default keeps a DIRECT boot
+  // (e.g. headless smoke test) working even with no campaign in progress.
+  init(data: any) {
+    this._perSettlement = true; // this scene is ALWAYS a per-settlement view now
+    this._leaving = false; this._left = false; // reset leave guards each entry
+    let id: string | null = (data && data.settlementId != null) ? String(data.settlementId)
+      : GameWorld.currentSettlementId;
+    // Ensure a world + a current settlement exist for a clean direct boot (e.g.
+    // a headless smoke test that starts IsometricScene without the continent).
+    if (!GameWorld.world) {
+      try { GameWorld.startNewCampaign(generateWorld()); } catch (e) { /* handled below */ }
+    }
+    if (id == null && GameWorld.world) {
+      // Default to the player's home castle if nothing was passed.
+      const home = GameWorld.world.settlements.find((s: any) => s.kind === 'player_castle');
+      if (home) id = GameWorld.settlementId(home);
+    }
+    GameWorld.currentSettlementId = id;
+    this._settlementId = id;
+    // settlementState() lazily creates + caches the persisted state.
+    this._settle = GameWorld.settlementState(id) || null;
+    this._settleBiome = this._settle ? this._settle.localMap.biome : Biome.PLAINS;
+    this._settlePlayerOwned = this._settle ? this._settle.localMap.playerOwned : true;
+    this._settleSeed = this._settle ? this._settle.localMap.seed : 12345;
+  }
+
+  // Deterministic per-settlement PRNG (mulberry32) seeded from the local map seed
+  // so the SAME town always regenerates the SAME layout (no per-tile storage).
+  _srand(): number {
+    let t = (this._rngState = (this._rngState + 0x6d2b79f5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
   // ---- Asset loading -------------------------------------------------------
@@ -233,12 +280,16 @@ export class IsometricScene extends GameScene {
     // before ArmyManager (it reads the army cap) and the economy hooks.
     this.traitBonuses = defaultBonuses();
     this.reputation = new Reputation(this);
-    let king = null; try { king = JSON.parse(localStorage.getItem('kg_king')); } catch (e) {}
+    // (Phase 3) King identity comes from GameWorld now (the continent owns it),
+    // falling back to legacy localStorage so a direct boot still has a name. The
+    // king-creation-on-boot flow is removed — creation happens before ContinentScene.
+    let king: any = GameWorld.king || null;
+    if (!king) { try { king = JSON.parse(localStorage.getItem('kg_king')); } catch (e) {} }
     this.kingdomName = (king && king.kingdom) || 'Your Kingdom';
-    this.rulerName = (king && king.ruler) || 'The King';
+    this.rulerName = (king && (king.ruler || king.king)) || 'The King';
     this.kingTrait = (king && king.trait) || null;
     if (this.kingTrait) this.applyTraitBonuses(this.kingTrait);
-    this.armyMgr = new ArmyManager(this); // (Expansion) armies on the map
+    this.armyMgr = this._inertArmyMgr(); // (Phase 3) on-map continent armies disabled in the local view
     this.worldEvents = new WorldEvents(this); // (Expansion Phase 3) events + messenger
     this.research = new Research(this); // (Expansion Phase 5) research tree
     this.winConditions = new WinConditions(this); // (Audit FIX 2) victory paths
@@ -290,34 +341,48 @@ export class IsometricScene extends GameScene {
     this.castleBarBg.y = cy;
     this.castleBarFill.y = cy;
 
-    // (Phase 6) Three independent AI kingdoms. The wave coordinator lets only
-    // one attack at a time, with a cooldown between different kingdoms' waves.
+    // ====================================================================
+    // (Phase 3) WORLD-SCALE SYSTEMS — DISABLED in the per-settlement view.
+    // ====================================================================
+    // These belong to the CONTINENT (ContinentScene + GameWorld) now, not to a
+    // single settlement. Several would also crash at the new 40×40 local size:
+    //   * AIKingdom/FACTIONS hard-code castle tiles at col/row 185 (out of bounds
+    //     at N=40) and run on-map enemy kingdoms — that is continent strategy.
+    //   * WaveManager / WanderingFactions / Caravans / SettlementManager /
+    //     GoblinCamps / ArmyManager all assume the 200×200 continent.
+    //   * Diplomacy / GreatCouncil / Espionage / Narrative / Succession etc. are
+    //     campaign/late-game concerns (Phases 6-8), not the local town view.
+    // We replace them with inert stubs so every later call (update(), HUD,
+    // panels) is a harmless no-op and the scene boots clean. Re-homing these to
+    // the continent is future work for Phases 5-8.
     this.waveCoord = { holder: null, cooldown: 0 };
-    this.ai = new AIKingdom(this, FACTIONS.red); // primary (kept for legacy refs)
-    this.kingdoms = [this.ai, new AIKingdom(this, FACTIONS.purple), new AIKingdom(this, FACTIONS.yellow)];
+    this.ai = null;
+    this.kingdoms = [];                       // no AI kingdoms on a local map
     this.DAY_SECONDS = DAY_MS / 1000;
-    this.diplomacy = new Diplomacy(this); // Phase 7: relationships with kingdoms
-    this.leaders = new FactionLeaders(this); // (V2 Phase 1) named AI rulers
-    this.heroes = new Heroes(this); // (V2 Phase 3) named heroes
-    this.maintenance = new Maintenance(this); // (V2 Phase 6) building aging + disasters
+    this.diplomacy = this._inertSystem();     // continent-scale (P6)
+    this.leaders = this._inertSystem();       // continent-scale (P6)
+    this.heroes = this._inertSystem();        // hero system (P6)
+    this.maintenance = this._inertSystem();   // building aging/disasters (P7 local later)
     this._plagueMult = 1;
-    this.court = new RoyalCourt(this); // (V2 Phase 7) advisors
-    this.succession = new Succession(this); // (V2 Phase 8) heir, marriage, succession
-    this.espionage = new Espionage(this); // (V2 Phase 9) spy network
-    this.narrative = new Narrative(this); // (V2 Phase 11) story arc + 4th win path
-    this.weatherSys = new Weather(this); // (V2 Phase 12) weather gameplay effects
-    this.popClasses = new PopulationClasses(this); // (V2 Phase 13) social classes
-    this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
-    this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
-    this.roads = new Roads(this); // (Completion Phase 5) player-built roads
-    this.caravans = new Caravans(this); // Phase 5: trade routes between settlements
-    this.settlements = new SettlementManager(this); // Phase B: neutral settlements
-    this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
-    this.territory = new Territory(this); // Phase 4: territory + fog of war
-    this.ruins = new Ruins(this); // (Session-1 Phase 1) ancient ruins
+    this.court = this._inertSystem();         // advisors (P7)
+    this.succession = this._inertSystem();    // succession (P8)
+    this.espionage = this._inertSystem();     // spy network (P6)
+    this.narrative = this._inertSystem();     // story arc (P8)
+    this.weatherSys = this._inertSystem();    // weather gameplay (keep visuals only)
+    this.popClasses = this._inertSystem();    // social classes (later)
+    this.banking = this._inertSystem();       // treasury/loans (campaign-scale)
+    this.greatCouncil = { held: false, update() {} }; // buildingUnlocked() reads .held
+    this.roads = this._inertSystem();         // player roads (continent-scale)
+    this.caravans = this._inertSystem();      // trade routes (continent-scale, P5)
+    this.settlements = this._inertSettlements(); // neutral settlements are on the continent now
+    this.goblinCamps = this._inertSettlements(); // goblin camps are on the continent now
+    this.factions = this._inertSystem();      // wandering factions (continent-scale)
+    this.discovery = this._inertSystem();     // location histories (continent-scale)
+    // KEPT per-settlement subsystems: Territory (local fog/reveal) + Ruins are
+    // bounded to the local grid and safe at N=40.
+    this.territory = new Territory(this); // Phase 4: local territory + fog of war
+    this.ruins = this._inertSystem();     // ancient ruins are a continent feature now
     this.createFogOverlay(); // (BUG 7) opaque fog above world objects
-    this.factions = new WanderingFactions(this); // (Session-1 Phase 2) caravans/tribes/pilgrims
-    this.discovery = new Discovery(this); // (Session-1 Phase 4) location histories
     if (this.taxIndex == null) this.taxIndex = 1; this.applyTax(); // (Session-1 Phase 5) tax system
     // (Phase 7) Reveal a generous 20-tile starting radius around the castle.
     if (this.buildings.castle) this.revealAround(this.buildings.castle.col, this.buildings.castle.row, 20);
@@ -336,15 +401,21 @@ export class IsometricScene extends GameScene {
     this.updateWeather(); // (Polish Phase 4) apply weather for the starting season
 
     if (this._startZoom) this.cameras.main.setZoom(Phaser.Math.Clamp(this._startZoom, 0.3, 2));
-    // (Phase 4) First-ever start (no saved king) shows the creation screen; it
-    // then opens the tutorial. Otherwise go straight to the tutorial.
-    if (!this._noIntro) { let hasKing = false; try { hasKing = !!localStorage.getItem('kg_king'); } catch (e) {} if (!hasKing && !SaveManager.hasPending()) this.showKingCreation(); else this.showWelcomePanel(); }
+    // (Phase 3) King-creation-on-boot REMOVED — the king is chosen before the
+    // continent loads. No welcome/tutorial modal on settlement entry either; the
+    // player drops straight into the local town view.
 
     this.setupUICamera();
 
-    // (Phase B) Tab toggles the continent overview (launched on top, this scene
-    // pauses while it's open).
-    this.input.keyboard.on('keydown-TAB', (e) => { if (e && e.preventDefault) e.preventDefault(); this.openContinent(); });
+    // (Phase 3) Build the per-settlement HUD top bar + Leave button, restore any
+    // saved buildings/tasks for THIS settlement, and start the local time ticker.
+    this.buildSettlementHud();
+    this.createLeaveButton();
+    this.restoreSettlementState();
+    this.startSettlementTime();
+
+    // (Phase 3) TAB no longer opens a continent overlay on top — the continent is
+    // a separate scene the player returns to via "Leave Settlement".
     // (Gameplay change 2) Escape cancels move/placement mode (or closes the menu).
     this.input.keyboard.on('keydown-ESC', () => {
       if (this._menuOpen) this.closeMenu();
@@ -362,21 +433,284 @@ export class IsometricScene extends GameScene {
     this.createPauseButton(); // (Expansion Phase 7) pause control
     this.setupHotkeys();      // (Expansion Phase 7) keyboard shortcuts
     this.input.keyboard.on('keydown-S', (e) => { if (this._typing) return; this.quickSave(); });
-    this._beforeUnload = () => { try { SaveManager.save(this, 0); } catch (err) {} };
-    window.addEventListener('beforeunload', this._beforeUnload);
-    this.events.once('shutdown', () => window.removeEventListener('beforeunload', this._beforeUnload));
+    // (Phase 3) The old beforeunload auto-save wrote the LEGACY single-scene save
+    // format. That format is the continent's concern (and is being rewritten in
+    // Phase 12), so we no longer auto-save the old format on unload from the local
+    // view. Per-settlement state is persisted into GameWorld on Leave instead.
 
     // (Visual P7) Catch heroes that join via an event popup mid-day (not just on
     // the daily tick). this.time events are auto-cleared on scene shutdown.
     this.time.addEvent({ delay: 1500, loop: true, callback: () => this.checkHeroFx() });
 
-    // (Save system) If a load is pending (set by requestLoad → scene.restart),
-    // reconstruct the saved state now that the fresh scene exists.
-    if (SaveManager.hasPending()) {
-      const data = SaveManager.consumePending();
-      SaveManager.applySave(this, data);
-      this.showLoadedBanner(this.gameDay);
+    // (Phase 3) Legacy pending-load reconstruction REMOVED here — loading a saved
+    // campaign is handled by the continent + GameWorld (Phase 12 SaveManager).
+  }
+
+  // ====================================================================
+  // (Phase 3) INERT SYSTEM STUBS — for world-scale subsystems disabled in the
+  // per-settlement view. A Proxy answers ANY property access with a polymorphic
+  // stub that is callable (every method → no-op), array-like (every method also
+  // returns []/0 via valueOf), and yields an empty array when iterated. This lets
+  // legacy update()/HUD/panel code call e.g. settlements.threats() / .update() /
+  // .list / .total() without throwing, returning harmless empties. Cheap and
+  // future-proof: re-homing these to the continent (P5-8) just replaces the stub.
+  // ====================================================================
+  _inertSystem(): any {
+    const noop: any = () => [];
+    // Property names that legacy code reads WITHOUT calling (and then iterates /
+    // filters / .length) — these must answer with a real empty array.
+    const ARRAY_PROPS = new Set(['list', 'units', 'enemies', 'pawns', 'tribes', 'fires', 'roster', 'sites', 'armies', 'buildings', 'available']);
+    const handler: ProxyHandler<any> = {
+      get(_t, prop) {
+        if (prop === Symbol.iterator) return function* () { /* empty */ };
+        if (prop === 'length') return 0;
+        if (prop === 'then') return undefined; // never look thenable to await
+        if (prop === 'valueOf') return () => 0;
+        if (prop === 'toString') return () => '';
+        if (typeof prop === 'string' && ARRAY_PROPS.has(prop)) return [];
+        return new Proxy(noop, handler);
+      },
+      apply() { return new Proxy(noop, handler); },
+    };
+    return new Proxy(noop, handler);
+  }
+
+  // Neutral settlements + goblin camps are continent features now; provide a stub
+  // with the exact numeric/array contract the HUD + update loop expect locally.
+  _inertSettlements(): any {
+    return {
+      update() {}, collectDaily() {}, applyDepths() {},
+      threats: () => [],
+      // `list` is read as a PROPERTY (iterated/filtered) in several places, so it
+      // must be an array, not a method.
+      list: [],
+      ownedCount: () => 0, total: () => 0,
+    };
+  }
+
+  // The on-map continent army manager is disabled in the local view. soldierTotal()
+  // and HUD code do arithmetic on its returns, so it needs a TYPED stub (numbers /
+  // empty arrays), not the generic Proxy (whose returns can't coerce to a number).
+  _inertArmyMgr(): any {
+    return {
+      armies: [], selected: null, maxPlayerArmies: 0,
+      update() {}, onNewDay() {},
+      playerArmies: () => [], aiArmies: () => [], aiArmiesFor: () => [],
+      availableUnits: () => 0, totalUnits: () => 0, etaDays: () => 0,
+      formArmy() {}, marchTo() {}, stopMarch() {}, selectArmy() {}, disband() {},
+      removeArmy() {}, spawnAIArmy() {}, setUnitsFromBattle() {}, addMorale() {},
+    };
+  }
+
+  // ====================================================================
+  // (Phase 3) PER-SETTLEMENT HUD, ENTER/LEAVE & STATE PERSISTENCE
+  // ====================================================================
+
+  // Top context bar: LEFT settlement name + tier + faction, CENTER local
+  // resources, RIGHT Day X (from GameWorld) + "You are in [Name]". Drawn above
+  // the existing HUD; routed to the UI camera so it never zooms/pans.
+  buildSettlementHud() {
+    const fix = (o: any) => o.setScrollFactor(0);
+    const D = 210; // above the legacy top bar (≤200) but below modals
+    const st = this._settle;
+    const name = st ? st.name : 'Settlement';
+    const faction = st ? st.faction : 'player';
+    // A slim parchment strip across the very top.
+    this._sBarBg = fix(this.add.rectangle(0, 0, GAME_W, 26, 0x241a0e, 0.92).setOrigin(0, 0).setDepth(D));
+    this._sBarLine = fix(this.add.rectangle(0, 26, GAME_W, 2, 0xc9a14a, 0.7).setOrigin(0, 0).setDepth(D));
+    this._sBarLeft = fix(this.add.text(12, 5, '', {
+      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#ffe9b0', fontStyle: 'bold',
+    }).setDepth(D + 1));
+    this._sBarCenter = fix(this.add.text(GAME_W / 2, 5, '', {
+      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#f0e6d0',
+    }).setOrigin(0.5, 0).setDepth(D + 1));
+    this._sBarRight = fix(this.add.text(GAME_W - 150, 5, '', {
+      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#f0e6d0',
+    }).setOrigin(1, 0).setDepth(D + 1));
+    // A reusable notification banner (centre, just under the bar).
+    this._sNote = fix(this.add.text(GAME_W / 2, 40, '', {
+      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#fff', fontStyle: 'bold',
+      backgroundColor: '#6b4a26dd', padding: { x: 14, y: 7 }, align: 'center',
+    }).setOrigin(0.5, 0).setDepth(D + 5).setVisible(false));
+    this._sBarLeftStatic = `${name}  ·  ${this.factionLabel(faction)}`;
+    this.updateSettlementHud();
+    this.routeCameras && this.routeCameras();
+  }
+
+  factionLabel(faction: string): string {
+    if (faction === 'player') return 'Your realm';
+    if (faction === 'neutral' || !faction) return 'Free town';
+    return faction.charAt(0).toUpperCase() + faction.slice(1);
+  }
+
+  updateSettlementHud() {
+    if (!this._sBarLeft) return;
+    const tierName = (this.TIERS[this.tierIndex] && this.TIERS[this.tierIndex].name) || 'Village';
+    this._sBarLeft.setText(`${this._sBarLeftStatic}  ·  ${tierName}`);
+    const r = this.resources;
+    this._sBarCenter.setText(`Wood ${fmtNum(r.wood)}   Stone ${fmtNum(r.stone)}   Food ${fmtNum(r.food)}   Iron ${fmtNum(r.iron || 0)}   Gold ${fmtNum(GameWorld.gold)}`);
+    const nm = this._settle ? this._settle.name : 'this place';
+    this._sBarRight.setText(`Day ${GameWorld.displayDay()}   ·   You are in ${ellipsize(nm, 16)}`);
+  }
+
+  // Persistent "Leave Settlement" button, top-right (left of the Menu button).
+  createLeaveButton() {
+    const fix = (o: any) => o.setScrollFactor(0);
+    const D = 212;
+    const w = 150, h = 28, x = GAME_W - 46 - w - 8, y = 30;
+    const bg = fix(this.add.rectangle(x, y, w, h, 0x6b3a26, 0.95).setOrigin(0, 0).setDepth(D).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
+    const txt = fix(this.add.text(x + w / 2, y + h / 2, 'Leave Settlement', { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5).setDepth(D + 1));
+    bg.on('pointerover', () => bg.setFillStyle(0x8a4a2f));
+    bg.on('pointerout', () => bg.setFillStyle(0x6b3a26));
+    bg.on('pointerup', () => this.confirmLeave());
+    this._leaveBtn = bg; this._leaveTxt = txt;
+    this.routeCameras && this.routeCameras();
+  }
+
+  // Confirm dialog → leaveToContinent().
+  confirmLeave() {
+    if (this._leaveModal) return;
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(400);
+    const els: any[] = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.55).setOrigin(0, 0).setInteractive()));
+    const W = 400, H = 150, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 24, 'Leave this settlement?', { fontFamily: 'Georgia, serif', fontSize: '18px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 56, 'You will return to the continent at this location.', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#cfc1a6' }).setOrigin(0.5, 0)));
+    const yes = fix(this.add.rectangle(x + W / 2 - 95, y + H - 36, 160, 34, 0x6b3a26).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(yes, fix(this.add.text(x + W / 2 - 95, y + H - 36, 'Leave', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const no = fix(this.add.rectangle(x + W / 2 + 95, y + H - 36, 160, 34, 0x2f5b3a).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(no, fix(this.add.text(x + W / 2 + 95, y + H - 36, 'Stay', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const close = () => { els.forEach(o => o.destroy()); this._leaveModal = null; };
+    this._leaveModal = close;
+    no.on('pointerup', () => close());
+    yes.on('pointerup', () => { close(); this.leaveToContinent(); });
+    this.routeCameras && this.routeCameras();
+  }
+
+  // Save state, fade out, return to ContinentScene at this settlement's tile.
+  leaveToContinent() {
+    if (this._leaving) return;
+    this._leaving = true;
+    this.saveSettlementState();
+    // Drop the player party onto the continent at this settlement's location.
+    const s = GameWorld.settlementById(this._settlementId);
+    if (s) { GameWorld.player.col = s.col; GameWorld.player.row = s.row; }
+    GameWorld.currentSettlementId = null;
+    this.cameras.main.fadeOut(280, 0, 0, 0);
+    const finish = () => {
+      if (this._left) return; // guard against double-fire (fade event + fallback)
+      this._left = true;
+      // ContinentScene was SLEPT on entry; wake it (resume() is for paused scenes).
+      if (this.scene.isSleeping('ContinentScene')) this.scene.wake('ContinentScene');
+      else if (this.scene.isPaused('ContinentScene')) this.scene.resume('ContinentScene');
+      else if (!this.scene.isActive('ContinentScene')) this.scene.launch('ContinentScene');
+      // Stop ourselves LAST so create() runs fresh on the next entry.
+      this.scene.stop();
+    };
+    // Run on the camera-fade callback, with a delayedCall fallback in case the
+    // fade is interrupted (e.g. the scene is paused during the fade).
+    this.cameras.main.once('camerafadeoutcomplete', finish);
+    this.time.delayedCall(360, finish);
+  }
+
+  // Mirror the live scene's buildings/resources/tier back into the persisted
+  // SettlementState so the next visit resumes exactly where the player left off.
+  saveSettlementState() {
+    const st = this._settle;
+    if (!st) return;
+    st.tier = this.tierIndex;
+    st.workers = this.buildings ? this.buildings.workersUsed() : 0;
+    st.workerCap = this.resources ? this.resources.workersCap : st.workerCap;
+    st.population = this.population ? Math.round(this.population.count || st.population) : st.population;
+    st.happiness = this.population ? Math.round(this.population.happiness ?? st.happiness) : st.happiness;
+    st.resources = {
+      wood: Math.round(this.resources.wood), stone: Math.round(this.resources.stone),
+      food: Math.round(this.resources.food), iron: Math.round(this.resources.iron || 0),
+    };
+    // Persist buildings (skip the castle — it is always re-placed at centre).
+    st.buildings = [];
+    st.tasks = [];
+    for (const b of this.buildings.buildings) {
+      if (!b.alive || b.typeKey === 'castle') continue;
+      st.buildings.push({ typeKey: b.typeKey, col: b.col, row: b.row, level: b.level || 1, workers: b.workers || 0 });
+      // Resume any in-progress training slots on a barracks.
+      if (b.slots && b.slots.length) {
+        for (const slot of b.slots) st.tasks.push({ kind: 'training', what: slot.type, col: b.col, row: b.row, timeLeft: slot.timeLeft });
+      }
     }
+    st.garrison = this.troops ? [{ type: 'warrior', count: this.troops.count || 0 }] : st.garrison;
+    st.visited = true;
+    st.lastVisitedDay = GameWorld.day;
+  }
+
+  // Restore saved buildings/resources/tier on entry (after the castle is placed).
+  // First visit just keeps the defaults set by makeSettlementState.
+  restoreSettlementState() {
+    const st = this._settle;
+    if (!st) return;
+    // Seed local resources from the persisted stockpile.
+    if (st.visited && st.resources) {
+      this.resources.wood = st.resources.wood;
+      this.resources.stone = st.resources.stone;
+      this.resources.food = st.resources.food;
+      this.resources.iron = st.resources.iron || 0;
+    }
+    this.tierIndex = st.tier || 0;
+    // Re-place persisted buildings at their saved positions (ignoreStage so a
+    // resumed save is authoritative and never blocked by tier gating).
+    for (const sb of (st.buildings || [])) {
+      if (this.buildings.isOccupied(sb.col, sb.row)) continue;
+      const b = this.buildings.place(sb.typeKey, sb.col, sb.row, { ignoreStage: true });
+      if (b) {
+        if (sb.level && sb.level > 1) b.level = sb.level;
+        b.workers = sb.workers || 0;
+        this.decorateBuilding(b);
+      }
+    }
+    // Resume in-progress training tasks on the matching barracks.
+    for (const t of (st.tasks || [])) {
+      if (t.kind !== 'training') continue;
+      const b = this.buildings.grid[t.row] && this.buildings.grid[t.row][t.col];
+      if (b && b.slots) b.slots.push({ type: t.what, timeLeft: t.timeLeft });
+    }
+    this.refreshPanel && this.refreshPanel();
+    this.updateSettlementHud();
+  }
+
+  // Start the local clock + production ticker and drain any pending notifications.
+  startSettlementTime() {
+    const st = this._settle;
+    if (st) st.lastVisitedDay = GameWorld.day; // mark this visit
+    // Local day display follows the GameWorld master clock.
+    this.gameDay = GameWorld.displayDay();
+    // Drain queued cross-world notifications so the player sees what happened.
+    if (GameWorld.pendingNotifications && GameWorld.pendingNotifications.length) {
+      const n = GameWorld.pendingNotifications.shift();
+      if (n) this.notify(n.text, n.color);
+    }
+  }
+
+  // (Phase 3 / hook for P5-7) Banner notification: "something happened" inside the
+  // settlement. ContinentScene/GameWorld can push via GameWorld.notify(); we also
+  // expose a static so other scenes can call IsometricScene.notify(...) when the
+  // local view is active.
+  notify(text: string, color: number = 0xc9a14a) {
+    if (!this._sNote) return;
+    const hex = '#' + (color & 0xffffff).toString(16).padStart(6, '0') + 'dd';
+    this._sNote.setText(text).setBackgroundColor(hex).setVisible(true).setAlpha(1);
+    this.tweens.killTweensOf(this._sNote);
+    this.tweens.add({ targets: this._sNote, alpha: 0, delay: 2600, duration: 700, onComplete: () => this._sNote.setVisible(false) });
+  }
+
+  // Static convenience: route a notification to the live per-settlement view if
+  // it is the active scene (otherwise it is queued in GameWorld for next entry).
+  static notify(game: any, text: string, color: number = 0xc9a14a) {
+    try {
+      const s = game && game.scene && game.scene.keys && game.scene.keys.IsometricScene;
+      if (s && s.scene && s.scene.isActive() && s.notify) { s.notify(text, color); return; }
+    } catch (e) { /* fall through to queue */ }
+    GameWorld.notify(text, color);
   }
 
   // (Polish Phase 10) Wrap an existing scene launch with a brief, skippable
@@ -395,16 +729,12 @@ export class IsometricScene extends GameScene {
     handle = showTransition(this, { title, subtitle, tint, hold: 850, onMid: fire });
   }
 
+  // (Phase 3) The continent is now a SEPARATE scene we sleep on entry, not an
+  // overlay launched on top. openContinent() therefore just leaves the settlement
+  // (with confirm) — the old launch-on-top path would duplicate the slept scene.
   openContinent() {
     if (this.isGameOver || this._menuOpen) return;
-    // (Bug 3) Guard double-launch and wrap the transition: if launching the
-    // continent ever throws, make sure we don't end up paused with no scene up.
-    if (this.scene.isActive('ContinentScene')) return;
-    try { SaveManager.save(this, 0); } catch (e) {} // (Save system) auto-save before transition
-    this._launchWithTransition('THE CONTINENT', 'Unrolling the great map…', 0x8fb87a, () => {
-      this.scene.launch('ContinentScene');
-      this.scene.pause();
-    });
+    this.confirmLeave();
   }
 
   // ---- BUG 1 FIX: dedicated UI camera that never zooms/pans -----------------
@@ -785,20 +1115,117 @@ export class IsometricScene extends GameScene {
   //   EAST  (cols 31+) ... rocky highlands (stone + gold)
   //   SOUTH (rows 31+) ... open plains + a river along the bottom edge (sheep)
   //   WEST  (cols 0-8) ... mixed wilderness (AI kingdoms, goblin raids)
-  // regionAt() is the single source of truth, also read by ResourceNodes,
-  // Wildlife, Territory and AIKingdom. The NE/SE corners fold into north/south
-  // so the Purple (NE forest) and Yellow (SE plains) kingdoms sit in-theme.
-  // Named biome for a tile. The huge map is banded: a flat START zone in the
-  // centre, DEEP FOREST to the north, HIGHLAND MOUNTAINS east, RIVER DELTA south,
-  // WESTERN WILDLANDS west, and transitional MIDDLE wilderness between them.
+  // (Phase 3) PER-SETTLEMENT LOCAL MAP. Each settlement's 40×40 map is generated
+  // ONCE in buildLocalMapGrid() from its WORLD biome (plains / forest / mountain /
+  // coast / desert / highland …) so every town FEELS different. biomeAt() now just
+  // reads that precomputed `localBiomeGrid`; the named values it returns
+  // ('start' | 'forest' | 'mountains' | 'delta' | 'wildlands' | 'middle') match
+  // the legacy renderer + the systems (ResourceNodes/Wildlife/Territory) that
+  // read regionAt(), so the existing art pipeline is reused unchanged.
   biomeAt(c, r) {
     if (c < 0 || r < 0 || c >= N || r >= N) return 'middle';
     if (this.isBuildZone(c, r)) return 'start';
-    if (c < 50) return 'wildlands';     // west (incl. NW/SW corners)
-    if (c >= 150) return 'mountains';   // east (incl. NE/SE corners)
-    if (r < 50) return 'forest';        // north band
-    if (r >= 150) return 'delta';       // south band
+    if (this.localBiomeGrid && this.localBiomeGrid[r]) return this.localBiomeGrid[r][c] || 'middle';
     return 'middle';
+  }
+
+  // Generate the local-biome grid for THIS settlement, themed by its world biome.
+  // Returns a 2D array of legacy biome names so the renderer/systems are reused.
+  // Layout: a flat buildable START core (BZ), then a themed wilderness ring whose
+  // mix of forest/rock/water/plain differs per world biome:
+  //   PLAINS    → open grass, sparse copses, a river along one edge (if any).
+  //   FOREST    → dense trees ringing the clearing (wood-rich).
+  //   MOUNTAIN  → rocky highland + impassable peaks at the back edge (stone/iron).
+  //   COAST     → beach + open SEA on one side (the south/front edge).
+  //   DESERT    → sandy scrub, very few trees.
+  //   HIGHLAND  → rocky hills, scattered stone, a few trees.
+  buildLocalMapGrid() {
+    this._rngState = this._settleSeed | 0;
+    const biome = this._settleBiome;
+    const grid = Array.from({ length: N }, () => Array(N).fill('middle'));
+    const mid = Math.floor(N / 2);
+
+    // Theme weights per WORLD biome → probabilities used to paint wilderness.
+    // theme: 'forest' (trees), 'mountains' (rock+peak), 'plain', 'delta' (water).
+    const theme = (() => {
+      switch (biome) {
+        case Biome.LUSH_FOREST:
+        case Biome.ALPINE_FOREST:
+          return { base: 'forest', pForest: 0.6, pRock: 0.03, sea: null, peakEdge: false };
+        case Biome.HIGHLAND:
+          return { base: 'mountains', pForest: 0.12, pRock: 0.45, sea: null, peakEdge: true };
+        case Biome.MOUNTAIN_PEAK:
+          return { base: 'mountains', pForest: 0.05, pRock: 0.6, sea: null, peakEdge: true };
+        case Biome.COAST:
+          return { base: 'delta', pForest: 0.06, pRock: 0.02, sea: 'south', peakEdge: false };
+        case Biome.OCEAN:
+          return { base: 'delta', pForest: 0.02, pRock: 0.0, sea: 'south', peakEdge: false };
+        case Biome.DESERT:
+        case Biome.SCRUBLAND:
+          return { base: 'wildlands', pForest: 0.03, pRock: 0.08, sea: null, peakEdge: false };
+        case Biome.WETLAND:
+          return { base: 'delta', pForest: 0.18, pRock: 0.01, sea: null, peakEdge: false, river: true };
+        case Biome.TUNDRA:
+          return { base: 'wildlands', pForest: 0.1, pRock: 0.12, sea: null, peakEdge: false };
+        case Biome.RIVER:
+          return { base: 'delta', pForest: 0.12, pRock: 0.02, sea: null, peakEdge: false, river: true };
+        case Biome.PLAINS:
+        default:
+          return { base: 'middle', pForest: 0.1, pRock: 0.04, sea: null, peakEdge: false, river: true };
+      }
+    })();
+
+    for (let r = 0; r < N; r++) {
+      for (let c = 0; c < N; c++) {
+        if (this.isBuildZone(c, r)) { grid[r][c] = 'start'; continue; }
+        // Distance-from-centre falloff so the theme thickens toward the edges.
+        const edge = Math.max(Math.abs(c - mid), Math.abs(r - mid));
+        const t = Math.min(1, (edge - 10) / (mid - 10)); // 0 at build edge → 1 at map edge
+        const roll = this._srand();
+        const fp = theme.pForest * (0.5 + t);
+        const rp = theme.pRock * (0.5 + t);
+        if (roll < fp) grid[r][c] = 'forest';
+        else if (roll < fp + rp) grid[r][c] = 'mountains';
+        else grid[r][c] = theme.base;
+      }
+    }
+
+    // SEA edge (coast/ocean towns): flood the front (south) rows with water.
+    if (theme.sea === 'south') {
+      for (let r = N - 6; r < N; r++) {
+        for (let c = 0; c < N; c++) {
+          if (this.isBuildZone(c, r)) continue;
+          if (r >= N - 4 || this._srand() < 0.6) grid[r][c] = 'delta_sea';
+        }
+      }
+    }
+
+    // PEAK backdrop (mountain/highland towns): impassable peaks along the far edge.
+    if (theme.peakEdge) {
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < N; c++) {
+          if (this.isBuildZone(c, r)) continue;
+          if (r < 2 || this._srand() < 0.5) grid[r][c] = 'peak';
+        }
+      }
+    }
+
+    // RIVER (plains/wetland/river towns): a meandering band across one wilderness
+    // strip just south of the build zone — a flavourful water feature.
+    if (theme.river) {
+      const z = this.BZ;
+      const baseRow = z.r1 + 4;
+      for (let c = 0; c < N; c++) {
+        const rr = baseRow + Math.round(2 * Math.sin(c * 0.4 + (this._settleSeed % 7)));
+        for (let k = 0; k < 2; k++) {
+          const r = rr + k;
+          if (r >= 0 && r < N && !this.isBuildZone(c, r)) grid[r][c] = 'river_band';
+        }
+      }
+    }
+
+    this.localBiomeGrid = grid;
+    return grid;
   }
 
   // Compatibility shim: the older systems (Wildlife/ResourceNodes/Territory)
@@ -806,7 +1233,10 @@ export class IsometricScene extends GameScene {
   regionAt(c, r) {
     const b = this.biomeAt(c, r);
     if (b === 'start') return this.isBuildZone(c, r) ? 'settlement' : 'plain';
-    return { forest: 'north', mountains: 'east', delta: 'south', wildlands: 'west', middle: 'plain' }[b];
+    return ({
+      forest: 'north', mountains: 'east', delta: 'south', wildlands: 'west', middle: 'plain',
+      delta_sea: 'south', river_band: 'south', peak: 'east',
+    } as Record<string, string>)[b] || 'plain';
   }
 
   // Build a single 64x64-cell canvas atlas containing every terrain tile, so the
@@ -830,6 +1260,9 @@ export class IsometricScene extends GameScene {
 
   drawGrid() {
     this.buildTerrainAtlas();
+    // (Phase 3) Build THIS settlement's local biome grid first (themed by the
+    // settlement's world biome) — biomeAt() reads it below.
+    this.buildLocalMapGrid();
     const waterKeys = ['iso_water', 'iso_water2', 'iso_water3'];
     const forestKeys = ['iso_forest1', 'iso_forest2', 'iso_forest3', 'iso_forest4', 'iso_forest5', 'iso_forest6', 'iso_forest7', 'iso_forest8'];
 
@@ -840,6 +1273,10 @@ export class IsometricScene extends GameScene {
       for (let c = 0; c < N; c++) {
         const b = this.biomeAt(c, r);
         biome[r][c] = b;
+        // Hard terrain (water/peak) is decided by the local-map generator; the
+        // remaining wilderness gets a per-theme forest/rock scatter for texture.
+        if (b === 'delta_sea' || b === 'river_band') { type[r][c] = 'water'; continue; }
+        if (b === 'peak') { type[r][c] = 'rock'; continue; }
         let pForest = 0, pRock = 0;
         if (b === 'forest') { pForest = 0.62; pRock = 0.03; }
         else if (b === 'mountains') { pRock = 0.6; pForest = 0.04; }
@@ -848,23 +1285,13 @@ export class IsometricScene extends GameScene {
         else if (b === 'middle') { pForest = 0.1; pRock = 0.07; }
         // start zone stays clean grass
         if (b !== 'start') {
-          const roll = Math.random();
+          const roll = this._srand();
           if (roll < pForest) type[r][c] = 'forest';
           else if (roll < pForest + pRock) type[r][c] = 'rock';
         }
       }
     }
-
-    // River: a continuous 3-4 tile east-west band across the south delta.
-    for (let c = 0; c < N; c++) {
-      const base = 172 + Math.round(3 * Math.sin(c * 0.05) + 1.5 * Math.sin(c * 0.21));
-      const w = 3 + (Math.sin(c * 0.13) > 0.4 ? 1 : 0);
-      for (let k = 0; k < w; k++) {
-        const r = base + k;
-        if (r >= 0 && r < N && !this.isBuildZone(c, r)) type[r][c] = 'water';
-      }
-    }
-    this.riverRowAt = (c) => 172 + Math.round(3 * Math.sin(c * 0.05) + 1.5 * Math.sin(c * 0.21)) + 1;
+    this.riverRowAt = (_c) => -1; // no continent-scale river on the local map
 
     this.terrainType = type;
     this.biomeGrid = biome;
@@ -4060,10 +4487,11 @@ export class IsometricScene extends GameScene {
     }
   }
 
-  // (Phase 3) Category click — toggles its panel; "Map" opens the continent view.
+  // (Phase 3) Category click — toggles its panel; "Map" now LEAVES the settlement
+  // back to the continent (the continent is a separate scene we slept on entry).
   onTabClick(mode) {
     sfx.play('ui_click');
-    if (mode === 'map') { this.openContinent(); return; }
+    if (mode === 'map') { this.confirmLeave(); return; }
     this.selectedBuilding = null; this.clearSelection(); this.placementType = null; this.clearGhost(); this.hideTip();
     if (mode === 'research' && !(this.research && this.research.hasLibrary())) { this.showToast('Build a Library (Industry) to research'); return; }
     // Toggle closed if the same category is already open.
@@ -4612,10 +5040,15 @@ export class IsometricScene extends GameScene {
   }
 
   updateDayCycle(gdelta) {
+    // (Phase 3) TIME NEVER STOPS. The continent owns the master clock; while the
+    // player is inside a settlement, this local ticker keeps GameWorld.day moving
+    // (so the campaign clock advances) and the local view READS that day for its
+    // own day cycle. DAY_MS matches the continent (1 day = 5 real minutes).
+    GameWorld.day += gdelta / DAY_MS;
     this.dayTimer += gdelta;
     if (this.dayTimer >= DAY_MS) {
       this.dayTimer -= DAY_MS;
-      this.gameDay += 1;
+      this.gameDay = GameWorld.displayDay();
       // (Loop 3, Feature #3) Farm L5 auto-feeds the army from its stockpile → halves upkeep.
       const autoFeed = this.buildings.buildings.some((b) => b.typeKey === 'farm' && b.alive && b.level >= 5) ? 0.5 : 1;
       const eat = Math.round(this.troops.dailyUpkeep() * (this._seasonFoodUpkeepMult || 1) * (this._weatherFoodMult || 1) * (this.traitBonuses ? this.traitBonuses.foodMult : 1) * autoFeed); // (Phase 3 season + Phase 4 Warlord + Loop 3 farm L5 + V2 P12 winter)
@@ -5055,6 +5488,7 @@ export class IsometricScene extends GameScene {
     if (this.armyMgr) this.armyMgr.update(gdelta); // (Expansion) march armies
     this.updateSelectionRings();
     this.updateHud();
+    this.updateSettlementHud(); // (Phase 3) settlement-context top bar (day/resources)
     this.updateMinimap();
     this.applyIsoDepths();
     this.routeCameras(); // BUG 1: keep newly-created objects on the right camera

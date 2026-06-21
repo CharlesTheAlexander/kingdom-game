@@ -40,7 +40,52 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       STUBBED for later: per-settlement view is a safe overlay (Phase 3 = real local IsometricScene);
       supply→desertion is a morale-erosion flag only; Continue/Load rebuild from king record, not a full
       slot restore (Phase 12 SaveManager); passive +5 gold/day is a placeholder economy.
-- [ ] P3 — IsometricScene as PER-SETTLEMENT view (per-settlement state, enter/leave)
+- [x] P3 — IsometricScene as PER-SETTLEMENT view (per-settlement state, enter/leave)
+      Files: src/scenes/IsometricScene.ts (converted continent→local view), src/scenes/ContinentScene.ts
+      (real enter/leave wiring), src/systems/GameWorld.ts (settlementStates map + settlementState() +
+      notify()), src/systems/SettlementState.ts (NEW — JSON-friendly per-settlement save shape).
+      STATE: SettlementState{ id, name, faction, tier, buildings[], tasks[] (resumable construction/training),
+      workers, workerCap, resources{wood/stone/food/iron}, garrison[], population, happiness, lastVisitedDay,
+      visited, hasAdministrator/administratorName, localMap{biome,seed,size,playerOwned} }. Stored in
+      GameWorld.settlementStates keyed by settlement id; lazily created on first entry (makeSettlementState);
+      home castle is one of these. serializable() now includes settlementStates (Phase-12 ready; no Phaser
+      objects/typed arrays — local map regenerated from biome+seed, never stored per-tile).
+      LOCAL MAP: IsometricScene N shrunk 200→40. buildLocalMapGrid() themes the 40×40 grid from the settlement's
+      WORLD biome: plains→grass + river band; forest→dense trees ringing the clearing; mountain/highland→rocky +
+      impassable peak backdrop (stone/iron); coast/ocean→beach + sea on the south edge; desert/scrub→sand, few
+      trees; wetland/river→water band. Deterministic per-settlement PRNG (mulberry32 from localMap.seed) so a
+      town always regenerates the same. biomeAt() reads the grid; existing AssetGenerator art + iso renderer reused.
+      ENTER/LEAVE: ContinentScene.enterSettlement() fades, scene.launch('IsometricScene',{settlementId}) +
+      scene.sleep() (state preserved). IsometricScene.init(data) resolves the id (data → GameWorld.currentSettlementId
+      → home), loads SettlementState, restoreSettlementState() re-places saved buildings at their positions
+      (ignoreStage) and resumes training slots. Persistent "Leave Settlement" button (top-right) + Map tab +
+      Esc-less confirm → saveSettlementState() → fade → wake ContinentScene at the settlement's tile.
+      ContinentScene WAKE/RESUME handler re-attaches chunk images + recentres + fades in.
+      HUD: settlement-context top bar — LEFT name·faction·tier, CENTER local resources (wood/stone/food/iron/gold),
+      RIGHT "Day X" (from GameWorld) + "You are in [Name]". NOTIFY: IsometricScene.notify(text,color) banner +
+      static IsometricScene.notify(game,...) router + GameWorld.notify()/pendingNotifications queue (drained on entry).
+      TIME CONTINUES: updateDayCycle() advances GameWorld.day by gdelta/DAY_MS every frame while inside (continent
+      owns the master clock; the local view reads GameWorld.displayDay()); local production ticks as before.
+      DISABLED/NEUTERED (world-scale, now owned by ContinentScene/GameWorld; see comments in create()):
+      AIKingdom×3 + FACTIONS (hard-coded castle tiles at col/row 185 = out-of-bounds at N=40), WaveManager waves,
+      ArmyManager on-map armies (typed stub _inertArmyMgr so soldierTotal() arithmetic still works), WanderingFactions,
+      Caravans, SettlementManager (neutral settlements are continent objects now), GoblinCamps, Diplomacy, GreatCouncil,
+      Espionage, Narrative, Succession, RoyalCourt, Banking, FactionLeaders, Heroes, Maintenance, PopulationClasses,
+      Discovery, Roads, Ruins — all replaced with inert Proxy/stub objects (_inertSystem/_inertSettlements) so every
+      legacy update()/HUD/panel call is a harmless no-op. KEPT per-settlement: building placement/UI, workers,
+      local resources/production, troop training, garrison, population/happiness, research/library, Territory
+      (local fog/reveal), Wildlife (local threats), weather visuals. Also removed: king-creation-on-boot (king
+      comes from GameWorld), welcome/tutorial modal on entry, beforeunload + pending-load legacy auto-save, the
+      TAB continent-overlay toggle. WeatherSys gameplay disabled but Weather() visuals kept.
+      Audit (headless, full new-game flow): enter home (plains, biome 2) → IsometricScene active + castle@20,20 +
+      40×40 localMap; placed 3 buildings; GameWorld.day advanced 1.00→1.81 while inside; Leave → ContinentScene
+      active, player at settlement tile; SettlementState persisted (3 buildings, visited); re-entry restored
+      house+farm; entered DIFFERENT-biome neutral (alpine forest, biome 9) → visibly distinct forest-ringed map;
+      FPS 57-59 inside; screenshots p3_settlement_plains/p3_settlement_other confirm distinct maps + castle/buildings
+      + HUD + Leave button; ZERO console errors; tsc clean; build clean.
+      DEFERRED: garrison/population are stored but not yet richly simulated on the local map; administrator
+      "while-you-were-away" diffing is a hook (lastVisitedDay) not yet computed (P5-7); the disabled world-scale
+      systems need re-homing to the continent in later phases; SaveManager rewrite is P12.
 - [ ] P4 — Pioneer system (found settlements anywhere)
 - [ ] P5 — Living expedition system (parties on the continent)
 - [ ] P6 — Hero world integration (dialogue, quests, stationing)
