@@ -11,7 +11,7 @@ const TECHS: any[] = [
   { id: 'mining_tech', branch: 1, row: 1, name: 'Mining Techniques', desc: 'Mines +50% stone', prereq: null, flag: (s) => { s._researchMineMult = 1.5; } },
   { id: 'trade_networks', branch: 1, row: 2, name: 'Trade Networks', desc: 'Market ratios +15%', prereq: 'adv_farming', flag: (s) => { s._researchMarketMult = 1.15; } },
   { id: 'cartography', branch: 2, row: 0, name: 'Cartography', desc: 'Fog reveals faster', prereq: null, flag: (s) => { s._researchFog = true; }, once: (s) => { const c = s.buildings.castle; if (c && s.revealAround) s.revealAround(c.col, c.row, 30); } },
-  { id: 'ranger', branch: 2, row: 1, name: 'Ranger Training', desc: 'Expeditions -50% losses', prereq: 'cartography', flag: (s) => { s._researchRanger = true; } },
+  { id: 'ranger', branch: 2, row: 1, name: 'Ranger Training', desc: 'Expeditions -50% losses; Conservation (deer regrow)', prereq: 'cartography', flag: (s) => { s._researchRanger = true; s._conservation = true; } }, // (V2 P10) rangers practise sustainable hunting
   { id: 'espionage', branch: 2, row: 2, name: 'Espionage', desc: 'Always see AI armies', prereq: 'ranger', flag: (s) => { s._researchEspionage = true; s.intelUntilDay = 9e9; } },
 ];
 const BRANCH_COL = [0xc0392b, 0x2ecc71, 0x3498db];

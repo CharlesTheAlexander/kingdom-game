@@ -185,10 +185,15 @@ class Wolf extends Beast {
 
 // ---- Goblin ---------------------------------------------------------------
 class Goblin extends Beast {
-  constructor(scene, x, y, party) {
-    super(scene, x, y, { kind: 'goblin', tex: 'goblin_idle', anim: 'goblin_idle', px: 24, tint: 0x6cff8a, hp: 15 });
+  constructor(scene, x, y, party, opts: any = {}) {
+    // (V2 Phase 10) Goblin Fortresses train shamans — bigger, tougher, purple.
+    const shaman = !!opts.shaman;
+    super(scene, x, y, shaman
+      ? { kind: 'goblin', tex: 'goblin_idle', anim: 'goblin_idle', px: 32, tint: 0xb060ff, hp: 45, dropType: 'gold', dropAmt: [12, 20] }
+      : { kind: 'goblin', tex: 'goblin_idle', anim: 'goblin_idle', px: 24, tint: 0x6cff8a, hp: 15 });
+    this.shaman = shaman;
     this.party = party; // shared party object for the gold reward
-    this.speed = 40;
+    this.speed = shaman ? 30 : 40;
     this.targetNode = null;
     this.targetBuilding = null;
     this.drainAcc = 0;
@@ -280,6 +285,37 @@ class Boar extends Beast {
   }
 }
 
+// ---- Deer (V2 Phase 10) ---------------------------------------------------
+// Peaceful grazers that wander cleared land. Hunting them yields food, but
+// over-hunting collapses the herd. Wolves prey on them (see the manager's
+// ecology tick), so a healthy herd means more wolves.
+class Deer extends Beast {
+  constructor(scene, x, y) {
+    super(scene, x, y, { kind: 'deer', tex: 'boar_idle', anim: 'boar_idle', px: 28, tint: 0xcdb89a, hp: 16, dropType: 'food', dropAmt: [8, 14] });
+    this.speed = 26;
+    this.goal = null;
+  }
+  killedByPlayer() {
+    if (this.scene.wildlife && this.scene.wildlife.onDeerHunted) this.scene.wildlife.onDeerHunted();
+    super.killedByPlayer();
+  }
+  update(dt) {
+    if (!this.alive) return;
+    // Flee from the nearest wolf; otherwise amble across cleared land.
+    let wolf = null, wd = Infinity;
+    for (const u of this.scene.wildlife.units) { if (u.kind !== 'wolf' || !u.alive) continue; const d = Phaser.Math.Distance.Between(this.x, this.y, u.x, u.y); if (d < wd) { wd = d; wolf = u; } }
+    if (wolf && wd < this.scene.TILE * 4) {
+      const ang = Math.atan2(this.y - wolf.y, this.x - wolf.x);
+      this.x += Math.cos(ang) * this.speed * 1.6 * dt; this.y += Math.sin(ang) * this.speed * 1.6 * dt;
+      this.spr.setFlipX(wolf.x > this.x);
+      this.syncBar(); return;
+    }
+    if (!this.goal || Phaser.Math.Distance.Between(this.x, this.y, this.goal.x, this.goal.y) < 8) this.goal = this.wanderPoint(['south', 'plain', 'north']);
+    this.moveToward(this.goal.x, this.goal.y, this.speed, dt);
+    this.syncBar();
+  }
+}
+
 // ---- Manager --------------------------------------------------------------
 export class WildlifeManager {
   scene: any;
@@ -297,10 +333,15 @@ export class WildlifeManager {
     this._lastWolfDay = 1;
     this._lastBoarDay = 1;
     this._lastGobDay = 0;
+    // (V2 Phase 10) Ecosystem: an abstract deer herd drives wolf numbers.
+    this.herd = 6;
+    this.deerDepleted = false;
+    this._overhunt = 0;
   }
 
   count() { return this.units.length; }
   wolfCount() { return this.units.reduce((n, u) => n + (u.kind === 'wolf' ? 1 : 0), 0); }
+  deerCount() { return this.units.reduce((n, u) => n + (u.kind === 'deer' ? 1 : 0), 0); }
 
   // Spawn a starting wolf pack + a boar so the world feels alive on day 1.
   spawnInitial() {
@@ -346,24 +387,31 @@ export class WildlifeManager {
   spawnGoblinRaid() {
     // (Phase B) Raids set out from the goblin camp nearest your territory.
     let p = null;
+    let camp = null;
     const castle = this.scene.buildings.castle;
     if (this.scene.goblinCamps && castle) {
-      const camp = this.scene.goblinCamps.nearestAliveTo(castle.col, castle.row);
+      camp = this.scene.goblinCamps.nearestAliveTo(castle.col, castle.row);
       if (camp) p = { x: camp.x + Phaser.Math.Between(-20, 20), y: camp.y + Phaser.Math.Between(-20, 20) };
     }
     if (!p) p = this.regionPoint(['west'], { minTiles: GOBLIN_MIN_DIST });
     if (!p) return;
+    // (V2 Phase 10) Larger camps/fortresses send larger raids; fortresses add a shaman.
+    const tier = camp ? (camp.tier || 1) : 1;
     const party = { rewarded: false, members: [] };
-    const n = Phaser.Math.Between(3, 5);
+    const n = Phaser.Math.Between(3, 5) + (tier - 1) * 2;
     for (let i = 0; i < n && this.count() < MAX_WILDLIFE; i++) {
       const g = new Goblin(this.scene, p.x + Phaser.Math.Between(-24, 24), p.y + Phaser.Math.Between(-24, 24), party);
       party.members.push(g);
       this.units.push(g);
     }
+    if (tier >= 3 && this.count() < MAX_WILDLIFE) { // fortress shaman
+      const sh = new Goblin(this.scene, p.x + Phaser.Math.Between(-16, 16), p.y, party, { shaman: true });
+      party.members.push(sh); this.units.push(sh);
+    }
     if (party.members.length) {
       this.goblinParties.push(party);
       sfx.play('goblin_raid'); // (Polish Phase 2)
-      this.scene.threatWarning('⚠ Goblin raid incoming from the West!', 0x6cff8a);
+      this.scene.threatWarning(tier >= 3 ? '⚠ A Goblin Fortress unleashes a war party with a shaman!' : '⚠ Goblin raid incoming from the West!', 0x6cff8a);
     }
   }
 
@@ -371,6 +419,58 @@ export class WildlifeManager {
     const p = this.regionPoint(['south']);
     if (!p || this.count() >= MAX_WILDLIFE) return;
     this.units.push(new Boar(this.scene, p.x, p.y));
+  }
+
+  // (V2 Phase 10) ---- Ecosystem ------------------------------------------
+  spawnDeer() {
+    const p = this.regionPoint(['south', 'north'], { minTiles: 6 });
+    if (!p || this.count() >= MAX_WILDLIFE) return;
+    this.units.push(new Deer(this.scene, p.x, p.y));
+  }
+
+  // The player (or wolves) thinned the herd by hunting.
+  onDeerHunted() {
+    this.herd = Math.max(0, this.herd - 1);
+    this._overhunt += 1;
+    if (this.herd <= 0 && !this.scene._conservation) {
+      if (!this.deerDepleted) { this.deerDepleted = true; this.scene.threatWarning && this.scene.threatWarning('The deer herd is wiped out — only Conservation will restore it', 0xc9a14a, false); }
+    }
+  }
+
+  // Predator–prey: deer regrow (faster with Conservation), wolves eat deer, and
+  // wolf packs grow when prey is plentiful. Called once per in-game day.
+  ecologyTick() {
+    const s = this.scene;
+    const HERD_CAP = 12;
+    // Regrowth — halted once depleted unless Conservation (Ranger Training) is researched.
+    if (!this.deerDepleted || s._conservation) {
+      this.herd = Math.min(HERD_CAP, this.herd + (s._conservation ? 2 : 1));
+      if (this.deerDepleted && this.herd > 0) { this.deerDepleted = false; s.logEvent && s.logEvent('Conservation pays off — the deer return to the forests', 'green'); }
+    }
+    // Wolves prey on the herd.
+    const eat = Math.min(this.herd, this.wolfCount());
+    if (eat > 0) this.herd = Math.max(0, this.herd - Math.ceil(eat / 3));
+    // Predators follow prey: a fat herd grows the packs.
+    if (this.herd >= 8 && this.wolfCount() < MAX_WOLVES) {
+      const [wx, wy] = this._wolfSpot();
+      this.units.push(new Wolf(s, wx, wy));
+      if (this.herd >= 10) s.logEvent && s.logEvent('Wolf packs grow fat on the swelling deer herds', 'orange');
+    }
+    // Keep a few deer visible to match the herd.
+    const want = Math.min(this.herd, 5);
+    for (let i = this.deerCount(); i < want && this.count() < MAX_WILDLIFE; i++) this.spawnDeer();
+  }
+
+  _wolfSpot() {
+    const p = this.regionPoint(['north'], { rowMax: 49, minTiles: WOLF_MIN_DIST });
+    if (p) return [p.x, p.y];
+    const c = this.scene.buildings.castle; const t = this.scene.tileCenter(c ? c.col - 14 : 10, c ? c.row : 10);
+    return [t.x, t.y];
+  }
+
+  onNewDay() {
+    this.ecologyTick();
+    if (this.scene.goblinCamps && this.scene.goblinCamps.onNewDay) this.scene.goblinCamps.onNewDay();
   }
 
   update(dt) {
@@ -396,4 +496,8 @@ export class WildlifeManager {
     this.goblinParties = this.goblinParties.filter((p) => !p.rewarded);
     this.units = this.units.filter((u) => u.alive);
   }
+
+  // (V2 Phase 10) Persist the ecology state (the live beasts are transient).
+  serialize() { return { herd: this.herd, deerDepleted: this.deerDepleted, overhunt: this._overhunt }; }
+  restore(d: any) { if (!d) return; this.herd = d.herd != null ? d.herd : 6; this.deerDepleted = !!d.deerDepleted; this._overhunt = d.overhunt || 0; }
 }

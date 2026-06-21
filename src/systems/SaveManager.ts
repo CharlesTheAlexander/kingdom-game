@@ -48,6 +48,8 @@ export function capture(scene: any) {
     court: scene.court && scene.court.serialize ? scene.court.serialize() : null,
     succession: scene.succession && scene.succession.serialize ? scene.succession.serialize() : null,
     espionage: scene.espionage && scene.espionage.serialize ? scene.espionage.serialize() : null,
+    wildlife: scene.wildlife && scene.wildlife.serialize ? scene.wildlife.serialize() : null,
+    goblinCamps: scene.goblinCamps && scene.goblinCamps.serialize ? scene.goblinCamps.serialize() : null,
     roads: scene.roads && scene.roads.serialize ? scene.roads.serialize() : null,
     stats: { battlesWon: scene._battlesWon || 0 },
     kingdomStats: scene.stats && scene.stats.serialize ? scene.stats.serialize() : null,
@@ -193,6 +195,8 @@ export function applySave(scene: any, data: any) {
   sect('court', () => { if (data.court && scene.court) scene.court.restore(data.court); });
   sect('succession', () => { if (data.succession && scene.succession) scene.succession.restore(data.succession); });
   sect('espionage', () => { if (data.espionage && scene.espionage) scene.espionage.restore(data.espionage); });
+  sect('wildlife', () => { if (data.wildlife && scene.wildlife && scene.wildlife.restore) scene.wildlife.restore(data.wildlife); });
+  sect('goblinCamps', () => { if (data.goblinCamps && scene.goblinCamps && scene.goblinCamps.restore) scene.goblinCamps.restore(data.goblinCamps); });
   sect('roads', () => { if (data.roads && scene.roads) scene.roads.restore(data.roads); });
   sect('winConditions', () => { if (data.winConditions && scene.winConditions) scene.winConditions.restore(data.winConditions); if (data.stats) scene._battlesWon = data.stats.battlesWon || 0; });
   sect('ruins', () => { if (data.ruins && scene.ruins) scene.ruins.restore(data.ruins); });

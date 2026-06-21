@@ -3955,6 +3955,7 @@ export class IsometricScene extends GameScene {
     if (this.court) this.court.onNewDay(); // (V2 Phase 7) royal court weekly reports
     if (this.succession) this.succession.onNewDay(); // (V2 Phase 8) heir raising + natural death
     if (this.espionage) this.espionage.onNewDay(); // (V2 Phase 9) spy training
+    if (this.wildlife && this.wildlife.onNewDay) this.wildlife.onNewDay(); // (V2 Phase 10) ecosystem + goblin camp growth
     // (Completion Phase 7) Advance Siege Workshop training.
     for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
