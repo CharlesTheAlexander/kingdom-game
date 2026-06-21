@@ -186,12 +186,15 @@ class Wolf extends Beast {
 // ---- Goblin ---------------------------------------------------------------
 class Goblin extends Beast {
   constructor(scene, x, y, party, opts: any = {}) {
-    // (V2 Phase 10) Goblin Fortresses train shamans — bigger, tougher, purple.
-    const shaman = !!opts.shaman;
+    // (V2 Phase 10) Goblin Fortresses field shamans and warlords. (Assets V2)
+    // each now has its own sprite instead of a tinted base goblin.
+    const shaman = !!opts.shaman, warlord = !!opts.warlord;
     super(scene, x, y, shaman
-      ? { kind: 'goblin', tex: 'goblin_idle', anim: 'goblin_idle', px: 32, tint: 0xb060ff, hp: 45, dropType: 'gold', dropAmt: [12, 20] }
-      : { kind: 'goblin', tex: 'goblin_idle', anim: 'goblin_idle', px: 24, tint: 0x6cff8a, hp: 15 });
-    this.shaman = shaman;
+      ? { kind: 'goblin', tex: 'goblin_shaman', anim: 'goblin_shaman', px: 30, hp: 45, dropType: 'gold', dropAmt: [12, 20] }
+      : warlord
+        ? { kind: 'goblin', tex: 'goblin_warlord', anim: 'goblin_warlord', px: 38, hp: 70, dropType: 'gold', dropAmt: [18, 28] }
+        : { kind: 'goblin', tex: 'goblin_idle', anim: 'goblin_idle', px: 24, hp: 15 });
+    this.shaman = shaman; this.warlord = warlord;
     this.party = party; // shared party object for the gold reward
     this.speed = shaman ? 30 : 40;
     this.targetNode = null;
@@ -291,7 +294,7 @@ class Boar extends Beast {
 // ecology tick), so a healthy herd means more wolves.
 class Deer extends Beast {
   constructor(scene, x, y) {
-    super(scene, x, y, { kind: 'deer', tex: 'boar_idle', anim: 'boar_idle', px: 28, tint: 0xcdb89a, hp: 16, dropType: 'food', dropAmt: [8, 14] });
+    super(scene, x, y, { kind: 'deer', tex: 'deer_idle', anim: 'deer_idle', px: 26, hp: 16, dropType: 'food', dropAmt: [8, 14] }); // (Assets V2) dedicated deer sprite
     this.speed = 26;
     this.goal = null;
   }
@@ -403,6 +406,10 @@ export class WildlifeManager {
       const g = new Goblin(this.scene, p.x + Phaser.Math.Between(-24, 24), p.y + Phaser.Math.Between(-24, 24), party);
       party.members.push(g);
       this.units.push(g);
+    }
+    if (tier >= 2 && this.count() < MAX_WILDLIFE) { // (Assets V2) a warlord leads larger raids
+      const wl = new Goblin(this.scene, p.x + Phaser.Math.Between(-16, 16), p.y - 6, party, { warlord: true });
+      party.members.push(wl); this.units.push(wl);
     }
     if (tier >= 3 && this.count() < MAX_WILDLIFE) { // fortress shaman
       const sh = new Goblin(this.scene, p.x + Phaser.Math.Between(-16, 16), p.y, party, { shaman: true });

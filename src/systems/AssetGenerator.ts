@@ -140,6 +140,12 @@ function flag(g: any, x: number, y: number, h: number, accent: number) {
   g.fillStyle(accent, 1); g.fillTriangle(x + 1.5, y, x + 1.5, y + 7, x + 13, y + 3.5); // pennant
 }
 function shadow(g: any, cx = 32, cy = 60, rw = 24) { g.fillStyle(0x000000, 0.25); g.fillEllipse(cx, cy, rw, 8); }
+// (Assets V2) A small five-point star (Graphics) for prestige emblems.
+function star(g: any, cx: number, cy: number, r: number, color = 0xc9a84c) {
+  g.fillStyle(color, 1); g.beginPath();
+  for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + k * 4 * Math.PI / 5; (k === 0 ? g.moveTo : g.lineTo).call(g, cx + Math.cos(a) * r, cy + Math.sin(a) * r); }
+  g.closePath(); g.fill();
+}
 
 // Draw one building texture (accent-coloured) under `key`.
 function makeBuilding(scene: any, key: string, draw: (g: any, A: number) => void, accent = 0x1a3a8b) {
@@ -256,22 +262,34 @@ const BUILD: Record<string, (g: any, A: number) => void> = {
     g.fillStyle(0x9aa0a6, 1); g.fillCircle(38, 37, 3); // payload
     flag(g, 31, 16, 8, A);
   },
+  // (Assets V2) Grand, prestigious memorial hall: pillars flank the door, a
+  // carved crossed-swords relief, blue banners, torches, steps and a gold star.
   hallofheroes: (g, A) => {
-    box(g, 14, 30, 36, 28, STONE);
-    g.fillStyle(ROOF, 1); g.fillRect(12, 24, 40, 8);
-    for (const sx of [22, 32, 42]) { g.fillStyle(0xcfc7b4, 1); g.fillRect(sx - 3, 36, 6, 20); g.fillStyle(0xe8e2d0, 1); g.fillCircle(sx, 34, 4); } // hero statues
-    g.fillStyle(DOOR, 1); g.fillRect(29, 46, 6, 12);
-    flag(g, 16, 12, 8, A); flag(g, 48, 12, 8, A);
-    g.fillStyle(0xc9a84c, 1); g.beginPath(); g.moveTo(32, 16); for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + k * 4 * Math.PI / 5; g.lineTo(32 + Math.cos(a) * 5, 22 + Math.sin(a) * 5); } g.closePath(); g.fill(); // star
+    box(g, 12, 28, 40, 30, STONE);
+    g.fillStyle(ROOF, 1); g.fillRect(10, 22, 44, 7);                       // entablature
+    g.fillStyle(0xc9a84c, 1); g.fillTriangle(10, 22, 32, 12, 54, 22);      // gold pediment
+    for (const px of [20, 44]) { g.fillStyle(0xe8e2d2, 1); g.fillRect(px - 2, 30, 5, 26); g.fillStyle(0xcfc7b4, 1); g.fillRect(px + 1, 30, 1, 26); g.fillStyle(STONE, 1); g.fillRect(px - 3, 28, 7, 2); g.fillRect(px - 3, 56, 7, 2); } // pillars
+    g.lineStyle(1.5, 0x9aa0a6, 1); g.beginPath(); g.moveTo(28, 34); g.lineTo(36, 42); g.moveTo(36, 34); g.lineTo(28, 42); g.strokePath(); // crossed-swords relief
+    g.fillStyle(0x2a2436, 1); g.fillRect(30, 36, 4, 6);                    // memorial niche
+    g.fillStyle(DOOR, 1); g.fillRect(28, 46, 8, 12);                       // heavy doors
+    g.fillStyle(STONE_M, 1); g.fillRect(24, 56, 16, 2); g.fillRect(22, 58, 20, 2); // steps
+    g.fillStyle(GLOW, 1); g.fillCircle(16, 40, 2); g.fillCircle(48, 40, 2); // torches
+    flag(g, 12, 14, 8, 0x2a4a9b); flag(g, 50, 14, 8, 0x2a4a9b);            // blue banners
+    star(g, 32, 17, 5);
   },
+  // (Assets V2) The grandest building — cathedral-like with corner towers, three
+  // tall arched windows, a sun/crown relief, four banners and an ornate door.
   grandhall: (g, A) => {
-    box(g, 12, 28, 40, 30, STONE);                       // grand wide hall
-    g.fillStyle(ROOF, 1); g.fillRect(10, 22, 44, 8);     // entablature
-    for (const cx of [16, 24, 32, 40, 48]) { g.fillStyle(0xe8e2d2, 1); g.fillRect(cx, 30, 4, 28); g.fillStyle(0xcfc7b4, 1); g.fillRect(cx + 3, 30, 1, 28); } // columns
-    g.fillStyle(0xc9a84c, 1); g.beginPath(); g.moveTo(10, 22); g.lineTo(32, 10); g.lineTo(54, 22); g.closePath(); g.fill(); // gold pediment
-    g.fillStyle(DOOR, 1); g.fillRect(28, 44, 8, 14);     // central door
-    flag(g, 14, 6, 9, A); flag(g, 32, 2, 10, A); flag(g, 50, 6, 9, A); // three banners
-    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 16, 2.4); // crown jewel
+    box(g, 8, 26, 8, 32, STONE_M); merlons(g, 8, 24, 8, STONE);           // corner towers
+    box(g, 48, 26, 8, 32, STONE_M); merlons(g, 48, 24, 8, STONE);
+    box(g, 14, 26, 36, 32, STONE);                                        // main hall
+    g.fillStyle(ROOF, 1); g.fillRect(12, 20, 40, 7);                      // entablature
+    g.fillStyle(0xc9a84c, 1); g.fillTriangle(12, 20, 32, 8, 52, 20);      // gold pediment
+    for (const wx of [19, 30, 41]) { g.fillStyle(0x2a2436, 1); g.fillRect(wx, 32, 5, 14); g.fillTriangle(wx, 32, wx + 5, 32, wx + 2.5, 27); g.fillStyle(GLOW, 0.5); g.fillRect(wx + 1, 40, 3, 5); } // three arched windows, lit
+    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 15, 3); for (let k = 0; k < 8; k++) { const a = k / 8 * 6.283; g.fillRect(32 + Math.cos(a) * 4 - 0.7, 15 + Math.sin(a) * 4 - 0.7, 1.4, 1.4); } // sun/crown relief
+    g.fillStyle(DOOR, 1); g.fillRect(28, 46, 8, 12);                      // ornate double door
+    g.lineStyle(1, 0xc9a84c, 1); g.strokeRect(28, 46, 8, 12); g.beginPath(); g.moveTo(32, 46); g.lineTo(32, 58); g.strokePath();
+    flag(g, 10, 12, 8, A); flag(g, 22, 8, 9, A); flag(g, 42, 8, 9, A); flag(g, 54, 12, 8, A); // four banners
   },
   treasury: (g, A) => {
     box(g, 16, 30, 32, 28, STONE);                       // heavy fortified block
@@ -283,6 +301,62 @@ const BUILD: Record<string, (g: any, A: number) => void> = {
     g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 22, 3.2); g.fillStyle(STONE_D, 1); g.fillRect(31.3, 20.5, 1.4, 5); // gold coin sign
     g.fillStyle(0x2a2a30, 1); g.fillRect(20, 36, 3, 6); g.fillRect(41, 36, 3, 6); // barred windows
     g.lineStyle(1, 0x9aa0a6, 1); g.beginPath(); g.moveTo(21.5, 36); g.lineTo(21.5, 42); g.moveTo(42.5, 36); g.lineTo(42.5, 42); g.strokePath();
+  },
+  // (Assets V2) Mason's Lodge — open workshop: tool rack, worked stone block on a
+  // workbench, side scaffolding, and a hammer emblem.
+  masonslodge: (g, A) => {
+    box(g, 18, 38, 30, 20, WOOD);                                  // open workshop
+    g.fillStyle(BEAM, 1); g.fillRect(16, 36, 34, 3);
+    g.fillStyle(darken(WOOD, 0.12), 1); g.fillTriangle(14, 36, 50, 36, 32, 26); // roof
+    g.fillStyle(BEAM, 1); g.fillRect(20, 41, 16, 2);              // tool rack
+    g.fillStyle(0x9aa0a6, 1); for (const tx of [22, 26, 30]) g.fillRect(tx, 43, 1.5, 7); // hanging chisels
+    g.fillStyle(STONE_D, 1); g.fillRect(21.2, 49, 3.2, 2);        // a hammer head
+    g.fillStyle(BEAM, 1); g.fillRect(33, 51, 13, 3);             // workbench
+    box(g, 37, 45, 7, 7, STONE);                                  // stone block being worked
+    g.lineStyle(1.5, 0x6b4a28, 1); g.beginPath(); g.moveTo(48, 40); g.lineTo(54, 56); g.moveTo(54, 40); g.lineTo(48, 56); g.strokePath(); // scaffolding X
+    g.fillStyle(0x9aa0a6, 1); g.fillRect(30, 30, 5, 2); g.fillRect(31.5, 26, 2, 6); // hammer emblem
+  },
+  // (Assets V2) Spy Guild — deliberately plain; black void windows, one candle,
+  // an off-centre shadowed door, and a raven perched on the roof.
+  intelligence: (g, A) => {
+    box(g, 18, 34, 28, 24, STONE_M);
+    g.fillStyle(darken(STONE_M, 0.22), 1); g.fillTriangle(16, 34, 48, 34, 32, 24); // plain roof
+    g.fillStyle(0x07070a, 1); g.fillRect(22, 40, 5, 6); g.fillRect(37, 40, 5, 6); // dark void windows
+    g.fillStyle(GLOW, 0.9); g.fillRect(38, 41, 2, 2);            // one candle
+    g.fillStyle(0x120f0b, 1); g.fillRect(30, 48, 6, 10);         // off-centre shadowed door
+    g.fillStyle(0x0e0e12, 1); g.fillEllipse(41, 24, 4, 2.2); g.fillTriangle(43, 24, 47, 22, 44, 25); g.fillRect(40, 21, 2, 3); // raven on roof
+  },
+  // (Assets V2) Guildhall — timber-framed, larger than a house; lit wide windows,
+  // two chimneys, and a hanging guild sign (shield + crossed tools).
+  guildhall: (g, A) => {
+    box(g, 16, 36, 32, 22, WOOD);
+    g.fillStyle(BEAM, 1); for (const bx of [20, 28, 36, 44]) g.fillRect(bx, 36, 1.5, 22); // timber frame
+    g.fillStyle(ROOF, 1); g.fillTriangle(14, 36, 50, 36, 32, 24);
+    g.fillStyle(GLOW, 0.9); g.fillRect(20, 43, 7, 7); g.fillRect(37, 43, 7, 7); // busy lit windows
+    g.fillStyle(DOOR, 1); g.fillRect(29, 48, 6, 10);
+    box(g, 18, 22, 5, 12, STONE_D); box(g, 42, 22, 5, 12, STONE_D); // two chimneys
+    g.fillStyle(0x6b4a28, 1); g.fillRect(31.2, 32, 1.6, 4);       // sign hook
+    g.fillStyle(A, 1); g.beginPath(); g.moveTo(28, 36); g.lineTo(36, 36); g.lineTo(36, 41); g.lineTo(32, 44); g.lineTo(28, 41); g.closePath(); g.fill(); // shield
+    g.lineStyle(1, 0xcfcfcf, 1); g.beginPath(); g.moveTo(30, 37.5); g.lineTo(34, 41.5); g.moveTo(34, 37.5); g.lineTo(30, 41.5); g.strokePath(); // crossed tools
+  },
+  // (Assets V2) Manor — decorative noble stone house: pointed arched windows with
+  // purple/gold trim, a balcony railing, carved doorway, crown emblem, weather vane.
+  manor: (g, A) => {
+    box(g, 16, 32, 32, 26, STONE);
+    g.fillStyle(ROOF, 1); g.fillTriangle(14, 32, 50, 32, 32, 20);
+    for (const wx of [22, 38]) { g.fillStyle(0x2a2436, 1); g.fillRect(wx, 41, 6, 9); g.fillTriangle(wx, 41, wx + 6, 41, wx + 3, 35); g.fillStyle(0x6a3aa0, 1); g.fillRect(wx - 1, 49, 8, 1.5); } // arched windows + purple sill
+    g.fillStyle(STONE_D, 1); g.fillRect(24, 39, 16, 1.5); for (let rx = 24; rx < 40; rx += 3) g.fillRect(rx, 37, 1, 3); // balcony railing
+    g.fillStyle(DOOR, 1); g.fillRect(29, 47, 7, 11); g.lineStyle(1, 0xc9a84c, 1); g.strokeRect(29, 47, 7, 11); // carved doorway
+    g.fillStyle(0xc9a84c, 1); g.fillRect(30, 25, 8, 2); g.fillTriangle(30, 25, 32, 21, 34, 25); g.fillTriangle(34, 25, 36, 21, 38, 25); // crown emblem
+    g.fillStyle(0x6b4a28, 1); g.fillRect(31.5, 12, 1, 8); g.fillStyle(0xc9a84c, 1); g.fillTriangle(32, 12, 38, 14, 32, 16); // weather vane
+  },
+  // (Assets V2) Levee — a wide low stone retaining wall: reinforced dark base,
+  // blue water-marks, iron brackets. Infrastructure, so no banner.
+  levee: (g, A) => {
+    box(g, 8, 44, 48, 12, STONE_M);                               // wide low wall
+    g.fillStyle(STONE_D, 1); g.fillRect(8, 52, 48, 4);            // reinforced base
+    g.lineStyle(1, 0x4a7bd5, 0.6); g.beginPath(); g.moveTo(8, 48); g.lineTo(56, 48); g.moveTo(8, 50.5); g.lineTo(56, 50.5); g.strokePath(); // water marks
+    g.fillStyle(0x6b7280, 1); for (const ix of [18, 32, 46]) g.fillRect(ix, 45, 2, 9); // iron brackets
   },
 };
 
@@ -379,8 +453,9 @@ function figure(ctx: any, P: any, o: any = {}) {
   if (o.helmet) { ctx.fillStyle = css(P.helmet); ctx.beginPath(); ctx.arc(cx + lean, 54 + bob, 17, Math.PI, 0); ctx.fill(); ctx.fillRect(cx - 17 + lean, 52 + bob, 34, 4); if (o.visor) fillRect2(ctx, cx - 12 + lean, 54 + bob, 24, 4, 0x14202c); }
   if (o.hood) { ctx.fillStyle = css(P.hood); ctx.beginPath(); ctx.arc(cx + lean, 52 + bob, 18, Math.PI * 1.04, -Math.PI * 0.04); ctx.fill(); ctx.fillRect(cx - 18 + lean, 50 + bob, 36, 6); }
   if (o.ears) { ctx.fillStyle = css(P.skin); ctx.beginPath(); ctx.moveTo(cx - 14 + lean, 50 + bob); ctx.lineTo(cx - 28 + lean, 40 + bob); ctx.lineTo(cx - 12 + lean, 56 + bob); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx + 14 + lean, 50 + bob); ctx.lineTo(cx + 28 + lean, 40 + bob); ctx.lineTo(cx + 12 + lean, 56 + bob); ctx.closePath(); ctx.fill(); }
-  // Shield on the left arm.
-  if (o.shield) { ctx.fillStyle = css(P.shield); ctx.beginPath(); ctx.moveTo(cx - 28 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 100 + bob); ctx.lineTo(cx - 21 + lean, 108 + bob); ctx.lineTo(cx - 28 + lean, 100 + bob); ctx.closePath(); ctx.fill(); if (o.cross) fillRect2(ctx, cx - 22 + lean, 84 + bob, 2, 18, 0xe8c84a); }
+  // Shield on the left arm. (Assets V2) round=small buckler for cheaper units.
+  if (o.shield && o.round) { disc(ctx, cx - 20 + lean, 92 + bob, 9, P.shield); ctx.strokeStyle = css(darken(P.shield, 0.3)); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx - 20 + lean, 92 + bob, 9, 0, Math.PI * 2); ctx.stroke(); disc(ctx, cx - 20 + lean, 92 + bob, 2, 0xcfcfcf); }
+  else if (o.shield) { ctx.fillStyle = css(P.shield); ctx.beginPath(); ctx.moveTo(cx - 28 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 80 + bob); ctx.lineTo(cx - 14 + lean, 100 + bob); ctx.lineTo(cx - 21 + lean, 108 + bob); ctx.lineTo(cx - 28 + lean, 100 + bob); ctx.closePath(); ctx.fill(); if (o.cross) fillRect2(ctx, cx - 22 + lean, 84 + bob, 2, 18, 0xe8c84a); }
   // Weapon arm (ang in radians from shoulder, 0 = straight down toward +x).
   const sx = cx + 16 + lean, sy = 84 + bob, ang = o.armAng != null ? o.armAng : Math.PI * 0.5;
   fillRect2(ctx, cx + 12 + lean, 76 + bob, 7, 26, P.tunic); // upper arm stub
@@ -412,6 +487,14 @@ function drawWeapon(ctx: any, w: string, hx: number, hy: number, ang: number, P:
   } else if (w === 'staff') {
     ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hx, hy + 14); ctx.lineTo(hx, hy - 30); ctx.stroke();
     if (o.healGlow) disc(ctx, hx, hy - 32, 4 + o.healGlow * 6, 0xfff2a8);
+    if (o.magic) { ctx.globalAlpha = 0.5; disc(ctx, hx, hy - 32, 7, o.magic); ctx.globalAlpha = 1; disc(ctx, hx, hy - 32, 3.5, o.magic); } // (Assets V2) shaman magic
+  } else if (w === 'spear') {
+    // (Assets V2) Long thin shaft with a small triangular tip — pike reach.
+    const a = ang - Math.PI * 0.5, len = 54;
+    const ex = hx + Math.cos(a) * len, ey = hy + Math.sin(a) * len, bx = hx - Math.cos(a) * 12, by = hy - Math.sin(a) * 12;
+    ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+    const px = Math.cos(a + Math.PI / 2), py = Math.sin(a + Math.PI / 2);
+    ctx.fillStyle = css(0xd2d6dc); ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(a) * 9 + px * 4, ey - Math.sin(a) * 9 + py * 4); ctx.lineTo(ex - Math.cos(a) * 9 - px * 4, ey - Math.sin(a) * 9 - py * 4); ctx.closePath(); ctx.fill();
   } else if (w === 'club') {
     const a = ang - Math.PI * 0.5;
     ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + Math.cos(a) * 20, hy + Math.sin(a) * 20); ctx.stroke();
@@ -432,6 +515,12 @@ const PAL: Record<string, any> = {
   monk: { tunic: 0x6b4a2a, tunicDark: 0x4a3018, legs: 0x4a3018, skin: 0xe2b78c, hood: 0x5c3e1e },
   pawn: { tunic: 0x7a5a3a, tunicDark: 0x523c24, legs: 0x4a3624, skin: 0xe2b78c },
   goblin: { tunic: 0x3a5a24, tunicDark: 0x24401a, legs: 0x2a3a18, skin: 0x4a7a2a, hood: 0x2a401a },
+  // (Assets V2) Spearman — lighter/cheaper blue armour than the warrior.
+  spearman: { tunic: 0x3a6ab0, tunicDark: 0x274a86, legs: 0x3a2a1a, skin: 0xe2b78c, helmet: 0x9aa6b2, shield: 0x3a6ab0 },
+  // (Assets V2) Goblin shaman — dark robes, sickly green skin.
+  goblinShaman: { tunic: 0x223018, tunicDark: 0x161f0f, legs: 0x1c2812, skin: 0x5a8a3a, hood: 0x182410 },
+  // (Assets V2) Goblin warlord — bigger, mismatched brown/gray war-gear.
+  goblinWarlord: { tunic: 0x4a3a26, tunicDark: 0x2e2416, legs: 0x2a2418, skin: 0x4a7a2a, helmet: 0x6b6b64, shield: 0x5c4a2e },
 };
 
 function idlePose(t: number) { return { bob: Math.round(Math.sin(t * Math.PI * 2) * 1.5) }; }
@@ -515,6 +604,101 @@ export function generateEnemyUnits(scene: any) {
   // Wildlife.
   spriteSheet(scene, 'wolf_idle', 6, (ctx, t) => beastFig(ctx, t, 'wolf'));
   spriteSheet(scene, 'boar_idle', 6, (ctx, t) => beastFig(ctx, t, 'boar'));
+}
+
+// ---- Assets V2: new units + wildlife ---------------------------------------
+// Two horn points rising off a helmet (goblin warlord). Head sits ~y56.
+function horns(ctx: any) {
+  const cx = 96; ctx.fillStyle = css(0x9aa0a6);
+  ctx.beginPath(); ctx.moveTo(cx - 12, 46); ctx.lineTo(cx - 20, 30); ctx.lineTo(cx - 6, 44); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx + 12, 46); ctx.lineTo(cx + 20, 30); ctx.lineTo(cx + 6, 44); ctx.closePath(); ctx.fill();
+}
+
+// A mounted lancer: a brown horse with a seated warrior and a forward lance.
+// Centred at x=96, hooves ~y150 (matches the humanoid figure baseline).
+function cavalryFig(ctx: any, bob: number, gait: number, thrust = 0) {
+  const cx = 96, gY = 150, body = 0x8b5e3c, dark = 0x5c3d1e, sway = gait * 4;
+  // legs (4 stubs, alternating with gait)
+  ctx.fillStyle = css(dark);
+  for (const [lx, ph] of [[-28, 1], [-16, -1], [16, 1], [28, -1]] as any[]) ctx.fillRect(cx + lx, gY - 24, 6, 24 + ph * sway);
+  // barrel body + belly
+  ctx.fillStyle = css(body); ctx.beginPath(); ctx.ellipse(cx, gY - 36, 40, 17, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = css(dark); ctx.beginPath(); ctx.ellipse(cx, gY - 29, 32, 8, 0, 0, Math.PI * 2); ctx.fill();
+  // neck + head (front = +x)
+  ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(cx + 30, gY - 46); ctx.lineTo(cx + 46, gY - 68); ctx.lineTo(cx + 54, gY - 62); ctx.lineTo(cx + 40, gY - 40); ctx.closePath(); ctx.fill();
+  disc(ctx, cx + 52, gY - 66, 7, body);
+  ctx.fillStyle = css(0x20140c); ctx.fillRect(cx + 56, gY - 68, 2, 2); // eye
+  // mane + tail
+  ctx.strokeStyle = css(dark); ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(cx + 34, gY - 56); ctx.lineTo(cx + 30, gY - 44); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - 38, gY - 46); ctx.lineTo(cx - 50, gY - 30 + sway); ctx.stroke();
+  // rider (seated warrior torso + head + helm)
+  const ry = gY - 62 + bob;
+  ctx.fillStyle = css(PAL.warriorB.tunic); ctx.fillRect(cx - 12, ry, 22, 26);
+  ctx.fillStyle = css(PAL.warriorB.tunicDark); ctx.fillRect(cx - 12, ry + 20, 22, 6);
+  disc(ctx, cx - 1, ry - 8, 12, PAL.warriorB.skin);
+  ctx.fillStyle = css(PAL.warriorB.helmet); ctx.beginPath(); ctx.arc(cx - 1, ry - 9, 13, Math.PI, 0); ctx.fill(); ctx.fillRect(cx - 14, ry - 11, 26, 3);
+  // lance extending forward over the horse's head
+  const lx0 = cx + 6, ly0 = ry + 4, lx1 = cx + 70 + thrust * 14, ly1 = ry - 6;
+  ctx.strokeStyle = css(0x8b5e3c); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(lx0 - 18, ly0 + 6); ctx.lineTo(lx1, ly1); ctx.stroke();
+  ctx.fillStyle = css(0xd2d6dc); ctx.beginPath(); ctx.moveTo(lx1, ly1); ctx.lineTo(lx1 - 10, ly1 - 4); ctx.lineTo(lx1 - 10, ly1 + 4); ctx.closePath(); ctx.fill();
+}
+
+// A slim grazing deer (128x128 frame, hooves ~y100). Head angled down to graze.
+function deerFig(ctx: any, t: number) {
+  const cx = 60, gY = 102, b = Math.sin(t * Math.PI * 2) * 1.5, body = 0x9a6a44, dark = 0x6b4423;
+  ctx.fillStyle = css(dark);
+  for (const lx of [-20, -10, 8, 18]) ctx.fillRect(cx + lx, gY - 18, 3.5, 18);
+  ctx.fillStyle = css(body); ctx.beginPath(); ctx.ellipse(cx, gY - 24 + b, 24, 10, 0, 0, Math.PI * 2); ctx.fill();
+  // lowered head + neck (front +x)
+  ctx.fillStyle = css(body); ctx.beginPath(); ctx.moveTo(cx + 20, gY - 26 + b); ctx.lineTo(cx + 32, gY - 8 + b); ctx.lineTo(cx + 37, gY - 12 + b); ctx.lineTo(cx + 25, gY - 28 + b); ctx.closePath(); ctx.fill();
+  disc(ctx, cx + 35, gY - 12 + b, 5, body);
+  ctx.strokeStyle = css(dark); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx + 35, gY - 16 + b); ctx.lineTo(cx + 31, gY - 25 + b); ctx.moveTo(cx + 37, gY - 16 + b); ctx.lineTo(cx + 41, gY - 25 + b); ctx.stroke();
+  ctx.fillStyle = css(0x20140c); ctx.fillRect(cx + 36, gY - 13 + b, 1.5, 1.5);
+  ctx.fillStyle = '#efe9dc'; ctx.fillRect(cx - 24, gY - 26 + b, 3, 5); // white tail
+}
+
+// A massive dragon (160x120 frame), wings spread, fire glow under the maw.
+function dragonFig(ctx: any) {
+  const cx = 80, cy = 58;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(cx, 108, 58, 12, 0, 0, Math.PI * 2); ctx.fill(); // ground shadow
+  // wings (two large triangles up & back)
+  ctx.fillStyle = css(0x401018); ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx - 70, cy - 44); ctx.lineTo(cx - 30, cy + 14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = css(0x521820); ctx.beginPath(); ctx.moveTo(cx + 6, cy); ctx.lineTo(cx + 70, cy - 44); ctx.lineTo(cx + 30, cy + 14); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = css(0x2a0a10); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx - 50, cy - 30); ctx.moveTo(cx + 6, cy); ctx.lineTo(cx + 50, cy - 30); ctx.stroke();
+  // body (irregular dark-red polygon)
+  ctx.fillStyle = css(0x6a1c22); ctx.beginPath(); ctx.moveTo(cx - 18, cy - 4); ctx.lineTo(cx + 18, cy - 6); ctx.lineTo(cx + 30, cy + 18); ctx.lineTo(cx, cy + 34); ctx.lineTo(cx - 28, cy + 16); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = css(0x4a1218); ctx.beginPath(); ctx.moveTo(cx, cy + 6); ctx.lineTo(cx + 14, cy + 20); ctx.lineTo(cx, cy + 30); ctx.lineTo(cx - 12, cy + 20); ctx.closePath(); ctx.fill(); // belly scales
+  // tail
+  ctx.strokeStyle = css(0x6a1c22); ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(cx - 20, cy + 18); ctx.quadraticCurveTo(cx - 50, cy + 40, cx - 64, cy + 20); ctx.stroke();
+  ctx.fillStyle = css(0x521820); ctx.beginPath(); ctx.moveTo(cx - 64, cy + 20); ctx.lineTo(cx - 76, cy + 14); ctx.lineTo(cx - 70, cy + 28); ctx.closePath(); ctx.fill();
+  // neck + angular horned head (front +x)
+  ctx.fillStyle = css(0x6a1c22); ctx.beginPath(); ctx.moveTo(cx + 12, cy - 4); ctx.lineTo(cx + 40, cy - 22); ctx.lineTo(cx + 50, cy - 14); ctx.lineTo(cx + 22, cy + 6); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx + 44, cy - 24); ctx.lineTo(cx + 64, cy - 18); ctx.lineTo(cx + 58, cy - 6); ctx.lineTo(cx + 44, cy - 10); ctx.closePath(); ctx.fill(); // jaw
+  ctx.fillStyle = css(0x3a0e12); ctx.beginPath(); ctx.moveTo(cx + 46, cy - 24); ctx.lineTo(cx + 42, cy - 36); ctx.lineTo(cx + 52, cy - 26); ctx.closePath(); ctx.fill(); // horn
+  disc(ctx, cx + 52, cy - 16, 2.4, 0xff7a1a); disc(ctx, cx + 52, cy - 16, 1.2, 0xffe24a); // glowing eye
+  // fire glow under the maw
+  ctx.globalAlpha = 0.85; disc(ctx, cx + 64, cy - 4, 6, 0xff7a1a); ctx.globalAlpha = 1; disc(ctx, cx + 64, cy - 4, 3, 0xffd24a);
+}
+
+export function generateV2Units(scene: any) {
+  // Spearman — warrior with a long pike + small round buckler, lighter armour.
+  warriorSheets(scene, PAL.spearman, { idle: 'spearman_idle', run: 'spearman_run', atk: 'spearman_attack', atk2: 'spearman_attack2' }, { helmet: true, shield: true, round: true, weapon: 'spear' });
+  // Cavalry — mounted lancer (idle bob, run gait, attack thrust).
+  spriteSheet(scene, 'cavalry_idle', 8, (ctx, t) => cavalryFig(ctx, idlePose(t).bob, 0));
+  spriteSheet(scene, 'cavalry_run', 6, (ctx, t) => cavalryFig(ctx, 0, Math.sin(t * Math.PI * 2)));
+  spriteSheet(scene, 'cavalry_attack', 4, (ctx, t) => cavalryFig(ctx, 0, 0.4, t));
+  // Goblin shaman — robed, hooded, staff with a purple magical glow.
+  spriteSheet(scene, 'goblin_shaman', 6, (ctx, t) => figure(ctx, PAL.goblinShaman, { hood: true, ears: true, weapon: 'staff', magic: 0xb060ff, ...idlePose(t), armAng: Math.PI * 0.5 }));
+  spriteSheet(scene, 'goblin_shaman_run', 6, (ctx, t) => figure(ctx, PAL.goblinShaman, { hood: true, ears: true, weapon: 'staff', magic: 0xb060ff, ...runPose(t), armAng: Math.PI * 0.55 }));
+  // Goblin warlord — bigger, horned helm, oversized cleaver.
+  spriteSheet(scene, 'goblin_warlord', 6, (ctx, t) => { figure(ctx, PAL.goblinWarlord, { helmet: true, ears: true, weapon: 'bigsword', ...idlePose(t), armAng: Math.PI * 0.5 }); horns(ctx); });
+  spriteSheet(scene, 'goblin_warlord_run', 6, (ctx, t) => { figure(ctx, PAL.goblinWarlord, { helmet: true, ears: true, weapon: 'bigsword', ...runPose(t), armAng: Math.PI * 0.55 }); horns(ctx); });
+  // Deer — peaceful grazer (128px frame like the boar).
+  objSheet(scene, 'deer_idle', 6, 128, 128, (ctx, t) => deerFig(ctx, t));
+  // Dragon — single huge frame, spawned over the kingdom during the disaster.
+  objSheet(scene, 'dragon', 1, 160, 120, (ctx) => dragonFig(ctx));
 }
 
 // ---- world-object helpers --------------------------------------------------
@@ -708,6 +892,7 @@ export function generateAll(scene: any) {
   generateAIBuildings(scene);
   generateUnits(scene);
   generateEnemyUnits(scene);
+  generateV2Units(scene); // (Assets V2) cavalry, spearman, goblin shaman/warlord, deer, dragon
   generateWorldObjects(scene);
   generateUI(scene);
   generateFX(scene);

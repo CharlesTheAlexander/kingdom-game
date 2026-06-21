@@ -7,6 +7,9 @@ import { sfx } from '../audio/SoundEngine.js';
 // number of living warriors IS the Soldiers resource shown in the UI.
 
 const SCALE = 36 / 192; // warrior sheets are 192px frames; show at ~36px
+// (Assets V2) Spearman/Cavalry use their own animated spritesheets (no more tint).
+const SPEARMAN_OPTS = { hp: 45, dps: 12, idle: 'spearman_idle', run: 'spearman_run', attack: 'spearman_attack', label: 'Spearman' };
+const CAVALRY_OPTS = { hp: 40, dps: 20, scale: 50 / 192, idle: 'cavalry_idle', run: 'cavalry_run', attack: 'cavalry_attack', label: 'Cavalry' };
 const WARRIOR_SPEED = 70; // px/sec
 const ATTACK_RANGE = 0.8 * 48; // within ~1 tile
 const DPS_TO_ENEMY = 15;
@@ -426,8 +429,8 @@ export class TroopManager {
       else if (d.t === 'knight') { u = new Warrior(this.scene, x, y, x, y, { knight: true, hp: 120, dps: 25, scale: 44 / 192, tint: 0x9fb8d8, label: 'Knight' }); this.warriors.push(u); }
       else if (d.t === 'mercenary') { u = new Warrior(this.scene, x, y, x, y, { mercenary: true, label: 'Mercenary', idle: 'yellow_warrior_idle', run: 'yellow_warrior_run', attack: 'yellow_warrior_attack' }); this.warriors.push(u); }
       else if (d.t === 'siege') { u = new Warrior(this.scene, x, y, x, y, { hp: 80, dps: 8, scale: 52 / 192, idle: 'siege_unit', run: 'siege_unit', attack: 'siege_unit', label: 'Siege' }); u.siege = true; this.warriors.push(u); }
-      else if (d.t === 'spearmen') { u = new Warrior(this.scene, x, y, x, y, { hp: 45, dps: 12, tint: 0x9ab0c8, label: 'Spearman' }); u.spear = true; this.warriors.push(u); }
-      else if (d.t === 'cavalry') { u = new Warrior(this.scene, x, y, x, y, { hp: 40, dps: 20, scale: 44 / 192, tint: 0xd8b46a, label: 'Cavalry' }); u.cav = true; this.warriors.push(u); }
+      else if (d.t === 'spearmen') { u = new Warrior(this.scene, x, y, x, y, SPEARMAN_OPTS); u.spear = true; this.warriors.push(u); }
+      else if (d.t === 'cavalry') { u = new Warrior(this.scene, x, y, x, y, CAVALRY_OPTS); u.cav = true; this.warriors.push(u); }
       else { u = new Warrior(this.scene, x, y, x, y); this.warriors.push(u); }
       if (d.maxHp) u.maxHp = d.maxHp;
       if (d.hp != null) u.hp = d.hp;
@@ -487,12 +490,12 @@ export class TroopManager {
   // (V2 Phase 4) Spearmen — anti-cavalry, slow. Cavalry — fast, charge, anti-archer.
   spawnSpearman(home) {
     const hx = home.x + Phaser.Math.Between(-22, 22), hy = home.y + Phaser.Math.Between(20, 40);
-    const u = new Warrior(this.scene, hx, hy, hx, hy, { hp: 45, dps: 12, tint: 0x9ab0c8, label: 'Spearman' });
+    const u = new Warrior(this.scene, hx, hy, hx, hy, SPEARMAN_OPTS); // (Assets V2) dedicated sprite
     u.spear = true; this.warriors.push(u); return u;
   }
   spawnCavalry(home) {
     const hx = home.x + Phaser.Math.Between(-22, 22), hy = home.y + Phaser.Math.Between(20, 40);
-    const u = new Warrior(this.scene, hx, hy, hx, hy, { hp: 40, dps: 20, scale: 44 / 192, tint: 0xd8b46a, label: 'Cavalry' });
+    const u = new Warrior(this.scene, hx, hy, hx, hy, CAVALRY_OPTS); // (Assets V2) dedicated sprite
     u.cav = true; this.warriors.push(u); return u;
   }
 

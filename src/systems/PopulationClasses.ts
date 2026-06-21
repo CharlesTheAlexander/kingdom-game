@@ -28,9 +28,11 @@ export class PopulationClasses {
     const s = this.scene;
     const total = s.population ? s.population.count : 0;
     const stage = s.currentStage ? s.currentStage() : 1;
-    const nobles = (stage >= 5 && (this.has('grandhall') || this.has('treasury'))) ? Math.round(total * 0.10) : 0;
+    // (Assets V2) Manor is the canonical noble seat, Guildhall the craftsmen's
+    // home; the older blacksmith/grandhall still count as fallbacks.
+    const nobles = (stage >= 5 && (this.has('manor') || this.has('grandhall') || this.has('treasury'))) ? Math.round(total * 0.10) : 0;
     const merchants = this.has('market') ? Math.round(total * 0.20) : 0;
-    const craftsmen = this.has('blacksmith') ? Math.round(total * 0.25) : 0;
+    const craftsmen = (this.has('guildhall') || this.has('blacksmith')) ? Math.round(total * 0.25) : 0;
     const peasants = Math.max(0, total - nobles - merchants - craftsmen);
     this.classes = { peasants, craftsmen, merchants, nobles };
     return this.classes;
@@ -41,9 +43,9 @@ export class PopulationClasses {
     const s = this.scene;
     switch (cls) {
       case 'peasants': return (s.resources ? s.resources.food : 0) > 0;
-      case 'craftsmen': return this.staffed('blacksmith');           // need work + materials
+      case 'craftsmen': return this.staffed('guildhall') || this.staffed('blacksmith'); // need work + materials
       case 'merchants': return this.staffed('market');               // need active trade
-      case 'nobles': return this.has('grandhall');                   // need luxury/prestige
+      case 'nobles': return this.has('manor') || this.has('grandhall'); // need luxury/prestige
       default: return true;
     }
   }

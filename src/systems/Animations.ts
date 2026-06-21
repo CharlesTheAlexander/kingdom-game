@@ -19,9 +19,14 @@ const LOOPS: any[] = [
   ['monk_idle', 5, 7], ['monk_run', 3, 12],
   ['pawn_idle', 7, 8], ['pawn_run', 5, 12], ['pawn_run_wood', 5, 12], ['pawn_run_gold', 5, 12], ['pawn_run_meat', 5, 12],
   ['pawn_run_axe', 5, 12], ['pawn_run_pickaxe', 5, 12], ['pawn_interact_axe', 5, 9], ['pawn_interact_pickaxe', 5, 9],
+  // (Assets V2) cavalry, spearman, goblin shaman/warlord, deer
+  ['spearman_idle', 7, 8], ['spearman_run', 5, 12], ['cavalry_idle', 7, 8], ['cavalry_run', 5, 12],
+  ['goblin_shaman', 5, 8], ['goblin_shaman_run', 5, 12], ['goblin_warlord', 5, 8], ['goblin_warlord_run', 5, 12],
+  ['deer_idle', 5, 6],
 ];
 const ONCE: any[] = [
   ['blue_archer_shoot', 7, 16], ['red_archer_shoot', 7, 16], ['monk_heal', 10, 16],
+  ['cavalry_attack', 3, 14], // (Assets V2) lance thrust
 ];
 // Combined melee swing: Attack1 frames then Attack2 frames, played as one
 // one-shot (the spec's Attack1 → Attack2 → Idle). [animKey, sheet1, sheet2].
@@ -31,6 +36,7 @@ const COMBO_ATTACKS: any[] = [
   ['yellow_warrior_attack', 'yellow_warrior_attack', 'yellow_warrior_attack2'],
   ['purple_warrior_attack', 'purple_warrior_attack', 'purple_warrior_attack2'],
   ['goblin_attack', 'goblin_attack', 'goblin_attack2'],
+  ['spearman_attack', 'spearman_attack', 'spearman_attack2'], // (Assets V2)
 ];
 
 // Create every unit animation once per scene (idempotent; skips missing textures).

@@ -125,22 +125,40 @@ export const BuildingTypes: Record<string, BuildingType> = {
   // (V2 Phase 9) Intelligence Guild — trains spies and runs covert missions.
   intelligence: {
     key: 'intelligence', name: 'Spy Guild', cost: { gold: 120, planks: 40 }, maxWorkers: 1, hp: 120,
-    placeable: true, stageUnlock: 4, tex: 'tavern',
+    placeable: true, stageUnlock: 4, // (Assets V2) now has its own sprite
     desc: 'Trains spies (80g, 2 days) and sends them on missions: intel, sabotage, incite, assassinate, rumors.',
   },
   // (V2 Phase 6) Mason's Lodge — its masons maintain nearby buildings, halting
   // deterioration and slowly repairing them. Staffed lodges also help fight fires.
   masonslodge: {
     key: 'masonslodge', name: "Mason's Lodge", cost: { wood: 50, stone: 50 }, maxWorkers: 2, hp: 120,
-    placeable: true, stageUnlock: 2, tex: 'blacksmith',
+    placeable: true, stageUnlock: 2, // (Assets V2) now has its own sprite
     desc: 'Masons maintain buildings within 6 tiles: no decay, slow repair, and they help douse fires.',
+  },
+  // (Assets V2) Guildhall — home of the craftsmen class (Population Classes).
+  guildhall: {
+    key: 'guildhall', name: 'Guildhall', cost: { gold: 100, wood: 60, planks: 20 }, maxWorkers: 2, hp: 130,
+    placeable: true, stageUnlock: 4,
+    desc: 'Home of the craftsmen. Skilled workers gather here; crafted goods flow from a busy guild.',
+  },
+  // (Assets V2) Manor — seat of the noble class; governance bonuses.
+  manor: {
+    key: 'manor', name: 'Manor', cost: { gold: 100, stone: 60, cutStone: 20 }, maxWorkers: 0, hp: 150,
+    placeable: true, stageUnlock: 5,
+    desc: 'A noble residence. Nobles provide governance income; their absence breeds unrest.',
+  },
+  // (Assets V2) Levee — riverside infrastructure that holds back floods.
+  levee: {
+    key: 'levee', name: 'Levee', cost: { stone: 40, wood: 20 }, maxWorkers: 0, hp: 120,
+    placeable: true, noCap: true, anywhere: true, stageUnlock: 4,
+    desc: 'A stone embankment. Protects nearby farms from flood damage.',
   },
 };
 
 // Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now
 // grow automatically by settlement tier. The wall type def is kept above only so
 // old saves containing a placed Wall still load without error.
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'masonslodge', 'library', 'sawmill', 'stonecutter', 'intelligence', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall'];
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'masonslodge', 'guildhall', 'library', 'sawmill', 'stonecutter', 'intelligence', 'manor', 'levee', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 // (Loop 3, Feature #3) Buildings upgrade through 5 levels. Output scales on a

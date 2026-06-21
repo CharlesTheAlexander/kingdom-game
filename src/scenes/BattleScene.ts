@@ -13,6 +13,11 @@ const ANIM_SET: Record<string, any> = {
   blue_archer_idle: { run: 'blue_archer_run', atk: 'blue_archer_shoot' },
   red_archer_idle: { run: 'red_archer_idle', atk: 'red_archer_shoot' },
   monk_idle: { run: 'monk_run', atk: null },
+  // (Assets V2) new unit sprites
+  spearman_idle: { run: 'spearman_run', atk: 'spearman_attack' },
+  cavalry_idle: { run: 'cavalry_run', atk: 'cavalry_attack' },
+  goblin_shaman: { run: 'goblin_shaman_run', atk: null },
+  goblin_warlord: { run: 'goblin_warlord_run', atk: 'goblin_attack' },
 };
 
 // BattleScene (Phase 1 + UI overhaul Phase 3) — a separate strategic battle
@@ -37,8 +42,8 @@ const STATS: Record<string, any> = {
   goblin: { hp: 15, dmg: 8, speed: 74, range: 0, tex: 'goblin_idle', heal: 0 },
   garrison: { hp: 50, dmg: 15, speed: 0, range: 0, tex: 'blue_warrior_idle', heal: 0, hold: true },
   siege: { hp: 80, dmg: 8, speed: 18, range: 0, tex: 'siege_unit', heal: 0, siege: true }, // smashes walls (50/s), weak vs units
-  spearmen: { hp: 45, dmg: 12, speed: 34, range: 0, tex: 'blue_warrior_idle', heal: 0, spear: true }, // (V2 P4) anti-cavalry, slow
-  cavalry: { hp: 40, dmg: 20, speed: 100, range: 0, tex: 'blue_warrior_idle', heal: 0, charge: true }, // (V2 P4) fast, charges, anti-archer
+  spearmen: { hp: 45, dmg: 12, speed: 34, range: 0, tex: 'spearman_idle', heal: 0, spear: true }, // (V2 P4) anti-cavalry, slow
+  cavalry: { hp: 40, dmg: 20, speed: 100, range: 0, tex: 'cavalry_idle', heal: 0, charge: true }, // (V2 P4) fast, charges, anti-archer
   commander: { hp: 340, dmg: 38, speed: 46, range: 0, tex: 'blue_lancer', heal: 0, area: true, tank: true }, // (V2 P5) the King/Queen in person
 };
 // (V2 Phase 4) Rock-paper-scissors: key beats value.

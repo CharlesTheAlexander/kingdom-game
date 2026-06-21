@@ -178,13 +178,21 @@ export class Maintenance {
   tickFlood(day: number) {
     if (!this.floodWarn || day < this.floodWarn) return;
     this.floodWarn = 0;
-    let hit = 0;
+    let hit = 0, saved = 0;
     for (const b of this.buildingsList()) {
       if (b.typeKey !== 'farm') continue;
-      if (this.nextToWater(b)) { b.condition = Math.max(0, b.condition - 2); this.applyConditionVisual(b); hit++; }
+      if (!this.nextToWater(b)) continue;
+      if (this.leveeNear(b)) { saved++; continue; } // (Assets V2) a levee holds the flood back
+      b.condition = Math.max(0, b.condition - 2); this.applyConditionVisual(b); hit++;
     }
     if (hit) this.scene.threatWarning(`The flood damaged ${hit} riverside farm${hit > 1 ? 's' : ''}`, 0x4a7bd5, true);
+    else if (saved) this.scene.logEvent(`Your levees held — ${saved} farm${saved > 1 ? 's' : ''} spared the flood`, 'green');
     else this.scene.logEvent('The river receded with little harm', 'green');
+  }
+
+  // (Assets V2) Is a flood-protecting levee within 4 tiles of this building?
+  leveeNear(b: any) {
+    return this.scene.buildings.buildings.some((l: any) => l.alive && l.typeKey === 'levee' && Math.abs(l.col - b.col) <= 4 && Math.abs(l.row - b.row) <= 4);
   }
 
   // ---- dragon -----------------------------------------------------------
@@ -195,10 +203,21 @@ export class Maintenance {
   hasSiege() { return this.scene.buildings.buildings.some((b: any) => b.alive && b.typeKey === 'siegeworkshop'); }
   startDragon(day: number) {
     this.dragon = { since: day };
+    this.spawnDragonSprite(); // (Assets V2) show the beast circling the kingdom
     this.scene.threatWarning('A DRAGON descends upon your kingdom! A champion or siege weapons can stop it', 0xc0392b, true);
   }
+  // (Assets V2) A dragon sprite circles over the castle while the threat is active.
+  spawnDragonSprite() {
+    const s = this.scene, c = s.buildings && s.buildings.castle;
+    if (!c || !s.add || !s.textures || !s.textures.exists('dragon')) return;
+    this.clearDragonSprite();
+    this._dragonSpr = s.add.image(c.x, c.y - 140, 'dragon').setDepth(9999).setScale(1.1);
+    if (s.tweens) s.tweens.add({ targets: this._dragonSpr, x: c.x + 120, y: c.y - 120, yoyo: true, repeat: -1, duration: 2600, ease: 'Sine.inOut' });
+  }
+  clearDragonSprite() { if (this._dragonSpr) { this._dragonSpr.destroy(); this._dragonSpr = null; } }
   tickDragon(day: number) {
     if (!this.dragon || day <= this.dragon.since) return;
+    this.clearDragonSprite();
     if (this.hasChampion() || this.hasSiege()) {
       this.dragon = null; this.dragonSlain = true;
       this.scene.resources.add('gold', 300); this.scene.resources.add('iron', 80);
