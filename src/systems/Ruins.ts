@@ -16,7 +16,11 @@ export const RUIN_REWARDS = ['whetstone', 'map', 'iron', 'tome', 'champion', 'cu
 const REVEAL_TILES = 5;
 
 export class Ruins {
-  constructor(scene) {
+  scene: any;
+  list: any[];
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.list = []; // { name, col, row, x, y, reward, discovered, explored, g, nameText }
     this.generate();
@@ -33,7 +37,7 @@ export class Ruins {
       return true;
     };
     // biome → how many ruins go there
-    const plan = [['forest', 2], ['mountains', 2], ['wildlands', 1], ['delta', 1]];
+    const plan: any[] = [['forest', 2], ['mountains', 2], ['wildlands', 1], ['delta', 1]];
     const rewards = Phaser.Utils.Array.Shuffle([...RUIN_REWARDS]);
     let ni = 0;
     for (const [biome, n] of plan) {
@@ -103,7 +107,7 @@ export class Ruins {
   update() {
     if (this._done()) return;
     const s = this.scene;
-    const units = [];
+    const units: any[] = [];
     if (s.troops) for (const u of s.troops.allUnits()) units.push(u);
     if (s.pawns) for (const p of s.pawns.pawns) units.push(p);
     if (s.armyMgr) for (const a of s.armyMgr.playerArmies()) { const c = s.tileCenter(a.col, a.row); units.push({ x: c.x, y: c.y }); }
@@ -154,7 +158,7 @@ export class Ruins {
 
   applyReward(ruin) {
     const s = this.scene;
-    const toast = (t, c) => { s.showToast && s.showToast(t); s.logEvent && s.logEvent(t, c || 'green'); };
+    const toast = (t: string, c?: string) => { s.showToast && s.showToast(t); s.logEvent && s.logEvent(t, c || 'green'); };
     switch (ruin.reward) {
       case 'whetstone':
         s.buffs.warriorDamage = (s.buffs.warriorDamage || 1) * 1.25;
@@ -208,7 +212,7 @@ export class Ruins {
 
   // --- save ----------------------------------------------------------------
   serialize() { return this.list.map((r) => ({ name: r.name, col: r.col, row: r.row, reward: r.reward, discovered: r.discovered, explored: r.explored })); }
-  restore(data) {
+  restore(data: any) {
     if (!data || !data.length) return;
     // Match by name (positions are deterministic per save's stored col/row).
     for (const d of data) {
