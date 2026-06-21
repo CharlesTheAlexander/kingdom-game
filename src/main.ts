@@ -74,4 +74,9 @@ if (import.meta.env.DEV) {
   import('./systems/HeroWorld.js').then((hw) => {
     (window as any).__HeroWorld = hw.HeroWorld;
   });
+  // (Phase 7) Expose the WorldDiplomacy system so the headless audit can drive
+  // battle memory, tribute, treaties, betrayal consequences, and honor.
+  import('./systems/WorldDiplomacy.js').then((wd) => {
+    (window as any).__WorldDiplomacy = wd.WorldDiplomacy;
+  });
 }

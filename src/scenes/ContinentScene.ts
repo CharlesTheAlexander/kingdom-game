@@ -12,7 +12,9 @@ import { PioneerSystem } from '../systems/PioneerSystem.js';
 import type { PioneerParty, WorkerParty, AIParty as AIPartyT } from '../systems/GameWorld.js';
 import { ExpeditionSystem } from '../systems/ExpeditionSystem.js';
 import { HeroWorld } from '../systems/HeroWorld.js';
-import { generateHeroPortraits } from '../systems/AssetGenerator.js';
+import { WorldDiplomacy } from '../systems/WorldDiplomacy.js';
+import type { LeaderLine } from '../systems/WorldDiplomacy.js';
+import { generateHeroPortraits, generatePortraits } from '../systems/AssetGenerator.js';
 
 // ============================================================================
 // ContinentScene — Phase 2 (Bannerlord rebuild) PRIMARY game loop.
@@ -137,6 +139,20 @@ export class ContinentScene extends Phaser.Scene {
     // at a stale per-settlement scene, and so passives recompute against GameWorld.
     GameWorld.rebindHeroes();
     GameWorld.heroes.applyPassives();
+
+    // (Phase 7) Bake the three leader portraits (portrait_red/purple/yellow) for
+    // the diplomacy panel + leader speech popups, re-home diplomacy/leaders to a
+    // fresh world host, and wire the speech / panel-refresh hooks so the world-level
+    // Diplomacy + FactionLeaders can surface lines on the continent.
+    if (!this.textures.exists('portrait_red')) {
+      try { generatePortraits(this); } catch (e) { /* portraits optional */ }
+    }
+    GameWorld.initDiplomacy();
+    GameWorld.rebindDiplomacy();
+    WorldDiplomacy.ensure(); // apply banked caravan-raid deltas + seed memory
+    GameWorld._leaderSpeechHook = (faction: string, line: string) =>
+      this.showLeaderSpeech({ faction, name: WorldDiplomacy.leaderName(faction), portrait: 'portrait_' + faction, text: line });
+    GameWorld._diploPanelHook = () => { if (this._diploPanel) this.openDiplomacyPanel(); };
 
     // --- Fog of war overlay (screen space image) --------------------------
     this.initFog();
@@ -490,6 +506,13 @@ export class ContinentScene extends Phaser.Scene {
     // 4. Contextual low-supply / low-gold remarks (throttled by HeroWorld).
     if (GameWorld.player.supply <= 3) this.fireHeroDialogue('low_supply');
     else if (GameWorld.gold < 80) this.fireHeroDialogue('low_gold');
+
+    // --- (Phase 7) DIPLOMACY daily tick ----------------------------------
+    // Accrue honor for treaties upheld over time, drift relations, surface any
+    // time-based memory event (e.g. Elowen's 10-day intel share), and refresh an
+    // open diplomacy panel.
+    WorldDiplomacy.onNewDay();
+    if (this._diploPanel) this.openDiplomacyPanel();
   }
 
   // =========================================================================
@@ -1277,6 +1300,15 @@ export class ContinentScene extends Phaser.Scene {
     hb.on('pointerdown', () => { this._uiClick = true; });
     hb.on('pointerup', () => { this._uiClick = true; this.openHeroPanel(); });
     this.input.keyboard?.on('keydown-H', () => this.openHeroPanel());
+
+    // (Phase 7) Diplomacy panel toggle (relations + leader memory + honor). D key.
+    const db = fix(this.add.rectangle(GAME_W - 70, by + 102, 120, 26, 0x4a3a6b).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
+    fix(this.add.text(GAME_W - 70, by + 102, 'Diplomacy (D)', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5));
+    db.on('pointerover', () => db.setFillStyle(0x5d4a86));
+    db.on('pointerout', () => db.setFillStyle(0x4a3a6b));
+    db.on('pointerdown', () => { this._uiClick = true; });
+    db.on('pointerup', () => { this._uiClick = true; this.toggleDiplomacyPanel(); });
+    this.input.keyboard?.on('keydown-D', () => this.toggleDiplomacyPanel());
   }
 
   // =========================================================================
@@ -1796,11 +1828,16 @@ export class ContinentScene extends Phaser.Scene {
       this.fireHeroDialogue('victory');
       // Defeating a faction leader is a story beat (one-shot per faction).
       if (ai.factionKey === 'red') this.fireHeroDialogue('valdris_defeated', { force: true });
+      // (Phase 7) Record the win into leader memory → escalating dialogue + memory
+      // events (Valdris/Krag warrior/artifact gifts) surfaced via a leader popup.
+      this.recordFactionBattle(ai.factionKey, true);
     } else {
       // Push the player back home-ward a little on defeat.
       this.flashBanner('Your army was defeated.', 0x8c2b2b);
       this.grantHeroBattleXP(false, 0);
       this.fireHeroDialogue('defeat');
+      // (Phase 7) Record the loss into leader memory.
+      this.recordFactionBattle(ai.factionKey, false);
       // Move the enemy party off so it doesn't instantly re-trigger.
       ai.col = Phaser.Math.Clamp(ai.col + 6, 1, this.world.size - 2);
       GameWorld.pickAIObjective(ai);
@@ -2000,6 +2037,137 @@ export class ContinentScene extends Phaser.Scene {
   closeHeroPanel() { if (this._heroPanel) { this._heroPanel.forEach((o: any) => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._heroPanel = null; } }
 
   // =========================================================================
+  // (Phase 7) DIPLOMACY — leader speech popups, battle memory recording, and the
+  // diplomacy panel (relation bars + leader memory + honor + world-level actions).
+  // =========================================================================
+
+  // Record a continent/expedition battle vs a real faction into leader memory,
+  // then surface any escalating leader line + memory-event banner it triggers.
+  // The single entry point the headless verification calls (window hook below).
+  recordFactionBattle(faction: string, playerWon: boolean) {
+    const r = WorldDiplomacy.recordBattle(faction, playerWon);
+    if (r.line) this.showLeaderSpeech(r.line);
+    if (r.event) this.flashBanner(r.event, 0xc9a14a);
+    if (this._diploPanel) this.openDiplomacyPanel();
+    return r;
+  }
+
+  // A leader-portrait speech popup (same warm style as the hero popup, but in the
+  // bottom-RIGHT so a leader + a hero can both speak without overlapping).
+  showLeaderSpeech(line: LeaderLine) {
+    if (this._closing) return;
+    if (this._leaderSpeech) { try { this._leaderSpeech.forEach((o: any) => o.destroy()); } catch (e) { /* ignore */ } this._leaderSpeech = null; }
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 36);
+    const els: any[] = [];
+    const W = 380, H = 84, x = GAME_W - W - 14, y = GAME_H - H - 14;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.95)));
+    if (this.textures.exists(line.portrait)) {
+      els.push(fix(this.add.image(x + 42, y + H / 2, line.portrait).setDisplaySize(62, 62)));
+    } else {
+      els.push(fix(this.add.circle(x + 42, y + H / 2, 28, 0x6b4a26).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    }
+    els.push(fix(this.add.text(x + 82, y + 10, line.name, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+    els.push(fix(this.add.text(x + 82, y + 30, line.text, { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#e6d8b8', fontStyle: 'italic', wordWrap: { width: W - 96 } }).setOrigin(0, 0)));
+    this._leaderSpeech = els;
+    this.time.delayedCall(5000, () => { if (this._leaderSpeech === els) { els.forEach(o => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._leaderSpeech = null; } });
+  }
+
+  toggleDiplomacyPanel() {
+    if (this._diploPanel) { this.closeDiplomacyPanel(); return; }
+    this.openDiplomacyPanel();
+  }
+  closeDiplomacyPanel() { if (this._diploPanel) { this._diploPanel.forEach((o: any) => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._diploPanel = null; } }
+
+  // The diplomacy panel: per-faction leader portrait + name, a relation bar,
+  // treaty status, a one-line memory summary, and the world-level actions (send
+  // tribute / propose trade / propose alliance / break treaty / declare war), all
+  // wired to the world Diplomacy instance via WorldDiplomacy. Player honor at top.
+  openDiplomacyPanel() {
+    WorldDiplomacy.ensure();
+    this.closeDiplomacyPanel();
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 26);
+    const els: any[] = [];
+    const W = 480, H = 540, x = GAME_W / 2 - W / 2, y = 60;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x201608, 0.98).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.rectangle(x, y, W, 30, 0x3a2a10, 1).setOrigin(0, 0)));
+    els.push(fix(this.add.text(x + 12, y + 7, 'Diplomacy', { fontFamily: 'Georgia, serif', fontSize: '15px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+    const closeBtn = fix(this.add.text(x + W - 22, y + 6, '✕', { fontFamily: 'Georgia, serif', fontSize: '16px', color: '#e9d6a4' }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true }));
+    closeBtn.on('pointerdown', () => { this._uiClick = true; });
+    closeBtn.on('pointerup', () => { this._uiClick = true; this.closeDiplomacyPanel(); });
+    els.push(closeBtn);
+
+    // --- Honor banner (the player's standing, with its current effect) ---
+    const honor = WorldDiplomacy.honor();
+    const honorColor = honor >= 10 ? '#7cfc7c' : honor <= -5 ? '#ff6b6b' : '#ffe9b0';
+    const honorNote = honor >= 10 ? 'High honor — treaties are cheaper.' : honor <= -5 ? 'Low honor — treaties cost +50 gold.' : 'Honor is steady.';
+    els.push(fix(this.add.text(x + 14, y + 38, `Honor: ${honor >= 0 ? '+' : ''}${honor}`, { fontFamily: 'Georgia, serif', fontSize: '14px', color: honorColor, fontStyle: 'bold' }).setOrigin(0, 0)));
+    els.push(fix(this.add.text(x + 120, y + 40, honorNote, { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#cfc1a6' }).setOrigin(0, 0)));
+    els.push(fix(this.add.text(x + 14, y + 56, `Gold: ${GameWorld.gold}`, { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#e0b84a' }).setOrigin(0, 0)));
+
+    let cy = y + 78;
+    const ROW_H = 150;
+    for (const fk of WorldDiplomacy.FACTIONS) {
+      const s = WorldDiplomacy.summary(fk);
+      // Card frame.
+      els.push(fix(this.add.rectangle(x + 10, cy, W - 20, ROW_H - 8, 0x2a2012, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0xc9a14a, 0.5)));
+      // Portrait.
+      if (this.textures.exists(s.portrait)) els.push(fix(this.add.image(x + 46, cy + 40, s.portrait).setDisplaySize(60, 60)));
+      else els.push(fix(this.add.circle(x + 46, cy + 40, 28, s.memory ? 0x6b4a26 : 0x6b4a26).setStrokeStyle(2, 0xc9a14a, 0.9)));
+      // Name + status.
+      els.push(fix(this.add.text(x + 86, cy + 8, `${s.leader}`, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+      els.push(fix(this.add.text(x + 86, cy + 26, `${s.factionName} — ${s.status}`, { fontFamily: 'Georgia, serif', fontSize: '11px', color: s.allied ? '#7cfc7c' : '#cfc1a6' }).setOrigin(0, 0)));
+      // Relation bar (−100..+100 → 0..barW).
+      const barX = x + 86, barY = cy + 44, barW = W - 86 - 22;
+      els.push(fix(this.add.rectangle(barX, barY, barW, 12, 0x140d06).setOrigin(0, 0).setStrokeStyle(1, 0x6b5a3a, 0.8)));
+      const frac = Math.max(0, Math.min(1, (s.relation + 100) / 200));
+      const relCol = s.relation >= 50 ? 0x2a7a4f : s.relation >= 0 ? 0xc9a14a : s.relation >= -50 ? 0xc77b3a : 0x8c2b2b;
+      els.push(fix(this.add.rectangle(barX, barY, Math.max(2, barW * frac), 12, relCol).setOrigin(0, 0)));
+      els.push(fix(this.add.text(barX + barW + 2, barY - 1, `${s.relation > 0 ? '+' : ''}${s.relation}`, { fontFamily: 'Georgia, serif', fontSize: '10px', color: '#f0e6d0' }).setOrigin(1, 0)));
+      // Memory recap.
+      els.push(fix(this.add.text(x + 86, cy + 60, WorldDiplomacy.memoryRecap(fk), { fontFamily: 'Georgia, serif', fontSize: '10px', color: '#9aa0a6', wordWrap: { width: W - 86 - 18 } }).setOrigin(0, 0)));
+
+      // --- Action buttons row ---
+      const t = s.treaties;
+      const hasTreaty = t.trade || t.alliance || t.vassal;
+      const actions: Array<[string, number, () => void]> = [];
+      actions.push([`Tribute (50g)`, 0x6b4a26, () => this.diploAction(() => WorldDiplomacy.sendTribute(fk, 50))]);
+      if (!t.trade && !t.alliance) actions.push([`Trade (${WorldDiplomacy.treatyCost(fk, 'trade')}g)`, 0x1f5b3a, () => this.diploAction(() => WorldDiplomacy.proposeTreaty(fk, 'trade'))]);
+      if (!t.alliance) actions.push([`Ally (${WorldDiplomacy.treatyCost(fk, 'alliance')}g)`, 0x1f5b3a, () => this.diploAction(() => WorldDiplomacy.proposeTreaty(fk, 'alliance'))]);
+      if (hasTreaty) actions.push([`Betray`, 0x8c2b2b, () => this.diploBreak(fk)]);
+      actions.push([`War`, 0x6b1a1a, () => this.diploAction(() => WorldDiplomacy.declareWar(fk))]);
+
+      let bx = x + 86, byb = cy + ROW_H - 32;
+      for (const [label, col, fn] of actions.slice(0, 5)) {
+        const bw = Math.min(82, Math.max(54, label.length * 6.4));
+        const btn = fix(this.add.rectangle(bx, byb, bw, 22, col).setOrigin(0, 0).setStrokeStyle(1, 0xf0e6c8, 0.7).setInteractive({ useHandCursor: true }));
+        els.push(btn, fix(this.add.text(bx + bw / 2, byb + 11, label, { fontFamily: 'Georgia, serif', fontSize: '9.5px', color: '#fff' }).setOrigin(0.5)));
+        btn.on('pointerdown', () => { this._uiClick = true; });
+        btn.on('pointerup', () => { this._uiClick = true; fn(); });
+        bx += bw + 5;
+      }
+      cy += ROW_H;
+    }
+    this._diploPanel = els;
+  }
+
+  // Run a diplomacy action, surface its leader line / reason, then refresh.
+  diploAction(fn: () => { ok?: boolean; reason?: string; line: LeaderLine | null }) {
+    const r = fn();
+    if (r && r.ok === false && r.reason) { this.flashBanner(r.reason, 0x8c2b2b); }
+    if (r && r.line) this.showLeaderSpeech(r.line);
+    this.openDiplomacyPanel(); // rebuild fresh
+  }
+
+  // Break a treaty (betrayal): apply consequences, surface the angry line + the
+  // "cannot be trusted" broadcast, then refresh.
+  diploBreak(faction: string) {
+    const r = WorldDiplomacy.breakTreaty(faction);
+    if (r.ok === false && r.reason) { this.flashBanner(r.reason, 0x8c2b2b); }
+    else { if (r.line) this.showLeaderSpeech(r.line); if (r.notify) this.flashBanner(r.notify, 0x8c2b2b); }
+    this.openDiplomacyPanel();
+  }
+
+  // =========================================================================
   // Banner / tutorial / menu
   // =========================================================================
   flashBanner(text: string, color: number) {
@@ -2055,6 +2223,11 @@ export class ContinentScene extends Phaser.Scene {
     // (Phase 6) Tear down hero UI overlays so nothing dangles after a scene swap.
     if (this._heroPanel) { try { this.closeHeroPanel(); } catch (e) { /* ignore */ } }
     if (this._heroSpeech) { try { this._heroSpeech.forEach((o: any) => o.destroy()); } catch (e) { /* ignore */ } this._heroSpeech = null; }
+    // (Phase 7) Tear down diplomacy UI overlays + drop GameWorld hooks pointing here.
+    if (this._diploPanel) { try { this.closeDiplomacyPanel(); } catch (e) { /* ignore */ } }
+    if (this._leaderSpeech) { try { this._leaderSpeech.forEach((o: any) => o.destroy()); } catch (e) { /* ignore */ } this._leaderSpeech = null; }
+    GameWorld._leaderSpeechHook = null;
+    GameWorld._diploPanelHook = null;
   }
 
   // The minimap dots are refreshed in update via updateMinimap, but update() does

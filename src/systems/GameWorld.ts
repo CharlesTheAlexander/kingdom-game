@@ -29,6 +29,9 @@ import type { SettlementState } from './SettlementState.js';
 import { makeSettlementState } from './SettlementState.js';
 import { Biome } from '../data/Biomes.js';
 import { Heroes } from './Heroes.js';
+import { Diplomacy } from './Diplomacy.js';
+import { FactionLeaders } from './FactionLeaders.js';
+import type { LeaderMemory } from './WorldDiplomacy.js';
 
 /** Supply state, surfaced as a coloured dot in the HUD/minimap. */
 export type SupplyState = 'green' | 'yellow' | 'red';
@@ -244,6 +247,32 @@ class GameWorldState {
    *  fortress revealed, friendly-neutral villages, caravan/garrison allies. */
   heroFlags: Record<string, any> = {};
 
+  // --- Phase 7 (Diplomatic narrative — leader memory, honor) ---------------
+  // RE-HOMED diplomacy to the world level. `diplomacy` (relation meters / treaties
+  // / NAP / alliance) and `leaders` (named rulers Valdris/Elowen/Krag with voices)
+  // were both neutered inside the now-per-settlement IsometricScene; here they are
+  // real instances backed by a tiny world-level host adapter (diploHost) so the
+  // EXISTING logic keeps working at the CONTINENT level. WorldDiplomacy is the
+  // brain on top (memory, dialogue, memory events, betrayal, honor). Lazily wired
+  // by initDiplomacy() (called from WorldDiplomacy.ensure / startNewCampaign). All
+  // NEW campaign state below is plain JSON for Phase 12.
+  diplomacy: Diplomacy | null = null;
+  leaders: FactionLeaders | null = null;
+
+  /** Per-faction remembered history of the relationship (battles/treaties/tributes
+   *  /wars/alliance/first-contact). Source of truth for history-based dialogue.
+   *  JSON-friendly; keyed by faction key (red/purple/yellow). */
+  leaderMemory: Record<string, LeaderMemory> = {};
+
+  /** Player honor: +1 per treaty upheld over time, −3 per betrayal. Drives treaty
+   *  cost (≥+10 cheaper, ≤−5 +50/faction) and is surfaced in the diplomacy panel. */
+  honor = 0;
+
+  /** Phase-7 diplomacy flags (serialization-friendly): one-shot memory events,
+   *  caravan-avoid expiry after a betrayal, intel-shared, the unique artifact,
+   *  treaty-upheld accrual bookkeeping, and the deltas-applied guard. */
+  diploFlags: Record<string, any> = {};
+
   gold = 500;
 
   /** Continuous day counter (fractional during a day; floor() for display). */
@@ -301,6 +330,79 @@ class GameWorldState {
   /** Re-bind the hero roster to a fresh host (used on new campaign / restore so the
    *  Heroes instance never points at stale state). */
   rebindHeroes(): void { this.heroes.scene = this.heroHost(); }
+
+  // --------------------------------------------------------------------------
+  // Phase 7 — Diplomacy host adapter
+  // --------------------------------------------------------------------------
+  /** The `Diplomacy` + `FactionLeaders` classes were written against the per-
+   *  settlement IsometricScene and read a handful of scene members (`kingdoms`
+   *  as {cfg:{key,name,color}, castleAlive}, `resources.spend/add`, `gameDay`,
+   *  `showToast`/`logEvent`, cross-refs `diplomacy`/`leaders`, plus per-settlement
+   *  hooks like buildings/armyMgr/troops/reputation). At the WORLD level we satisfy
+   *  that contract with this adapter so BOTH systems keep working unchanged:
+   *   - `kingdoms` maps the 3 AI factions (red/purple/yellow) to the shape they
+   *     expect (always castleAlive at world scale; combat/sieges are P9+).
+   *   - `resources` routes spend/add to GameWorld.gold (so treaty/tribute costs
+   *     and alliance/trade income flow through the campaign purse).
+   *   - per-settlement-only hooks (buildings/armyMgr/troops/recallFactionArmies/
+   *     threatWarning/refreshPanel) are harmless no-ops; the continent surfaces
+   *     speech via WorldDiplomacy + ContinentScene's showLeaderSpeech instead. */
+  diploHost(): any {
+    const gw = this;
+    return {
+      get gameDay() { return gw.displayDay(); },
+      get kingdoms() {
+        const out: any[] = [];
+        if (!gw.world) return out;
+        for (const f of gw.world.factions) {
+          if (f.personality === 'player') continue;
+          out.push({ cfg: { key: f.key, name: f.name, color: f.color }, castleAlive: true });
+        }
+        return out;
+      },
+      resources: {
+        spend: (cost: any) => { const g = cost && cost.gold ? cost.gold : 0; if (gw.gold < g) return false; gw.gold -= g; return true; },
+        add: (_kind: string, amt: number) => { gw.gold += amt; },
+      },
+      // Cross-references so Diplomacy.declareWar/proposeAlliance can call leaders.say
+      // and FactionLeaders.onTrade/onDefeatInBattle can change relations.
+      get diplomacy() { return gw.diplomacy; },
+      get leaders() { return gw.leaders; },
+      // Speech is surfaced by ContinentScene via this hook (set by the scene); a
+      // no-op when headless / inside a settlement.
+      showLeaderSpeech: (faction: string, line: string) => { if (gw._leaderSpeechHook) gw._leaderSpeechHook(faction, line); },
+      logEvent: (text: string, _color?: string) => { gw.notify(text); },
+      showToast: (text: string) => { gw.notify(text, 0x8c2b2b); },
+      threatWarning: (_t: string) => { /* no-op at world level */ },
+      refreshPanel: () => { if (gw._diploPanelHook) gw._diploPanelHook(); },
+      // Per-settlement-only systems the classes guard for — left absent/empty so
+      // the existing `if (this.scene.x)` checks short-circuit safely.
+      reputation: { scores: {} as Record<string, number> },
+      buildings: { castle: null, countOfType: (_k: string) => 0 },
+    };
+  }
+
+  /** Hook ContinentScene sets so leader speech bubbles render on the continent. */
+  _leaderSpeechHook: ((faction: string, line: string) => void) | null = null;
+  /** Hook ContinentScene sets so an open diplomacy panel re-renders on changes. */
+  _diploPanelHook: (() => void) | null = null;
+
+  /** Lazily construct the world-level Diplomacy + FactionLeaders instances on a
+   *  fresh host. Idempotent (no-op if already wired). Called by WorldDiplomacy
+   *  .ensure() and on new campaign. */
+  initDiplomacy(): void {
+    if (this.diplomacy && this.leaders) return;
+    const host = this.diploHost();
+    this.diplomacy = new Diplomacy(host);
+    this.leaders = new FactionLeaders(host);
+  }
+
+  /** Re-bind diplomacy/leaders to a fresh host (new campaign / restore). */
+  rebindDiplomacy(): void {
+    const host = this.diploHost();
+    if (this.diplomacy) this.diplomacy.scene = host;
+    if (this.leaders) this.leaders.scene = host;
+  }
 
   // --------------------------------------------------------------------------
   // Derived helpers
@@ -410,6 +512,13 @@ class GameWorldState {
     this.heroDialogue = { lastShownDay: -99, firedOnce: {} };
     this.heroQuests = {};
     this.heroFlags = {};
+    // --- Phase 7 diplomacy reset (re-homed to the continent) ---
+    this.diplomacy = null;
+    this.leaders = null;
+    this.leaderMemory = {};
+    this.honor = 0;
+    this.diploFlags = {};
+    this.initDiplomacy(); // wire fresh Diplomacy + FactionLeaders to the new world
     this.spawnAIParties();
     this.spawnMercenaryCamps();
     this.started = true;
@@ -545,6 +654,16 @@ class GameWorldState {
       heroDialogue: this.heroDialogue,
       heroQuests: this.heroQuests,
       heroFlags: this.heroFlags,
+      // (Phase 7) Diplomacy campaign layer — relations/treaties (Diplomacy.serialize)
+      // + named-leader state (FactionLeaders.serialize) + remembered leader memory
+      // + honor + the diplomacy flags (memory events / caravan-avoid / artifact).
+      // All plain JSON; Phase 12 rebuilds the instances on a fresh host then
+      // restore()s these.
+      diplomacy: this.diplomacy ? this.diplomacy.serialize() : null,
+      leaders: this.leaders ? this.leaders.serialize() : null,
+      leaderMemory: this.leaderMemory,
+      honor: this.honor,
+      diploFlags: this.diploFlags,
       started: this.started,
     };
   }

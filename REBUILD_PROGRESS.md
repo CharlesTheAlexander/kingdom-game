@@ -190,7 +190,45 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       asserts pass; FPS 50-57; ZERO console errors (3 consecutive runs); tsc clean; build clean. P5 expedition + iso-
       enter regressions still green. DEFERRED (per spec): diplomacy memory/honor (P7 consumes heroFlags/relationDeltas),
       late-game win-condition implementation (P8 reads fourthWinCondition), save wiring (P12 reads heroes serialize()).
-- [ ] P7 — Diplomatic narrative continuity (leader memory, honor)
+- [x] P7 — Diplomatic narrative continuity (leader memory, honor)
+      RE-HOMED diplomacy from the now-inert per-settlement IsometricScene to the CONTINENT/world level. GameWorld now
+      owns a real `Diplomacy` instance (`GameWorld.diplomacy`, relation meters/treaties/NAP/alliance) + a real
+      `FactionLeaders` instance (`GameWorld.leaders`, named rulers Valdris/Elowen/Krag), BOTH backed by a tiny
+      world-level host adapter (`GameWorld.diploHost()`) that maps the 3 AI factions (red/purple/yellow) to the
+      {cfg:{key,name,color},castleAlive} shape they expect, routes resources.spend/add to GameWorld.gold, and
+      no-ops the per-settlement-only hooks. Banked Phase-5 caravan-raid deltas (`GameWorld.relationDeltas`) are
+      applied into real relations once on init (deltasApplied guard). New system `src/systems/WorldDiplomacy.ts`
+      (static, GameWorld-backed, JSON-friendly — same pattern as HeroWorld) is the brain on top: leader memory,
+      history-based dialogue, memory events, betrayal consequences, honor.
+      LEADER MEMORY: per faction `{battlesAgainst, battlesTheyWon, battlesYouWon, treatiesHeld, treatiesBetrayed,
+      tributesPaid, warsDeclared, allied, firstContact, alliedSinceDay, caravansRaided}` in `GameWorld.leaderMemory`,
+      incremented ONLY from real events (continent/expedition battles via ContinentScene.recordFactionBattle, treaty
+      sign/break, tribute, war, alliance, applied caravan raids).
+      HISTORY DIALOGUE: leaders speak differently by memory — memoryLine() escalates the same greeting through first
+      contact → defeated1/2/3 → betrayed/allied/tribute. Full spec ladders for all three (Valdris/Elowen/Krag) +
+      council variants (Valdris hostile vs respected, Elowen/Krag allied, "KRAG BROUGHT SNACKS"). Surfaced via a
+      leader-portrait speech popup (bottom-right, distinct from the hero popup) + in the diplomacy panel.
+      MEMORY EVENTS (one-shot, real effects): Valdris beaten 3× & rel≥0 → +5 warriors to the party; Elowen allied
+      10+ days → shares all intel free (intelShared flag); Krag beaten 3× & rel≥-20 → unique artifact (Krag's
+      Worldcleaver) + becomes ally.
+      BETRAYAL: breaking a treaty → that leader's angry line + ALL factions −10 relations + honor −3 + a "Word spreads
+      that [Kingdom] cannot be trusted" event + `diploFlags.caravanAvoidUntilDay` (5 days; WorldDiplomacy
+      .caravansAvoidingPlayer() is the readable flag for AI/ExpeditionSystem).
+      HONOR: `GameWorld.honor` (+1 per treaty upheld every 4 days, −3 per betrayal). ≥+10 → treaties 30% cheaper;
+      ≤−5 → +50 gold/treaty. Surfaced at the top of the diplomacy panel with its current effect.
+      PANEL: D key / "Diplomacy (D)" button on the continent → warm panel showing honor+gold, then per faction a
+      leader portrait + name + relation bar (−100..+100) + treaty status + one-line memory recap + world-level
+      actions (Tribute 50g / Trade / Ally / Betray / War) wired to WorldDiplomacy. Daily tick (onNewDay) accrues
+      honor + drifts relations + fires time-based memory events. main.ts exposes __WorldDiplomacy for the audit.
+      Audit (/tmp/audit/p7_diplomacy.mjs, headless new-game): banked purple −20 applied; Valdris first-contact +
+      3 wins → battlesYouWon=3, "earned my respect" day-3 line, 5-warrior gift (army 34→39); sign+break purple
+      alliance → all factions −10, honor −3, "cannot be trusted" notify, caravan-avoid flag set; tribute yellow →
+      tributesPaid 0→1 + "GOLD!..." line; ally purple +11 days → Elowen 10-day intel event fires; honor cost
+      modifiers (140/200/250 hi/mid/lo); diplomacy panel 53 objects render (shot p7_diplomacy); council variants
+      (Valdris respected, Krag snacks). 21/21 asserts pass; FPS 55-56; ZERO console errors (2 runs); tsc clean;
+      build clean. P5 expedition + P6 hero audits still green (no regression). DEFERRED (per spec): late-game
+      stages (P8 reads diploFlags), battle fog/rivers (P9), win endings (P10 — diploFlags.uniqueArtifact/intelShared
+      written for them), save wiring (P12 reads diplomacy/leaders serialize() + leaderMemory/honor/diploFlags).
 - [ ] P8 — Late game content (stages 8–9, tournament, imperial)
 - [ ] P9 — Battle fog of war + river system
 - [ ] P10 — Win consequence system (reputation endings)
