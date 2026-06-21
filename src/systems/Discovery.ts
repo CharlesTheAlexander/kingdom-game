@@ -19,7 +19,7 @@ const SETTLEMENT_HISTORIES = [
   'The birthplace of the last king before the dark age.',
 ];
 
-const BIOME_HISTORIES = {
+const BIOME_HISTORIES: Record<string, string> = {
   forest: 'The northern forests. Ancient trees older than any kingdom, and wolves that have never feared men.',
   mountains: 'The eastern highlands. Stone and iron in abundance, but the altitude is unforgiving.',
   delta: 'The southern plains. Rich farmland fed by the great river — travelers call it the breadbasket of the continent.',
@@ -29,7 +29,13 @@ const BIOME_HISTORIES = {
 const CAMP_HISTORY = 'A goblin encampment. Disorganized but numerous — they raid anything within reach.';
 
 export class Discovery {
-  constructor(scene) {
+  scene: any;
+  seen: Record<string, boolean>;
+  settlementHist: Record<string, string>;
+  _histPool: string[];
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.seen = {};            // key -> true
     this.settlementHist = {};  // settlement name -> assigned history
@@ -84,7 +90,7 @@ export class Discovery {
       const key = 'biome:' + b;
       if (this.has(key) || !BIOME_HISTORIES[b]) continue;
       this.mark(key);
-      const nm = { forest: 'Deep Forest', mountains: 'Iron Mountains', delta: 'River Delta', wildlands: 'Western Wildlands' }[b] || b;
+      const nm = (({ forest: 'Deep Forest', mountains: 'Iron Mountains', delta: 'River Delta', wildlands: 'Western Wildlands' }) as Record<string, string>)[b] || b;
       s.showDiscovery && s.showDiscovery('biome', nm, BIOME_HISTORIES[b]);
     }
   }
@@ -94,5 +100,5 @@ export class Discovery {
   biomesExplored() { return Object.keys(this.seen).filter((k) => k.startsWith('biome:')).length; }
 
   serialize() { return { seen: this.seen, settlementHist: this.settlementHist }; }
-  restore(d) { if (!d) return; this.seen = d.seen || {}; this.settlementHist = d.settlementHist || {}; }
+  restore(d: any) { if (!d) return; this.seen = d.seen || {}; this.settlementHist = d.settlementHist || {}; }
 }

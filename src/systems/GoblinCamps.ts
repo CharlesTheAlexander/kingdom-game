@@ -15,7 +15,18 @@ const CAMP_DEFS = [
 const RESPAWN_DAYS = 5;
 
 class GoblinCamp {
-  constructor(scene, def) {
+  scene: any;
+  col: number;
+  row: number;
+  x: number;
+  y: number;
+  huts: any[];
+  guards: any[];
+  discovered: boolean;
+  respawnTimer: number;
+  [key: string]: any;
+
+  constructor(scene: any, def: any) {
     this.scene = scene;
     this.col = def.col;
     this.row = def.row;
@@ -91,14 +102,18 @@ class GoblinCamp {
 }
 
 export class GoblinCampManager {
-  constructor(scene) {
+  scene: any;
+  list: any[];
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.list = CAMP_DEFS.map((d) => new GoblinCamp(scene, d));
   }
   aliveCount() { return this.list.filter((c) => c.alive).length; }
 
   threats() {
-    const out = [];
+    const out: any[] = [];
     for (const c of this.list) if (c.alive) for (const g of c.guards) if (g.alive) out.push(g);
     return out;
   }

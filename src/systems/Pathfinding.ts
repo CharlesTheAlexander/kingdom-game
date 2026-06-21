@@ -3,7 +3,7 @@
 // start / goal are { col, row }. The goal tile is always treated as reachable
 // even if it is "blocked" (e.g. the castle tile), so enemies can path to it.
 
-export function findPath(blocked, start, goal) {
+export function findPath(blocked: boolean[][], start: { col: number; row: number }, goal: { col: number; row: number }): { col: number; row: number }[] | null {
   const rows = blocked.length;
   const cols = blocked[0].length;
 
@@ -58,8 +58,8 @@ export function findPath(blocked, start, goal) {
   return null; // no path
 }
 
-function reconstruct(cameFrom, endKey, cols) {
-  const path = [];
+function reconstruct(cameFrom: Map<number, number>, endKey: number, cols: number) {
+  const path: any[] = [];
   let k = endKey;
   while (k !== undefined) {
     const col = k % cols;

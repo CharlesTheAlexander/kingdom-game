@@ -17,7 +17,7 @@ const GLOBAL_GAP = 12;    // seconds of calm between two different kingdoms' wav
 // zoneTint = the light territory wash colour.
 // (Phase B) On the 200x200 map the kingdoms sit in the far corners, 80+ tiles
 // from the player's centre start, and stay passive for the first several days.
-export const FACTIONS = {
+export const FACTIONS: Record<string, any> = {
   red: {
     key: 'red', name: 'Red Kingdom', color: 0xc0392b, labelColor: '#ff8a80', zoneTint: 0xffc2c2,
     tile: { col: 12, row: 100 }, buildCols: [4, 24], buildRows: [88, 112],
@@ -47,7 +47,18 @@ export const FACTIONS = {
 // Ranged enemy archer. Conforms to the enemy interface used by WaveManager,
 // towers and warriors (x, y, alive, update, takeDamage, destroy).
 export class AIArcher {
-  constructor(scene, x, y) {
+  scene: any;
+  x: number;
+  y: number;
+  maxHp: number;
+  hp: number;
+  alive: boolean;
+  spr: any;
+  hpBarBg: any;
+  hpBarFill: any;
+  [key: string]: any;
+
+  constructor(scene: any, x: number, y: number) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -132,11 +143,24 @@ export class AIArcher {
 }
 
 export class AIKingdom {
-  constructor(scene, cfg = FACTIONS.red) {
+  scene: any;
+  cfg: any;
+  buildings: any[];
+  usedTiles: Set<string>;
+  castleAlive: boolean;
+  castleHp: number;
+  startDay: number;
+  waveTimer: number;
+  waveNumber: number;
+  regrouping: boolean;
+  rebuildTimer: number;
+  [key: string]: any;
+
+  constructor(scene: any, cfg: any = FACTIONS.red) {
     this.scene = scene;
     this.cfg = cfg;
     this.buildings = []; // { sprite, type }
-    this.usedTiles = new Set();
+    this.usedTiles = new Set<string>();
     this.buildTimer = 0;
     this.waveTimer = cfg.firstWave;
     this.waveNumber = 0;
@@ -244,7 +268,7 @@ export class AIKingdom {
       if (this.scene.isBuildZone && this.scene.isBuildZone(col, row)) continue;
       if (this.scene.terrainType && this.scene.terrainType[row][col] === 'water') continue;
       this.usedTiles.add(key);
-      const type = Phaser.Utils.Array.GetRandom(this.cfg.buildMix);
+      const type: any = Phaser.Utils.Array.GetRandom(this.cfg.buildMix);
       const texKey = this.cfg.tex[type];
       const { x, y } = this.scene.tileCenter(col, row);
       const spr = this.scene.add.image(x, y, texKey).setDepth(5);

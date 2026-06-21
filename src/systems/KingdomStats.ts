@@ -4,7 +4,11 @@
 // discoveries) are read live from their systems at render time.
 
 export class KingdomStats {
-  constructor(scene) {
+  scene: any;
+  s: any;
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.s = this.blank();
     this.wrapResources();
@@ -19,7 +23,7 @@ export class KingdomStats {
     };
   }
 
-  note(key, amt = 1) { if (key in this.s && typeof this.s[key] === 'number') this.s[key] += amt; }
+  note(key: string, amt = 1) { if (key in this.s && typeof this.s[key] === 'number') this.s[key] += amt; }
 
   // Tally every positive resource gain by wrapping Resources.add. Idempotent:
   // the true original is cached on _origAdd so restore() can safely re-point the
@@ -34,7 +38,7 @@ export class KingdomStats {
   }
 
   serialize() { return this.s; }
-  restore(d) {
+  restore(d: any) {
     if (!d) return;
     const base = this.blank();
     this.s = Object.assign(base, d);

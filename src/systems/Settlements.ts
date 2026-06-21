@@ -23,7 +23,18 @@ const DEFS = [
 // destroy) that the player's troops auto-attack and that bites back via the
 // shared troops damage loop. It never chases — it guards its home tile.
 export class Defender {
-  constructor(scene, x, y, hp, tex, tint) {
+  scene: any;
+  x: number;
+  y: number;
+  maxHp: number;
+  hp: number;
+  alive: boolean;
+  spr: any;
+  hpBarBg: any;
+  hpBarFill: any;
+  [key: string]: any;
+
+  constructor(scene: any, x: number, y: number, hp: number, tex: string, tint: number) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -55,7 +66,20 @@ export class Defender {
 }
 
 class Settlement {
-  constructor(scene, def) {
+  scene: any;
+  name: string;
+  col: number;
+  row: number;
+  x: number;
+  y: number;
+  owner: string;
+  discovered: boolean;
+  buildings: any[];
+  guards: any[];
+  label: any;
+  [key: string]: any;
+
+  constructor(scene: any, def: any) {
     this.scene = scene;
     this.name = def.name;
     this.col = def.col;
@@ -110,7 +134,11 @@ class Settlement {
 }
 
 export class SettlementManager {
-  constructor(scene) {
+  scene: any;
+  list: any[];
+  [key: string]: any;
+
+  constructor(scene: any) {
     this.scene = scene;
     this.list = DEFS.map((d) => new Settlement(scene, d));
   }
@@ -122,7 +150,7 @@ export class SettlementManager {
     return this.list.map((s) => ({ name: s.name, owner: s.owner, discovered: s.discovered, guards: s.guards.filter((g) => g.alive).length, administrator: !!s.administrator }));
   }
 
-  restore(list) {
+  restore(list: any) {
     if (!list) return;
     for (const d of list) {
       const s = this.list.find((x) => x.name === d.name);
@@ -146,7 +174,7 @@ export class SettlementManager {
 
   // Living defenders of un-conquered settlements (added to the combat threats).
   threats() {
-    const out = [];
+    const out: any[] = [];
     for (const st of this.list) if (st.owner === 'neutral') for (const g of st.guards) if (g.alive) out.push(g);
     return out;
   }

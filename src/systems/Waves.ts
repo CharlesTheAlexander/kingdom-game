@@ -6,7 +6,21 @@ const CASTLE_DPS = 10; // damage an enemy deals to the castle per second on cont
 const ENEMY_SPEED = 55; // pixels per second
 
 export class Enemy {
-  constructor(scene, x, y, hp, damage, anims) {
+  scene: any;
+  x: number;
+  y: number;
+  maxHp: number;
+  hp: number;
+  damage: number;
+  alive: boolean;
+  rect: any;
+  path: any;
+  pathIdx: number;
+  hpBarBg: any;
+  hpBarFill: any;
+  [key: string]: any;
+
+  constructor(scene: any, x: number, y: number, hp: number, damage: number, anims?: any) {
     this.scene = scene;
     this.x = x;
     this.y = y;
@@ -118,7 +132,13 @@ export class Enemy {
 export class WaveManager {
   // Phase 3: the AI kingdom drives wave spawning, so `auto` defaults to false —
   // this manager now only updates/culls the shared enemies array.
-  constructor(scene, interval = 60, auto = false) {
+  scene: any;
+  interval: number;
+  enemies: any[];
+  spawnQueue: any[];
+  [key: string]: any;
+
+  constructor(scene: any, interval = 60, auto = false) {
     this.scene = scene;
     this.interval = interval;
     this.timeToNext = interval;
