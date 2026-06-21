@@ -3206,6 +3206,12 @@ export class IsometricScene extends GameScene {
     );
     const scouted = this.intelActive();
     this.panelText(14, this.PANEL_Y + 6, `AI KINGDOMS — DIPLOMACY${scouted ? '   (scouted)' : ''}`, { bold: true, color: '#ffe9b0' });
+    // (Pre-loop audit) Conquest-victory progress so the win path is legible.
+    if (this.winConditions) {
+      const have = this.winConditions.playerControlled(), total = this.winConditions.totalSettlements();
+      const need = Math.ceil(total * 0.75);
+      this.panelText(196, this.PANEL_Y + 6, `Conquest: ${have}/${total} (need ${need} to win)`, { color: have >= need ? '#7cfc7c' : '#cfc1a6', size: '11px' });
+    }
     // (Session-1 Phase 5) Tax slider — 4 segments, current highlighted.
     this.panelText(486, this.PANEL_Y + 6, 'Tax:', { color: '#cfc1a6', size: '11px' });
     this.taxLevels().forEach((t, i) => {

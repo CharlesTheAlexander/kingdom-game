@@ -1,5 +1,5 @@
 # KINGDOM GAME — MASTER DESIGN & PRODUCTION DOCUMENT
-*Last updated: June 2026 — auto-updated after every session* (copy 2)
+*Last updated: June 2026 — auto-updated after every session* (3)
 
 ---
 
@@ -387,43 +387,207 @@ Separate Phaser scene (BattleScene.js).
 - ⬜ Decorative bandit roads between goblin camps
 - ⬜ Zoom-morph transition (currently fade transition)
 
-### Phase C — Army & Battle System
-*Goal: Warfare feels strategic and satisfying*
-- ⬜ BattleScene.js (separate battle screen, triggers at 10+ units)
-- ⬜ Formation system (pre-battle positioning)
-- ⬜ Morale system
-- ⬜ Battle outcome → world map feedback
-- ⬜ World map army movement
-- ⬜ Siege mechanics
+### Phase C — Army & Battle System ✅ COMPLETE
+- ✅ BattleScene.js — terrain-themed battlefield, armies spawn left/right
+- ✅ Pre-battle phase (20s): Line/Wedge/Defensive/Flank formation buttons
+- ✅ Real-time combat: 5-button command bar (Charge/Hold/Flank L/R/Retreat)
+- ✅ Per-side morale bars (green→yellow→red), routing at 0
+- ✅ Floating damage numbers, projectiles, death fades
+- ✅ Victory/Defeat screen → survivors + loot returned to world
+- ✅ Knight unit: HP 120, damage 25, needs Blacksmith + Barracks L2 + Equipment
+- ⬜ Manual unit dragging in pre-battle (simplified to formation buttons)
+- ⬜ Box-select within battle (commands apply to whole army)
+- ⬜ Siege mechanics (planned later)
 
-### Phase D — Continent View
-*Goal: Strategic layer feels like Mount & Blade world map*
-- ⬜ ContinentScene.js (Tab to toggle)
-- ⬜ Catan-style continent visualization
-- ⬜ Territory coloring by faction
-- ⬜ Army dots, settlement icons
-- ⬜ Click to zoom into location
+### Phase D — Continent View ✅ COMPLETE (Phase B2)
+- ✅ ContinentScene.js — Tab to toggle
+- ✅ Catan-style biome visualization
+- ✅ Territory coloring by faction
+- ✅ Settlement icons, hover tooltips, click to focus
+- ✅ Live stats (day/season, % owned, active threats)
+- ⬜ Caravan dots on continent view (deferred)
 
-### Phase E — Economy Depth
-*Goal: Management feels meaningful*
-- ⬜ Market building (resource trading at ratios)
-- ⬜ Caravan system (trade between settlements)
-- ⬜ Expedition redesign (special resources: iron, scrolls, artifacts)
-- ⬜ Iron + equipment crafting (Knights unlock)
-- ⬜ Administrator system (auto-manage captured settlement for gold)
-- ⬜ Road building
+### Phase E — Economy Depth ✅ COMPLETE
+- ✅ Market building (2x2, trade panel, once per day)
+- ✅ Blacksmith (2x2, crafts Equipment resource, enables Knights)
+- ✅ Watchtower (extends fog of war reveal)
+- ✅ Tavern (morale bonus, mercenary recruitment)
+- ✅ Wall segments (block enemy pathfinding, have HP)
+- ✅ Equipment resource (crafted at Blacksmith, consumed training Knights)
+- ✅ Caravan system (Caravans.js, routes between owned settlements)
+- ✅ Administrator system (50g/day, auto-manages conquered settlements)
+- ✅ Diplomacy system (Diplomacy.js, relationship meters -100 to +100)
+- ✅ Non-aggression pacts, trade alliances, coordinated attacks
+- ⬜ Road building (deferred)
+- ⬜ Per-settlement stockpiles (caravans use pooled resources)
+- ⬜ Caravan dots on continent view
 
-### Phase F — Polish & Feel ✅ (largely complete — see Section 16)
-*Goal: Looks and feels like a real game*
-- ✅ Sound design — procedural Web Audio (`src/audio/SoundEngine.js`), all events wired, mute/volume control
-- ✅ Proper unit animations — `src/systems/Animations.js` (idle/walk/attack/shoot/heal + pawn tool work)
-- ✅ Settlement visual evolution (walls/castle per tier)
-- ⬜ Win/lose conditions (game-over on castle loss exists; victory condition still TBD)
-- ✅ Full 9-stage settlement progression
-- ✅ Day/night cycle + seasonal weather (snow/rain) — added this session
+### Phase F — Polish & Feel 🔄 IN PROGRESS
+- ✅ 9-stage settlement progression (Small/Medium/Large Village→Town→Castle)
+- ✅ Building caps: 8→12→16→20→24→28→32→36→40
+- ✅ Stage-gated buildings, castle sprite swaps per tier
+- ✅ Wall styles evolve (wooden→stone), moat + corner towers at Castle
+- ✅ Milestone announcement banners
+- ✅ Priority kingdom-attack banners (jump warning queue)
+- ✅ Territory pulse animation on every building placement
+- ✅ Goblin camp visuals (banners + rubble on destruction)
+- ✅ Seasonal terrain tints (Spring/Summer/Autumn/Winter)
+- ✅ Wandering villager NPCs in settlement
+- ✅ Performance: Blitter-batched terrain, bounded territory recompute
+- ✅ Resource bar: consistent icon+value+label chips, flash on change, critical pulse
+- ✅ Tutorial: 5-stage interactive (localStorage, never repeats), accurate hints
+- ✅ BattleScene visual overhaul: terrain backgrounds, 56px units, morale bars, dramatic overlays
+- ✅ Diplomacy UI: center-tick relationship bars, color-coded status, preview action effects
+- ✅ Bottom panel tabs: Build/Expeditions/Kingdoms/Caravans
+- ✅ Building costs show icons not abbreviations
+- ✅ Building tooltips on hover
+- ✅ Auto-exit placement mode after placing
+- ✅ Floating identity icons on reused-sprite buildings (bobbing coin/hammer/eye/mug)
+- ✅ Starting area expanded (20 tile reveal, nodes near castle)
+- ✅ Fog color: deep blue-gray (less oppressive)
+- ✅ Territory border: warm gold with gentle pulse
+- ✅ Continent view: local view rectangle, softened biome edges
+- ✅ Transition fades on scene switches
+- ✅ Sound design: SoundEngine.js, ~20 events, fully procedural Web Audio, mute toggle
+- ✅ Unit animations: Animations.js, spritesheet-driven, idle/walk/attack/heal per unit type
+- ✅ Pawn animations: tool-matched (axe=wood, pickaxe=stone), interact loops at nodes
+- ✅ BattleScene animations: all unit states wired
+- ✅ Day/night cycle: 4-phase interpolated (dawn/day/dusk/night), sun/moon, stars, torches
+- ✅ Per-building flickering torches at night
+- ✅ Snow particles (Winter, mountains + settlement, building snow caps)
+- ✅ Rain particles (Spring/Autumn, diagonal)
+- ✅ Seasonal ambient sound (wind/rain, 0.1 vol)
+- ✅ Text overflow audit: resource values abbreviate (125k/48k), expedition card fixed
+- ✅ Economy balance: Castle gold 2→1.5/sec (gold was 4-20x early costs)
+- ✅ BALANCE_REPORT.md written with full data tables
+- ⬜ Win/lose conditions
+- ⬜ Idle freelance yields reduction (recommended but deferred — warrants own playtest)
+- ⬜ More gold sinks in early game
 
-### Phase G — Late Game
-- ✅ Diplomacy system (relationships, tribute, pacts, war)
+**Branch:** ui-presentation-overhaul (commit e965a7d + polish commits)
+Run: git checkout main && git merge ui-presentation-overhaul
+
+**Key balance findings from simulation:**
+- Stone: ~60/day from idle workers — NOT scarce as suspected
+- Food: fine with one Farm, crisis only if army built before Farm
+- Gold: was oversupplied (600/day vs 30-150 early costs) — trimmed to 450/day
+- Iron: correct pacing lever for late game, intentional gate
+- All tier upgrade costs affordable in proportion to income
+- Freelance workers may be TOO generous — reduces need for building allocation
+
+### Phase H — Save System + Population ✅ COMPLETE
+- ✅ SaveManager.js: complete state snapshot (resources, buildings, troops HP, fog-of-war bitset, diplomacy, AI kingdoms, settlements, nodes, expeditions, caravans, artifacts, flags, audio)
+- ✅ 3 localStorage slots (slot 0 = auto-save)
+- ✅ Menu (≡ button): Continue/Save/Load/Settings/New Game with slot metadata
+- ✅ Auto-save: every 5 days + before BattleScene/Continent + on tab close
+- ✅ S quick-save hotkey, "Saving..." indicator, "Kingdom Loaded" banner
+- ✅ Corrupted/quota error handling
+- ✅ Population.js: 10 start, +4/House, +1 every 3 days when fed
+- ✅ Happiness 0-100: daily recompute, affects worker production (+10%/-20%/strike)
+- ✅ Happiness HUD: face icon + breakdown tooltip
+- ✅ Both systems persist through save/load
+- Commits: 04780c5 (save), b0c1b96 (population)
+- Branch: ui-presentation-overhaul
+
+### Phase I — Army On Map ✅ COMPLETE (commits 0f8e7a3, 426800c)
+- ✅ ArmyManager.js: named armies, terrain-based marching, supply, morale
+- ✅ Army icons on map (faction-colored diamonds, unit count badge, morale dot)
+- ✅ Armies tab in bottom panel: form, manage, disband
+- ✅ March to location, neutral settlement, AI castle, enemy army
+- ✅ Supply system: food from stockpile, morale drops when exhausted
+- ✅ Auto-return home when morale hits 20
+- ✅ Garrison duty at conquered settlements
+- ✅ AI armies march visibly on map (not teleporting spawns)
+- ✅ Warning banner when enemy army within 30 tiles
+- ✅ Army dots on continent view, moving in real time
+- ✅ BattleScene receives real army HP, returns survivors
+- ✅ Coalition warfare: 3-day warning then synchronized assault
+- ✅ Army quick-select hotkeys 1/2/3
+
+### Phase J — World Events + King Identity ✅ COMPLETE (commits 7c39328, 0ce9b47)
+- ✅ WorldEvents.js: 15 events (5 world news, 10 player choice)
+- ✅ Seasonal events (harvest/winter/summer/spring modifiers)
+- ✅ Messenger icon near castle, queues messages
+- ✅ Message panel with choice buttons
+- ✅ King creation screen (name + trait, one-time)
+- ✅ 6 traits: Warlord/Merchant/Builder/Diplomat/Explorer/Scholar
+- ✅ Reputation: Conqueror/Merchant/Protector/Destroyer (0-100)
+- ✅ Kingdom title under name based on highest reputation
+- ✅ Reputation effects on AI behavior and trade
+
+### Phase K — Research Tree ✅ COMPLETE (commit 9d4740f)
+- ✅ Library building (2x2, unlocks research)
+- ✅ 9-tech tree: Military/Economy/Exploration branches
+- ✅ Visual tree with prerequisite connections
+- ✅ Progress bar in Library info panel
+- ✅ Completion banners, effects applied immediately
+
+### Phase L — Diplomacy Expansion + QOL ✅ COMPLETE (commits 3fecf53, ab378df)
+- ✅ Trade Agreement treaty (+30 relations required)
+- ✅ Military Alliance treaty (+60 relations, ally sends troops)
+- ✅ Vassalage (demand tribute from weaker factions)
+- ✅ Notifications log (last 50 events, color coded)
+- ✅ Pause button (Space key, freezes all timers)
+- ✅ Hotkeys: B/E/K/A/R/M/Space/Escape
+- ✅ DESIGN_DOC.md updated with Section 18
+
+### Phase M — Full Audit + Fixes ✅ COMPLETE (commit 4fce9fd)
+- ✅ FULL_AUDIT_REPORT.md written — zero errors across 10 sessions
+- ✅ King creation now pauses simulation (gameSpeed=0)
+- ✅ Win conditions: Conquest/Diplomacy/Legacy all working
+- ✅ WinConditions.js: checked in onNewDay()
+- ✅ Victory screen: stats, Continue/New Game
+- ✅ Defeat screen: redesigned with stats + Try Again
+- ✅ Early AI tuning: garrison 3 each, Yellow day 6, Red day 9
+- ✅ BattleScene subtitle: "Attacking"/"Assaulting"/"Defending" correct
+- ✅ Diplomacy reputation: collapsible section, no overlap
+- ✅ Node labels: fade by zoom, visible on hover
+- ✅ Night: darker overlay, 40 stars, bigger moon/torches
+- ✅ Winter: 250 particles, thicker snow caps, louder wind
+- ✅ buildings.place() enforces stage gating
+
+### Phase N — World Depth Session 1 ✅ COMPLETE
+- ✅ Ancient ruins: 6 ruins in biomes, fog-hidden, one-time exploration, 6 unique rewards
+- ✅ WanderingFactions.js: 2 caravans (trade/raid), 2 tribes (envoy→friendly), pilgrims
+- ✅ Caravan trade: better-than-market rates, raid option
+- ✅ Tribe effects: Forest→scouts+timber, Plains→food gifts
+- ✅ Pilgrims: cross map, stop at Monastery for gold
+- ✅ World events expanded: 15→28 events, seasonal additions
+- ✅ Location histories: settlement/biome/goblin/AI castle discovery cards
+- ✅ Tax system: Low/Normal/High/Extortionate, revolt mechanic
+- ✅ Kingdom statistics panel: 6 sections, persists through save/load
+- ✅ All faction dots on continent view
+- Commits: 574a9b0, bf980a9, c09c933, 0600da1, 03c6321, 69a0720, d267dea
+
+### Phase O — Major Bug Fix + UI Redesign ✅ COMPLETE
+- ✅ 13 critical bugs fixed (soldier cap, alliance, AI army limits, fog, flank, battle blocks)
+- ✅ Fullscreen canvas (fills browser window, responsive resize)
+- ✅ K&C-inspired UI redesign: slim 7-category bar, toggle panels, visual research tree
+- ✅ Auto-walls replace manual wall placement (breach delay mechanic)
+- ✅ Loose units defend-only, must form army to attack
+- ✅ 3 small stone nodes near starting castle
+- ✅ Continent view restyled (saturated biomes, icons, river, vignette)
+- ✅ BattleScene: Start Battle Now button, animated formation preview
+- ✅ 100+ unit battles use formation blocks (readable at scale)
+- Commits: 168077a, d0eee52, 0aa9e07, 9a9ff8d, f3e798a, 83e469d
+
+**Known deviations:**
+- Building/unit selection still uses bottom panel (floating world-space panels deferred)
+- Wall type kept in save-compat only
+
+### Phase P — Tonight: Autonomous Loop Session
+- ⬜ Play → fix → improve loop until context exhausted
+- ⬜ TypeScript migration (separate dedicated session)
+- ⬜ In-battle tactical unit selection
+- ⬜ Battlefield terrain bonuses
+- ⬜ Building upgrades to 5 levels
+- ⬜ Manufacturing chains
+- ⬜ Banking system
+- ⬜ Great Council
+- ⬜ Asset replacement
+- ⬜ Main menu screen
+
+### Phase O — Late Game
 - ⬜ Multiplayer consideration
 - ⬜ 3D transition planning
 
@@ -484,335 +648,49 @@ kingdom-game/
 
 Always include this doc at the top of every major Claude Code prompt.
 
-**Current status: Full game audit complete ✅ — clean bill of health**
-- Zero critical/major bugs
-- One minor banner overlap fixed
-- All systems verified working end-to-end
-- Commit: 7041a18
+**Current status: Major bug fix pass complete ✅**
 
-**Known design observations (not bugs):**
-- Kingdom attack banners should jump the warning queue (currently FIFO)
-- Central building placement doesn't visibly expand territory (correct but confusing)
+**Bugs fixed (commit 8dac94e, branch ui-presentation-overhaul):**
+- ✅ Torch particles drift on zoom (fixed world projection)
+- ✅ Cannot place buildings behind castle (clicks fall through in placement mode)
+- ✅ Tab locks in continent view — CRITICAL (bulletproof: fallback timer, try/catch, Escape key, always-on return button)
+- ✅ Warriors/mercs don't attack settlements (playerCommanded flag disables home leash)
+- ✅ Soldier cap ignores expedition soldiers (deployedSoldiers() added to total)
+- ✅ Walls place outside territory (click re-validates on placement)
+- ✅ Kingdom panel text unreadable (white bold on dark backgrounds, proper sizing)
+- ✅ Units run home after move command (playerCommanded flag holds at destination)
+- ✅ Market 1-trade/day limit removed (unlimited trades)
+- ✅ Move and Demolish buildings added (free to move, 50% refund on demolish, Castle exempt)
 
-**Next session target: Phase C — BattleScene.js**
-Completely isolated file, zero risk to existing systems.
-- Triggers when 10+ units on either side
-- Pre-battle formation phase (30 sec)
-- Real time combat with morale system
-- Outcome feeds back to world map
-- See Section 8 for full spec
+**Note:** stray IsometricScene 2.js exists in src/scenes/ — delete it manually
 
-**After Phase C:**
-- Phase D — Economy depth (Market, Caravans, Blacksmith, Knights)
-- Phase E — Polish & Feel (sound, animations, full 9-stage progression)
-- Phase F — Late game (diplomacy, multiplayer consideration)
+**Commits:**
+- 61e7691: idle workers, wolf spawns, expedition slots, UI declutter
+- e167ff8: world expansion + continent view
+- 7041a18: full game audit fixes
+- isometric tile placement fix
+- 249e344: BattleScene + new buildings + 9-stage progression + diplomacy
+- e965a7d: UI presentation overhaul
+- polish commits (animations, sound, weather, balance)
+- 8dac94e: bug fixes + move/demolish buildings
 
----
+**Next session: UI Overhaul**
+Based on GAME_CRITIC_REPORT.md (committed to project).
 
-## SECTION 15: MAJOR UPDATE — BATTLES, BUILDINGS, PROGRESSION, DIPLOMACY ✅
+Top 3 critic priorities:
+1. Resource bar — inconsistent icons, gold/iron unreadable
+2. BattleScene — flat green void, tiny units, no spectacle
+3. Tutorial — outdated, contradicts actual mechanics (auto-gather)
 
-This session implemented the strategic mid/late-game layer:
-
-**BattleScene (`src/scenes/BattleScene.js`)** — separate scene; triggers when a
-combat involves 10+ combined units. Terrain-themed field, armies spawn
-left/right, terrain obstacles, 20s pre-battle with 4 formation buttons
-(Line/Wedge/Defensive/Flank), then auto-combat with a 5-button command bar
-(Charge/Hold/Flank L/R/Retreat), per-side morale bars (green/yellow/red),
-floating damage numbers, archer projectiles, death fades. Outcome (Victory/
-Defeat/Retreat) returns surviving army + loot to the world.
-
-**New buildings** — Market (2×2, trade panel, 1/day), Blacksmith (2×2, crafts
-Equipment/day, enables Knights), Watchtower (1×1, +8 fog reveal), Tavern (2×2,
-+10 battle morale, recruit mercenaries), Wall (1×1, placeable anywhere, blocks
-pathing, no-cap). New resource: **Equipment**.
-
-**Knights** — Barracks L2 + operational Blacksmith; 80g+30 food+1 equipment;
-HP 120 / 25 dmg, blue-steel armored sprite.
-
-**9-stage settlement progression** — Small/Medium/Large Village → Small/Medium/
-Large Town → Small/Medium/Large Castle, each with cost, building cap (8→40),
-stage-gated buildings, castle sprite swaps (village→wooden→stone fort), walls
-(fence→wood→stone), moat + corner towers at castle stages, milestone banners.
-
-**Caravans (`src/systems/Caravans.js`)** — routes between owned settlements
-(max 3), daily specialty delivery scaled by distance, raid chance.
-
-**Administrators** — assign to a conquered settlement: +30% tribute, 50 gold/day.
-
-**Diplomacy (`src/systems/Diplomacy.js`)** — per-kingdom relationship (-100..100),
-reacts to attacks/tribute/time; thresholds gate attacks; Send Tribute / Declare
-War / Non-aggression Pact / Trade Alliance from the kingdoms panel.
-
-**World polish** — priority warning banners (kingdom attacks jump the queue),
-territory pulse on every build, goblin-camp red banners + rubble, seasonal
-terrain tints, decorative wandering villagers.
-
-**Performance** — terrain is a single batched Blitter (no 40k-tile depth sort);
-territory recompute is bounded to the area around changed tiles.
+Other high priority:
+- Expedition panel overlap/clipping bugs
+- Diplomacy bars empty at neutral (looks broken)
+- Spatial disconnect: top-right openers open bottom panels
+- New buildings are tinted clones (Market = windmill)
+- Placement mode doesn't auto-exit
 
 ---
 
 *Git repo: github.com/CharlesTheAlexander/kingdom-game*
 *Local: ~/Desktop/kingdom-game*
 *Dev server: localhost:5174*
----
-
-## SECTION 16: PRESENTATION OVERHAUL, POLISH, BALANCE & CRITIC PASSES ✅
-
-Three back-to-back sessions took the game from "impressive prototype" to
-"looks like a game", driven by GAME_CRITIC_REPORT.md and a final critic re-pass
-(GAME_CRITIC_REPORT_2.md). No new gameplay systems were added; building anchors
-were untouched.
-
-**UI / presentation overhaul** (`ui-presentation-overhaul` branch)
-- Resource bar rebuilt as consistent icon+value+label chips (2 rows), with
-  flash-on-change and critical pulse; big numbers abbreviate (`12.3k`, `250k`).
-- Interactive staged tutorial (5 localStorage-gated stages) replacing the static,
-  outdated welcome modal; contextual hints rewritten to match real mechanics.
-- BattleScene overhaul: terrain-themed banded battlefield + scenery, 56px units in
-  dense ranks, redesigned morale bars (icon + numeric value), dramatic pre-battle
-  (battlefield name, faction, countdown), command bar with icons/active state,
-  full-screen Victory/Defeat overlay.
-- Diplomacy panel: centre-tick relationship bar with red/green zones, coloured
-  status labels, action buttons that preview effects ("Tribute 50g → +20").
-- Bottom-panel tabs `[Build][Expeditions][Kingdoms][Caravans]` replacing the
-  disconnected top-right openers; build costs as icon+number; building tooltips on
-  hover; placement auto-exits after placing.
-- Building identity: floating bobbing icons (coin/hammer/eye/mug) over reused-
-  sprite buildings + name labels on hover.
-- World: 20-tile starting reveal, nodes near the castle, deep blue-gray fog, warm-
-  gold pulsing territory border, continent "local view" rectangle + softened biome
-  edges + texture variation, transition fades.
-
-**Polish session**
-- **Animations** (`src/systems/Animations.js`): central state driver over the Tiny
-  Swords spritesheets — warriors (idle/walk/Attack1→Attack2 swing), archers
-  (walk/shoot), monks (walk/heal), pawns (tool-matched walk + chop/mine interact),
-  applied in the world and the BattleScene.
-- **Sound** (`src/audio/SoundEngine.js`): fully procedural Web Audio, ~20 events
-  wired (UI 0.3 / combat 0.5 / world 0.4 / fanfares 0.7), throttled; top-right
-  speaker control (click = mute, scroll = volume).
-- **Day/night**: smooth dawn→day→dusk→night with arcing sun, stars, moon, and
-  flickering per-building torches (drawn above the night overlay so they glow).
-- **Weather**: Winter snow (+ roof caps) and Spring/Autumn diagonal rain particle
-  systems with wind/rain ambient beds, driven off `seasonHint()`.
-- **Text audit**: number abbreviation + fixed the over-long Campaign expedition
-  reward; ellipsis helper for any long names.
-
-**Balance** (`BALANCE_REPORT.md`) — quantitative day-by-day economy sims via
-`window.__game`. Findings: the economy is generous, not scarce; the old "stone
-impossible" critique did not reproduce. Changes: Castle gold 2→1.5/sec (gold was
-oversupplied); idle freelance stone 2→4/trip (idle stone was RNG-low, gating the
-Mine). Food/gold-scarcity conditional fixes were not triggered.
-
-**Critic re-pass** (`GAME_CRITIC_REPORT_2.md`) — every Critic #1 item resolved,
-zero console errors anywhere, no regressions. Two MEDIUM onboarding-feel fixes
-applied: start mid-morning in bright daylight (not dim dawn), and silence the
-day-1 wolf alarm so the opening stays calm.
-
-**Verification:** `npm run build` clean; headless playthroughs (fresh load,
-combat, night, winter, BattleScene, continent) all console-clean.
-
----
-
-## SECTION 17: SAVE/LOAD + POPULATION (Expansion session)
-
-Implemented from the Creative Director expansion doc — its two top items were a
-save system and the army-on-map system. This session delivered the save system
-(its #1 priority — "players are losing progress") and population/happiness.
-
-**Save / Load (`src/systems/SaveManager.js`)** ✅
-- Full state snapshot: resources, day/time/tier, buildings (type/pos/level/hp/
-  workers), troops (type/pos/HP/kind), fog-of-war (base64 bitset), diplomacy,
-  AI-kingdom state, settlements (by name), nodes, expeditions, caravans,
-  artifacts/buffs, tutorial/hint flags, audio, population.
-- 3 localStorage slots (slot 0 = auto-save). Load = stash snapshot + scene.restart()
-  + per-section guarded `applySave()`.
-- Auto-save every N days, before BattleScene/Continent transitions, and on
-  `beforeunload`. Menu (≡ top-left): Continue / Save / Load / Settings / New Game,
-  with slot metadata (settlement, day, timestamp, playtime). "Saving…" indicator,
-  S quick-save, "Kingdom Loaded" banner, corrupted/quota handling.
-- Restart-reuse crash fixed by nulling stale HUD refs at the top of `create()`.
-
-**Population + Happiness (`src/systems/Population.js`)** ✅
-- Population (start 10, +4 capacity/House, +1 every 3 days when fed & below cap).
-- Happiness 0–100 recomputed daily from food / recent attacks / Tavern / crowding /
-  recent battles; scales worker production (+10% happy, −20% unhappy, strike <20).
-- Top-centre HUD (Pop X/Y + drawn happiness face + %) with a breakdown tooltip;
-  production modifier shown in the worker panel. Persisted in saves.
-
-**Still open from the expansion doc (future sessions):** army-on-map system
-(the other marquee feature — troops→armies, map movement, supply, AI armies,
-BattleScene HP handoff), world events + messengers, king identity + reputation,
-research tree, and the larger map/exploration/diplomacy/endgame content.
-
----
-
-## SECTION 18: MAJOR EXPANSION — ARMIES, EVENTS, KING IDENTITY, RESEARCH, DIPLOMACY, QOL ✅
-
-Delivered the remaining marquee features from the expansion doc in seven phases.
-All phases ship building clean (`npm run build`), with a full automated Day 0→25
-audit + real-time loop run passing at stable FPS and **zero console errors**.
-
-**1. Army system (`src/systems/ArmyManager.js`)** ✅
-- Player forms named armies from the unassigned troop pool (warrior/archer/monk/
-  knight/mercenary, each with its own HP); armies carry food supply + morale.
-- Armies are first-class map objects: float `col/row`, terrain-based march speed
-  (`MARCH_SPEED` per biome), depth-9999 faction-colored icons, selectable rings.
-- `marchTo` / `update(gdelta)` move armies in real time; `onNewDay` drains supply
-  (morale falls when starving), `sendSupplies` / `addMorale` recover them.
-- Base cap of 3 player armies (a trait can raise it via `traitBonuses.armyCap`).
-  Serialize/restore for saves.
-
-**2. Army combat + AI armies on the map** ✅
-- Player armies attack neutral settlements and AI castles; engagements hand off to
-  `BattleScene` (`{playerArmy, enemyArmy, terrainType, onComplete}`) and write the
-  surviving unit counts back via `setUnitsFromBattle`. Conquest grants reputation.
-- AI kingdoms now field real marching armies: `AIKingdom.launchWave()` spawns an
-  army that marches on the player (legacy edge-spawn kept only as a fallback).
-  Interception checks trigger army-vs-army battles. Armies drawn on the Continent
-  view too.
-
-**3. World events + messenger (`src/systems/WorldEvents.js`)** ✅
-- 15 events (news + branching `choice` events) plus seasonal modifiers; a 7-day
-  random roll with a 20-day cooldown, threat-warning banners, and a messenger
-  panel to resolve choices (artifacts, fog reveals, gold, troops, etc.).
-- Goblin spawns respect an event-granted truce window. Serialize/restore.
-
-**4. King identity + reputation (`src/systems/Reputation.js`)** ✅
-- First-ever start shows a king-creation screen (DOM inputs over the canvas):
-  kingdom name, ruler name, and 1 of 6 traits (warlord / merchant / builder /
-  diplomat / explorer / scholar), each with passive bonuses + a one-time effect.
-- Reputation tracks conqueror / merchant / protector / destroyer; the highest gives
-  the ruler a title shown in the HUD. Trait bonuses applied at use sites (produce,
-  upkeep, market, fog, army cap, free research). Persisted in saves.
-
-**5. Research tree (`src/systems/Research.js`)** ✅
-- A Library building unlocks a 9-tech tree across 3 branches (military / economy /
-  exploration) with prerequisites. Library workers advance the current tech daily.
-- Effects split into `once` (saved via buffs/troops) and idempotent `flag` effects
-  (re-applied on load). Visual tree panel with branch colors + progress bars.
-
-**6. Diplomacy expansion (`src/systems/Diplomacy.js`)** ✅
-- Treaties per kingdom: **Trade Agreement** (+30 rel → +20 gold/day), **Military
-  Alliance** (+60 rel, 200 gold → reinforcements when you're attacked), and
-  **Vassalage** (Conqueror 50+, neutral relations → +50 gold/day tribute, or war if
-  refused). Treaties shown as colored badges; Break Treaty available.
-- **Coalition warfare:** when 2+ kingdoms sit at ≤ −80, a "coalition is forming"
-  warning fires 3 days before all hostile kingdoms march **simultaneously**.
-- Treaties + coalition state serialize/restore.
-
-**7. Quality-of-life** ✅
-- **Notifications log** (📜 button + unread badge): last 50 events, color-coded,
-  click-outside / ✕ to close.
-- **Pause** (⏸ by the speed control / Space) freezes the whole simulation
-  (`gameSpeed → 0`).
-- **Hotkeys:** Space pause · B/E/K/A/R switch panels · M menu · L log · Tab continent
-  · S quick-save · Esc cancel.
-- **Army quick-select:** keys 1–3 select a player army and pan the camera to it.
-
-**Audit (Phase 8):** automated 25-day simulation (all `onNewDay` systems), world-event
-+ coalition stress, a 12s real-time run at 3× with a marching army, and a
-save→reload→load round-trip — all green, console clean, FPS stable (~44 headless).
-
-**Decisions logged:** all army combat routes through BattleScene regardless of size;
-armies auto-name; some trait effects simplified; DOM `<input>` used for king
-creation; coalition reuses each kingdom's `launchWave` for the synchronized assault.
-
----
-
-## SECTION 19: SESSION 1 — RUINS, WANDERING FACTIONS, EVENTS, HISTORIES, TAX, STATS ✅
-
-Seven-phase content pass adding the "living world" layer. All phases build clean and
-were headless-verified; a full integrated playthrough runs at ~42 FPS with **zero
-console errors** and full save/reload persistence of every new system.
-
-**1. Ancient Ruins (`src/systems/Ruins.js`)** — 6 Graphics-drawn ruins anchored to
-biomes (2 forest, 2 mountains, 1 wildlands, 1 delta), ≥40 tiles from the player and
-≥20 from AI castles, hidden in fog until a unit comes within 5 tiles (gold name +
-shimmer + investigate event). Explorable once via a 3-soldier / 2-day expedition for
-one of six non-repeating rewards (Whetstone +25% dmg, Forgotten Map full reveal, Iron
-Cache, Lost Tome free research, the Champion "The Ancient", or warned Cursed Gold).
-
-**2. Wandering Factions (`src/systems/WanderingFactions.js`)** — 2 merchant caravans
-(cart Graphics; roam between settlements; proximity prompt → Trade at better-than-
-market rates or Raid for loot at a reputation cost; rep 50+ makes them seek the
-player), 2 nomadic tribes (Forest/Plains, befriend via a 50-gold Envoy expedition →
-reveal their biome + periodic gifts; raid → hostile), and a pilgrim group every 10
-days crossing the map (territory happiness, Monastery donations, vanishes if attacked).
-Drawn on the continent view as colored dots.
-
-**3. World events 15 → 28 (`src/systems/WorldEvents.js`)** — 13 new events (AI-vs-AI
-war, drought, iron rush, renown, wounded soldier, rogue archer, weapon cache, plague,
-defector general, harvest festival, lost merchant, military parade, wandering scholar)
-plus Spring (food windfall) and Winter (wandering-band choice) seasonal additions.
-Backed by small hooks: temporary happiness modifiers, `_eventFarmMult`, iron-bonus
-window, research-speed multiplier, growth-pause.
-
-**4. Location histories (`src/systems/Discovery.js`)** — first approach (5 tiles) to a
-settlement, ruin, goblin camp, AI castle, or new biome shows a bottom-center card with
-an authored one-line history and logs it; never repeats.
-
-**5. Tax system** — Low/Normal/High/Extortionate slider in the kingdoms panel scales
-all gold income (Castle, caravans, administrators) and happiness; a HUD indicator
-shows the rate. Extortionate + happiness <20 for 3 days → revolt: 1-day worker strike,
-2 soldiers defect, happiness hit, taxes forced back to High.
-
-**6. Kingdom Statistics (`src/systems/KingdomStats.js`)** — a Stats button opens a
-full overlay (kingdom / military / economy / research / diplomacy / discoveries +
-reputation bars). Resource totals captured by wrapping `Resources.add`; counters via
-`note()`. Persists across saves (and survives New Game).
-
-**Decisions:** ruins/factions/discovery are world-space Graphics (no new art);
-caravan "dropdown" rendered as a list; AI-vs-AI war modeled by delaying both kingdoms'
-waves ~5 days; tax applies only to the three specified gold sources, not all gold.
-
----
-
-## SECTION 20: PLAYTEST BUG FIXES + K&C UI REDESIGN ✅
-
-Six-phase session: fix every playtest bug, then rebuild the UI around the
-Kingdoms-and-Castles philosophy (map-filling, minimal, panels only when needed).
-All phases build clean and were headless-verified at 1440×900 with zero console
-errors; a final 3× burst held a stable framerate.
-
-**Phase 1 — 13 critical bug fixes:**
-1. Soldier cap now counts army units (`soldierTotal` override) and is enforced at
-   every add site (training, mercenaries, expedition returns discharge excess).
-2. Alliance (+80 or treaty) sets `attackModifier 0` and recalls that faction's
-   marching armies; Break Alliance added.
-3. Battles never trigger with 0 enemy units (guards in spawn/arrive/intercept).
-4. AI capped at 2 armies/kingdom, ≤15 units each, 30-unit standing cap.
-5. Loading clears pending battle, blocks battles for 10s, pauses mid-march AI
-   armies 3 days, and stops any lingering BattleScene.
-6. Roaming faction sprites are NaN/bounds-clamped.
-7. Opaque fog overlay (depth 99998, viewport-bounded) hides everything unexplored.
-8. Torches removed entirely (clean removal).
-9. `playerCommanded` persists through deselection; explicit Return-to-Castle resets it.
-10. Offer Ceasefire (100g → −20 rel, 5-day cooldown) with accept/refuse logic.
-11. Flank L/R moves units to the left/right 30% then advances, with an arrow cue.
-12. Battles with >10 units a side render as formation BLOCKS ("Warriors x24").
-13. Discovery toasts slide in bottom-right, small, queued (max 2), auto-dismiss.
-
-**Phase 2 — Fullscreen:** 16:10 design resolution (1440×900) via `Scale.FIT` +
-resize listener; canvas fills the window (dark letterbox, never white).
-
-**Phase 3 — K&C UI:** slim bottom **category bar** (Castle / Food / Industry /
-Military / Research / Armies / Map) replacing the old tabs; panels toggle open
-above the bar, one at a time; default is no panel (map fills the screen). Top-left
-clickable **kingdom identity** (name / ruler-title-stage / pop-happiness / tax);
-centred **resource bar** with click-for-breakdown; top-right status cluster
-(stats / log / menu / messenger). Research renders as a visual tree.
-
-**Phase 4 — Design changes:** Wall building removed → **auto-walls** drawn along
-the territory border by tier (fence→wood→stone→fortification) with a 5s breach
-delay; **unassigned units defend only** (must form an Army to attack); **3 small
-stone deposits** (20 each) near the start; **continent view** restyled (saturated
-biomes, brighter river, star/circle/diamond/X/triangle icons, vignette).
-
-**Phase 5 — BattleScene:** "⚔ Start Battle Now" button appears after 3s to skip
-the timer; formations animate into place during pre-battle.
-
-**Decisions:** building-selection and unit-selection still use the bottom panel
-(functional; world-space floating panels deferred); the Wall type def is retained
-only for save compatibility; centred-resource HUD keeps the existing chip system.
