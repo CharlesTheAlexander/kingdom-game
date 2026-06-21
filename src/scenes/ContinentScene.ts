@@ -9,7 +9,8 @@ import { ContinentPathfinder } from '../systems/ContinentPathfinder.js';
 import type { PathStep } from '../systems/ContinentPathfinder.js';
 import { biomeData } from '../data/Biomes.js';
 import { PioneerSystem } from '../systems/PioneerSystem.js';
-import type { PioneerParty } from '../systems/GameWorld.js';
+import type { PioneerParty, WorkerParty, AIParty as AIPartyT } from '../systems/GameWorld.js';
+import { ExpeditionSystem } from '../systems/ExpeditionSystem.js';
 
 // ============================================================================
 // ContinentScene — Phase 2 (Bannerlord rebuild) PRIMARY game loop.
@@ -152,6 +153,12 @@ export class ContinentScene extends Phaser.Scene {
     // for, so we only re-path when a pioneer's destination changes.
     this._pioneerPaths = new Map();
     this._pioneerIcons = new Map(); // id -> { container, badge }
+
+    // --- Worker movement state (Phase 5) — same per-id A* cache as pioneers. --
+    this._workerPaths = new Map();
+    // (Phase 5) Turn ~1 in 2 of the existing merchant AI parties into raidable
+    // laden caravans so the player has caravan targets from the start.
+    this.seedCaravans();
 
     // --- Input ------------------------------------------------------------
     this.setupInput();
@@ -361,6 +368,10 @@ export class ContinentScene extends Phaser.Scene {
     // --- Pioneer parties (Phase 4): real-time travel + goblin ambush -------
     this.updatePioneers(delta);
 
+    // --- Worker parties (Phase 5): travel → mine → return + ruin digs ------
+    this.updateWorkers(delta);
+    this.tickRuinDigs(dayDelta);
+
     // --- Camera follow ----------------------------------------------------
     if (this.followParty) {
       const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
@@ -544,6 +555,254 @@ export class ContinentScene extends Phaser.Scene {
   }
 
   // =========================================================================
+  // WORKER parties (Phase 5) — reuse the EXACT pioneer movement framework: an
+  // A* path per worker, advanced on the per-biome tile budget, then hand the
+  // AT-DESTINATION state machine (mine / return / deposit) + goblin-proximity
+  // damage to ExpeditionSystem.tickWorkers. Workers have NO combat (vulnerable).
+  // =========================================================================
+  updateWorkers(delta: number) {
+    const dayDelta = delta / DAY_MS;
+    // Drop cached paths for workers that no longer exist (done/lost).
+    const live = new Set<string>(GameWorld.workers.map((p: WorkerParty) => p.id));
+    for (const id of Array.from(this._workerPaths.keys()) as string[]) if (!live.has(id)) this._workerPaths.delete(id);
+
+    for (const p of GameWorld.workers) {
+      // Only MOVING states path-find; 'mining' parks on the deposit tile.
+      if (p.status !== 'outbound' && p.status !== 'returning') continue;
+      let pc = this._workerPaths.get(p.id);
+      if (!pc || pc.destCol !== p.destCol || pc.destRow !== p.destRow) {
+        const startC = Math.round(p.col), startR = Math.round(p.row);
+        const res = this.pathfinder.find(startC, startR, p.destCol, p.destRow);
+        pc = { path: res.path.slice(), sub: 0, destCol: p.destCol, destRow: p.destRow };
+        this._workerPaths.set(p.id, pc);
+        p.col = startC; p.row = startR;
+      }
+      if (pc.path.length) {
+        let tileBudget = dayDelta * BASE_TILES_PER_DAY * 0.8; // laden miners, a touch slow
+        while (tileBudget > 0 && pc.path.length) {
+          const next = pc.path[0];
+          const cost = Math.max(0.5, this.pathfinder.tileCost(next.col, next.row));
+          const tileFraction = tileBudget / cost;
+          const remaining = 1 - pc.sub;
+          if (tileFraction >= remaining) {
+            tileBudget -= remaining * cost;
+            p.col = next.col; p.row = next.row;
+            pc.sub = 0; pc.path.shift();
+          } else { pc.sub += tileFraction; tileBudget = 0; }
+        }
+      }
+    }
+
+    // State machine (arrive→mine→return→deposit) + ambush, in ExpeditionSystem.
+    const events = ExpeditionSystem.tickWorkers(dayDelta);
+    for (const e of events) {
+      if (e.type === 'arrived') this.notifyExpedition(`Workers reached the ${e.worker.resource} deposit.`, 0x6b7a3a, e.worker.col, e.worker.row);
+      else if (e.type === 'deposited') this.notifyExpedition(`Workers delivered ${e.worker.carrying} ${e.worker.resource} home!`, 0x2a7a4f, e.worker.col, e.worker.row);
+      else if (e.type === 'lost') { this.notifyExpedition('A worker party was wiped out by goblins!', 0x8c2b2b, e.worker.col, e.worker.row); this._workerPaths.delete(e.worker.id); }
+    }
+  }
+
+  // PUBLIC test hook: fast-forward a worker through its WHOLE lifecycle (travel →
+  // mine → return → deposit) so headless tests need not simulate minutes of time.
+  fastForwardWorker(id: string): boolean {
+    const p = GameWorld.workers.find((x: WorkerParty) => x.id === id);
+    if (!p) return false;
+    // Snap to deposit, mine instantly, snap home, deposit instantly.
+    p.col = p.depositCol; p.row = p.depositRow;
+    p.status = 'mining'; p.mineDaysLeft = 0;
+    this._workerPaths.delete(id);
+    ExpeditionSystem.tickWorkers(0.0001); // arrive→mining handled; complete mine
+    // After mining completes it is 'returning'; snap it home and deposit.
+    const w2 = GameWorld.workers.find((x: WorkerParty) => x.id === id);
+    if (w2 && w2.status === 'returning') {
+      w2.col = w2.destCol; w2.row = w2.destRow;
+      this._workerPaths.delete(id);
+      ExpeditionSystem.tickWorkers(0.0001);
+    }
+    return true;
+  }
+
+  // (Phase 5) Advance any in-flight ruin digs; on completion fire a reward notice.
+  tickRuinDigs(dayDelta: number) {
+    const done = ExpeditionSystem.tickRuinExploration(dayDelta);
+    for (const d of done) {
+      this.notifyExpedition(`${d.ruin.name}: ${d.reward.summary}`, 0xc9a14a, d.ruin.col, d.ruin.row);
+    }
+  }
+
+  // =========================================================================
+  // CARAVANS (Phase 5) — flag a slice of merchant AI parties as laden caravans.
+  // =========================================================================
+  seedCaravans() {
+    let n = 0;
+    for (const ai of GameWorld.aiParties as AIPartyT[]) {
+      if (ai.isCaravan) { n++; continue; }
+      if (ai.personality === 'merchant' && (n < 3)) { ExpeditionSystem.makeCaravan(ai); n++; }
+    }
+    // Guarantee at least one caravan exists even with no merchant factions, by
+    // converting the first non-aggressive party.
+    if (n === 0) {
+      const cand = (GameWorld.aiParties as AIPartyT[]).find(a => a.personality !== 'aggressive');
+      if (cand) ExpeditionSystem.makeCaravan(cand);
+    }
+  }
+
+  // =========================================================================
+  // EXPEDITION proximity prompts (ruins / goblin camps / mercenary camps).
+  // =========================================================================
+  checkExpeditionProximity() {
+    if (this._modal || this._inBattle) return;
+    for (const s of this.world.settlements) {
+      const d = Phaser.Math.Distance.Between(GameWorld.player.col, GameWorld.player.row, s.col, s.row);
+      if (d > 1.6) continue;
+      const id = GameWorld.settlementId(s);
+      if (s.kind === 'ruin' && !GameWorld.exploredRuins[id] && !ExpeditionSystem.isExploring(id)) {
+        ExpeditionSystem.discover('ruin', s.name, s.col, s.row);
+        if (this._expoPromptId !== id) { this._expoPromptId = id; this.promptExploreRuin(s); }
+        return;
+      }
+      if (s.kind === 'goblin_camp' && !GameWorld.clearedCamps[id]) {
+        ExpeditionSystem.discover('goblin_camp', s.name, s.col, s.row);
+        if (this._expoPromptId !== id) { this._expoPromptId = id; this.promptRaidCamp(s); }
+        return;
+      }
+      if (s.kind === 'mercenary') {
+        ExpeditionSystem.discover('mercenary', s.name, s.col, s.row);
+        if (this._expoPromptId !== id) { this._expoPromptId = id; this.promptHireMercs(s); }
+        return;
+      }
+    }
+    // Out of range of everything → allow the next prompt to fire again.
+    this._expoPromptId = null;
+  }
+
+  // --- Modal: explore a ruin ----------------------------------------------
+  promptExploreRuin(ruin: Settlement) {
+    const id = GameWorld.settlementId(ruin);
+    this.openChoiceModal(`Explore ${ruin.name}?`, 'An ancient ruin lies before you. Exploring takes ~1 day.', 'Explore', () => {
+      const res = ExpeditionSystem.exploreRuin(id);
+      if (res.ok) this.flashBanner(`Exploring ${ruin.name}… (~${res.etaDays} day)`, 0xc9a14a);
+      else this.flashBanner(res.reason || 'Cannot explore.', 0x8c2b2b);
+    });
+  }
+
+  // --- Modal: raid a goblin camp (launches BattleScene) -------------------
+  promptRaidCamp(camp: Settlement) {
+    const id = GameWorld.settlementId(camp);
+    this.openChoiceModal(`Raid ${camp.name}?`, 'A goblin warband holds this camp. Defeat them to clear it and take their loot.', 'Attack', () => {
+      this.startCampRaid(camp);
+    });
+  }
+
+  startCampRaid(camp: Settlement) {
+    if (this._inBattle) return;
+    const id = GameWorld.settlementId(camp);
+    const res = ExpeditionSystem.raidCamp(id);
+    if (!res.ok || !res.goblinArmy) { this.flashBanner(res.reason || 'Cannot raid.', 0x8c2b2b); return; }
+    this._inBattle = true;
+    this.cancelPath();
+    GameWorld.pendingBattle = {
+      returnCol: GameWorld.player.col, returnRow: GameWorld.player.row,
+      enemyPartyId: null, enemyFaction: 'goblin',
+    };
+    // Reuse the existing BattleScene launch contract (same as startBattle).
+    this.scene.pause();
+    this.scene.launch('BattleScene', {
+      playerArmy: GameWorld.player.army.map(g => ({ type: g.type, count: g.count, battles: g.battles || 0 })),
+      enemyArmy: res.goblinArmy,
+      terrainType: this.battleTerrain(),
+      enemyFaction: 'goblin',
+      onComplete: (br: any) => this.onCampRaidComplete(br, id, camp),
+    });
+  }
+
+  onCampRaidComplete(res: any, campId: string, camp: Settlement) {
+    this._inBattle = false;
+    try { this.scene.resume(); } catch (e) { /* ignore */ }
+    if (res && Array.isArray(res.army)) {
+      GameWorld.player.army = res.army.filter((g: any) => g.count > 0).map((g: any) => ({ type: g.type, count: g.count }));
+      if (!GameWorld.player.army.length) GameWorld.player.army = [{ type: 'warrior', count: 1 }];
+    }
+    if (res && res.victory) {
+      const loot = ExpeditionSystem.onCampRaidWon(campId, res.loot || null);
+      this.notifyExpedition(`${camp.name} cleared! Plundered ${loot.gold} gold, ${loot.iron} iron.`, 0x2a7a4f, camp.col, camp.row);
+    } else {
+      this.flashBanner('The goblins held the camp.', 0x8c2b2b);
+    }
+    GameWorld.pendingBattle = null;
+    const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
+    this.cameras.main.centerOn(pp.x, pp.y);
+  }
+
+  // --- Modal: hire mercenaries --------------------------------------------
+  promptHireMercs(camp: Settlement) {
+    const id = GameWorld.settlementId(camp);
+    const rate = ExpeditionSystem.MERC_COST_PER_HEAD;
+    const batch = Math.min(ExpeditionSystem.MERC_MAX_HIRE, Math.max(1, Math.floor(GameWorld.gold / rate)), 10);
+    this.openChoiceModal(`${camp.name}`, `Sellswords for hire — ${rate} gold each.\nHire ${batch} veteran warrior${batch === 1 ? '' : 's'} for ${batch * rate} gold?`, `Hire ${batch}`, () => {
+      const res = ExpeditionSystem.hireMercenaries(id, batch);
+      if (res.ok) this.notifyExpedition(`Hired ${res.hired} mercenaries for ${res.cost} gold.`, 0x2a7a4f, camp.col, camp.row);
+      else this.flashBanner(res.reason || 'Cannot hire.', 0x8c2b2b);
+    });
+  }
+
+  // --- Modal: raid a caravan (simple resolve) -----------------------------
+  promptCaravanRaid(caravan: AIPartyT) {
+    if (this._modal || this._inBattle) return;
+    if (this._caravanPromptId === caravan.id) return;
+    this._caravanPromptId = caravan.id;
+    const fac = this.world.factions.find((f: any) => f.key === caravan.factionKey);
+    this.openChoiceModal('Raid Enemy Caravan?', `A ${fac ? fac.name : caravan.factionKey} supply train! Raiding steals its goods but sours relations (-20).`, 'Raid', () => {
+      const res = ExpeditionSystem.raidCaravan(caravan.id);
+      this._caravanPromptId = null;
+      if (!res.ok) { this.flashBanner(res.reason || 'Cannot raid.', 0x8c2b2b); return; }
+      if (res.victory && res.loot) {
+        this.notifyExpedition(`Caravan raided! +${res.loot.gold}g +${res.loot.wood}w +${res.loot.stone}s +${res.loot.iron}i (-20 ${res.faction})`, 0x2a7a4f, GameWorld.player.col, GameWorld.player.row);
+      } else {
+        this.flashBanner('The caravan guard drove you off.', 0x8c2b2b);
+      }
+    }, () => { this._caravanPromptId = null; });
+  }
+
+  // Generic two-button confirm modal (warm UI, matches promptEnterSettlement).
+  openChoiceModal(title: string, body: string, confirmLabel: string, onConfirm: () => void, onCancel?: () => void) {
+    if (this._modal) return;
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 40);
+    const els: any[] = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.55).setOrigin(0, 0).setInteractive()));
+    const W = 420, H = 178, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 20, title, { fontFamily: 'Georgia, serif', fontSize: '18px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 56, body, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#cfc1a6', align: 'center', wordWrap: { width: W - 44 } }).setOrigin(0.5, 0)));
+    const yes = fix(this.add.rectangle(x + W / 2 - 95, y + H - 38, 160, 34, 0x1f5b3a).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(yes, fix(this.add.text(x + W / 2 - 95, y + H - 38, confirmLabel, { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const no = fix(this.add.rectangle(x + W / 2 + 95, y + H - 38, 160, 34, 0x6b3a26).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
+    els.push(no, fix(this.add.text(x + W / 2 + 95, y + H - 38, 'Not now', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+    const close = () => { els.forEach(o => o.destroy()); this._modal = null; };
+    this._modal = close;
+    no.on('pointerdown', () => { this._uiClick = true; });
+    no.on('pointerup', () => { this._uiClick = true; close(); if (onCancel) onCancel(); });
+    yes.on('pointerdown', () => { this._uiClick = true; });
+    yes.on('pointerup', () => { this._uiClick = true; close(); onConfirm(); });
+  }
+
+  // (Phase 5) Notification that ALSO surfaces inside a settlement view (if the
+  // player is in a town) via the GameWorld/IsometricScene notify hook, and on the
+  // continent as a flash banner. Offers a continent-switch when inside a town.
+  notifyExpedition(text: string, color: number, _col?: number, _row?: number) {
+    this.flashBanner(text, color);
+    // If the player is currently INSIDE a settlement, route the message to the
+    // per-settlement view (which appends "(open the map)") and queue it too.
+    if (GameWorld.currentSettlementId != null) {
+      GameWorld.notify(text + '  ·  (open the continent map)', color);
+      try {
+        const iso: any = this.scene.get('IsometricScene');
+        if (iso && this.scene.isActive('IsometricScene') && iso.notify) iso.notify(text + '  ·  (open the map)', color);
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  // =========================================================================
   // CHUNK RENDER — bind pooled images to ChunkManager's visible texture keys.
   // =========================================================================
   refreshChunks() {
@@ -693,6 +952,96 @@ export class ContinentScene extends Phaser.Scene {
       g.setPosition(wp.x, wp.y);
       g.setScale(sc);
       this.iconLayer.add(g);
+    }
+
+    // (Phase 5) WORKER party icons — a pickaxe disc in the player colour with an
+    // HP pip. Distinct from the pioneer cart so the three player party types
+    // (crown / cart / pickaxe) read apart at a glance.
+    for (const p of GameWorld.workers as WorkerParty[]) {
+      if (p.status === 'done' || p.status === 'lost') continue;
+      const wp = this.tileToPx(p.col, p.row);
+      const g = this.add.graphics();
+      g.fillStyle(0x1a120a, 0.5); g.fillEllipse(0, 7, 18, 6);          // shadow
+      g.fillStyle(GameWorld.playerColor, 1); g.fillCircle(0, -2, 8);   // disc
+      g.lineStyle(1.5, 0xf5ecd2, 0.9); g.strokeCircle(0, -2, 8);
+      // pickaxe motif: a haft + a curved head (two short strokes).
+      g.lineStyle(1.6, 0xfff0c8, 0.95);
+      g.lineBetween(-4, 2, 4, -6);            // haft
+      g.lineBetween(2, -7, 6, -4);            // head right
+      g.lineBetween(2, -7, -1, -8);           // head left
+      // mining pulse ring while parked at the deposit.
+      if (p.status === 'mining') { g.lineStyle(1.2, 0xffe08a, 0.7); g.strokeCircle(0, -2, 11); }
+      // HP pip.
+      const hpFrac = Math.max(0, Math.min(1, p.hp / p.maxHp));
+      const hpCol = hpFrac > 0.5 ? 0x4ad06b : hpFrac > 0.25 ? 0xe6c84a : 0xd64a4a;
+      g.fillStyle(0x000000, 0.5); g.fillRect(-9, -16, 18, 3);
+      g.fillStyle(hpCol, 1); g.fillRect(-9, -16, 18 * hpFrac, 3);
+      g.setPosition(wp.x, wp.y);
+      g.setScale(sc);
+      this.iconLayer.add(g);
+    }
+
+    // (Phase 5) MERCENARY CAMP icons (tent) + CARAVAN icons (cargo wagon) +
+    // EXPLORED-RUIN markers. Merc camps & caravans aren't in the baked overview
+    // texture, so (like founded colonies) we draw them live here.
+    // -- Mercenary camps (tent) --
+    for (const s of this.world.settlements) {
+      if (s.kind !== 'mercenary') continue;
+      if (!this.fogLifted(s.col, s.row)) continue;
+      const mp = this.tileToPx(s.col, s.row);
+      const tg = this.add.graphics();
+      tg.fillStyle(0x1a120a, 0.5); tg.fillEllipse(0, 8, 18, 6);        // shadow
+      tg.fillStyle(0x9a6b3a, 1);                                       // tent canvas
+      tg.fillTriangle(0, -12, -11, 6, 11, 6);
+      tg.lineStyle(1.4, 0x3a2810, 0.95); tg.strokeTriangle(0, -12, -11, 6, 11, 6);
+      tg.lineStyle(1.4, 0x2a1c0c, 0.9); tg.lineBetween(0, -12, 0, 6);  // centre seam
+      tg.fillStyle(0x2a1c0c, 1); tg.fillTriangle(-3, 6, 3, 6, 0, -2);  // doorway
+      tg.setPosition(mp.x, mp.y); tg.setScale(sc);
+      this.iconLayer.add(tg);
+    }
+    // -- Explored-ruin markers (a distinct open-archway glyph) --
+    for (const s of this.world.settlements) {
+      if (s.kind !== 'ruin') continue;
+      const id = GameWorld.settlementId(s);
+      if (!GameWorld.exploredRuins[id]) continue;       // unexplored ruins are in the baked texture
+      if (!this.fogLifted(s.col, s.row)) continue;
+      const rp = this.tileToPx(s.col, s.row);
+      const rg = this.add.graphics();
+      rg.fillStyle(0x1a120a, 0.5); rg.fillEllipse(0, 7, 16, 5);
+      rg.lineStyle(2, 0xc9a14a, 1);
+      rg.strokeRect(-7, -10, 14, 16);                   // archway frame
+      rg.lineBetween(-7, -10, 0, -15); rg.lineBetween(7, -10, 0, -15); // broken pediment
+      rg.fillStyle(0x2a7a4f, 1); rg.fillCircle(0, -2, 3); // green "cleared" gem
+      rg.setPosition(rp.x, rp.y); rg.setScale(sc);
+      this.iconLayer.add(rg);
+    }
+    // -- Cleared goblin-camp markers (skull crossed out) --
+    for (const s of this.world.settlements) {
+      if (s.kind !== 'goblin_camp') continue;
+      const id = GameWorld.settlementId(s);
+      if (!GameWorld.clearedCamps[id]) continue;
+      if (!this.fogLifted(s.col, s.row)) continue;
+      const cp = this.tileToPx(s.col, s.row);
+      const cg = this.add.graphics();
+      cg.fillStyle(0x1a120a, 0.5); cg.fillEllipse(0, 7, 16, 5);
+      cg.fillStyle(0x6b6b6b, 1); cg.fillCircle(0, -2, 7);  // grey ash skull
+      cg.lineStyle(2, 0x8c2b2b, 0.9); cg.lineBetween(-7, -9, 7, 5); // struck through
+      cg.setPosition(cp.x, cp.y); cg.setScale(sc);
+      this.iconLayer.add(cg);
+    }
+    // -- Caravans (cargo wagon, enemy faction colour) --
+    for (const ai of GameWorld.aiParties as AIPartyT[]) {
+      if (!ai.isCaravan) continue;
+      if (!this.fogLifted(Math.round(ai.col), Math.round(ai.row))) continue;
+      const cp = this.tileToPx(ai.col, ai.row);
+      const cg = this.add.graphics();
+      cg.fillStyle(0x1a120a, 0.5); cg.fillEllipse(0, 7, 22, 6);
+      cg.fillStyle(0xb9924a, 1); cg.fillRect(-10, -8, 20, 9);   // cargo crate body
+      cg.lineStyle(1.2, ai.color, 1); cg.strokeRect(-10, -8, 20, 9);
+      cg.lineStyle(1, 0x5a3f1c, 0.9); cg.lineBetween(-10, -3, 10, -3); // crate band
+      cg.fillStyle(0x2a1c0c, 1); cg.fillCircle(-6, 3, 2.4); cg.fillCircle(6, 3, 2.4); // wheels
+      cg.setPosition(cp.x, cp.y); cg.setScale(sc);
+      this.iconLayer.add(cg);
     }
   }
 
@@ -856,6 +1205,109 @@ export class ContinentScene extends Phaser.Scene {
     btn.on('pointerdown', () => { this._uiClick = true; });
     btn.on('pointerup', () => { this._uiClick = true; this.toMainMenu(); });
     this.input.keyboard?.on('keydown-ESC', () => this.toMainMenu());
+
+    // (Phase 5) Expedition panel toggle (left of the menu button).
+    const eb = fix(this.add.rectangle(GAME_W - 70, by + 34, 120, 26, 0x4a3a6b).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
+    fix(this.add.text(GAME_W - 70, by + 34, 'Expeditions (E)', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5));
+    eb.on('pointerover', () => eb.setFillStyle(0x5d4a86));
+    eb.on('pointerout', () => eb.setFillStyle(0x4a3a6b));
+    eb.on('pointerdown', () => { this._uiClick = true; });
+    eb.on('pointerup', () => { this._uiClick = true; this.toggleExpeditionPanel(); });
+    this.input.keyboard?.on('keydown-E', () => this.toggleExpeditionPanel());
+  }
+
+  // =========================================================================
+  // EXPEDITION PANEL (Phase 5) — Active journeys + Discovered locations + a
+  // Quick-travel button (spend gold to send the main party to a known location).
+  // Built lazily on first toggle; rebuilt each open so contents are fresh.
+  // =========================================================================
+  toggleExpeditionPanel() {
+    if (this._expoPanel) { this.closeExpeditionPanel(); return; }
+    this.openExpeditionPanel();
+  }
+
+  closeExpeditionPanel() {
+    if (this._expoPanel) { this._expoPanel.forEach((o: any) => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._expoPanel = null; }
+  }
+
+  openExpeditionPanel() {
+    this.closeExpeditionPanel();
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 25);
+    const els: any[] = [];
+    const W = 360, H = 420, x = 14, y = 80;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x201608, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.rectangle(x, y, W, 30, 0x3a2a10, 1).setOrigin(0, 0)));
+    els.push(fix(this.add.text(x + 12, y + 7, 'Expeditions', { fontFamily: 'Georgia, serif', fontSize: '15px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+    const close = fix(this.add.text(x + W - 22, y + 6, '✕', { fontFamily: 'Georgia, serif', fontSize: '16px', color: '#e9d6a4' }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true }));
+    close.on('pointerdown', () => { this._uiClick = true; });
+    close.on('pointerup', () => { this._uiClick = true; this.closeExpeditionPanel(); });
+    els.push(close);
+
+    let cy = y + 40;
+    const head = (t: string) => { els.push(fix(this.add.text(x + 12, cy, t, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#e0b84a', fontStyle: 'bold' }).setOrigin(0, 0))); cy += 20; };
+    const line = (t: string, col = '#cfc1a6') => { els.push(fix(this.add.text(x + 18, cy, t, { fontFamily: 'Georgia, serif', fontSize: '12px', color: col, wordWrap: { width: W - 36 } }).setOrigin(0, 0))); cy += 17; };
+
+    // --- Active journeys --------------------------------------------------
+    head('Active Journeys');
+    const mainRemaining = this.estimateRemainingCost ? (this.path && this.path.length ? this.estimateRemainingCost() : 0) : 0;
+    const active = ExpeditionSystem.activeExpeditions(mainRemaining);
+    if (!active.length) line('No parties travelling.', '#8a7e62');
+    else for (const a of active.slice(0, 8)) {
+      const glyph = a.kind === 'main' ? '♛' : a.kind === 'pioneer' ? '⛟' : '⛏';
+      line(`${glyph} ${a.label} — ${a.purpose} (~${a.etaDays}d)`);
+    }
+    cy += 6;
+
+    // --- Discovered locations --------------------------------------------
+    head('Discovered Locations');
+    const disc = ExpeditionSystem.discoveredLocations();
+    if (!disc.length) line('Explore the map to discover sites.', '#8a7e62');
+    else for (const d of disc.slice(0, 9)) {
+      const tag = d.kind === 'ruin' ? 'Ruin' : d.kind === 'goblin_camp' ? 'Goblin Camp' : d.kind === 'mercenary' ? 'Merc Camp' : d.kind === 'deposit' ? 'Deposit' : d.kind;
+      line(`• ${d.name} (${tag})`);
+    }
+    cy += 8;
+
+    // --- Quick-travel -----------------------------------------------------
+    const qtCost = ExpeditionSystem.quickTravelCost();
+    const qbtnY = y + H - 40;
+    const qb = fix(this.add.rectangle(x + W / 2, qbtnY, W - 28, 32, disc.length ? 0x1f5b3a : 0x39393f).setOrigin(0.5, 0).setStrokeStyle(2, 0xf0e6c8, 0.8).setInteractive({ useHandCursor: !!disc.length }));
+    els.push(qb, fix(this.add.text(x + W / 2, qbtnY + 16, `Quick-travel to a site (${qtCost} gold)`, { fontFamily: 'Georgia, serif', fontSize: '13px', color: disc.length ? '#fff' : '#888', fontStyle: 'bold' }).setOrigin(0.5)));
+    qb.on('pointerdown', () => { this._uiClick = true; });
+    qb.on('pointerup', () => { this._uiClick = true; if (disc.length) { this.closeExpeditionPanel(); this.openQuickTravelMenu(disc); } });
+
+    this._expoPanel = els;
+  }
+
+  // A compact list-picker: choose a discovered location, pay the gold, and the
+  // main party auto-paths there via the existing pathfinder (moveTo).
+  openQuickTravelMenu(disc: Array<{ id: string; kind: string; name: string; col: number; row: number }>) {
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 40);
+    const els: any[] = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.55).setOrigin(0, 0).setInteractive()));
+    const items = disc.slice(0, 8);
+    const W = 380, rowH = 34, H = 70 + items.length * rowH, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(GAME_W / 2, y + 14, `Quick-travel (${ExpeditionSystem.quickTravelCost()} gold)`, { fontFamily: 'Georgia, serif', fontSize: '16px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    const close = () => { els.forEach(o => o.destroy()); this._modal = null; };
+    this._modal = close;
+    items.forEach((d, i) => {
+      const ry = y + 44 + i * rowH;
+      const row = fix(this.add.rectangle(x + 14, ry, W - 28, rowH - 6, 0x2a2014, 1).setOrigin(0, 0).setStrokeStyle(1, 0x6b4a26, 0.8).setInteractive({ useHandCursor: true }));
+      els.push(row, fix(this.add.text(x + 24, ry + 7, `${d.name}  (${d.col}, ${d.row})`, { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#e6d8b8' }).setOrigin(0, 0)));
+      row.on('pointerover', () => row.setFillStyle(0x3a2c18));
+      row.on('pointerout', () => row.setFillStyle(0x2a2014));
+      row.on('pointerdown', () => { this._uiClick = true; });
+      row.on('pointerup', () => {
+        this._uiClick = true;
+        const res = ExpeditionSystem.quickTravel(d.col, d.row);
+        close();
+        if (!res.ok) { this.flashBanner(res.reason || 'Cannot travel.', 0x8c2b2b); return; }
+        this.followParty = true;
+        this.moveTo(d.col, d.row);
+        this.flashBanner(`Main host sets out for ${d.name}.`, 0x2a7a4f);
+      });
+    });
   }
 
   updateHud() {
@@ -921,6 +1373,8 @@ export class ContinentScene extends Phaser.Scene {
       if (s.kind === 'player_castle') col = this.colorOf(GameWorld.playerColor);
       else if (s.kind === 'ai_castle') col = 0xd64a4a;
       else if (s.kind === 'goblin_camp') col = 0x7cb342;
+      else if (s.kind === 'ruin') col = 0xc9a14a;          // (Phase 5) ruins
+      else if (s.kind === 'mercenary') col = 0xe08a3a;     // (Phase 5) merc camps
       g.fillStyle(col, 1); g.fillRect(p.x - 1, p.y - 1, 3, 3);
     }
     // AI parties (where fog lifted).
@@ -935,6 +1389,13 @@ export class ContinentScene extends Phaser.Scene {
       const p = toMM(pio.col, pio.row);
       g.fillStyle(0xffffff, 0.9); g.fillRect(p.x - 1.6, p.y - 1.6, 3.2, 3.2);
       g.fillStyle(this.colorOf(GameWorld.playerColor), 1); g.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
+    // (Phase 5) Worker parties — small player-coloured squares with a tan border.
+    for (const wk of GameWorld.workers as WorkerParty[]) {
+      if (wk.status === 'done' || wk.status === 'lost') continue;
+      const p = toMM(wk.col, wk.row);
+      g.fillStyle(0xffe08a, 0.9); g.fillRect(p.x - 1.6, p.y - 1.6, 3.2, 3.2);
+      g.fillStyle(this.colorOf(GameWorld.playerColor), 1); g.fillRect(p.x - 0.8, p.y - 0.8, 1.6, 1.6);
     }
     // Player dot (pulses).
     const pp = toMM(GameWorld.player.col, GameWorld.player.row);
@@ -970,12 +1431,27 @@ export class ContinentScene extends Phaser.Scene {
         return;
       }
     }
-    // AI party?
-    for (const ai of GameWorld.aiParties) {
+    // (Phase 5) Worker party? Tooltip = purpose + carried haul + HP.
+    for (const wk of GameWorld.workers as WorkerParty[]) {
+      if (wk.status === 'done' || wk.status === 'lost') continue;
+      if (Phaser.Math.Distance.Between(t.col, t.row, wk.col, wk.row) <= 2) {
+        const line = wk.status === 'mining' ? `Mining ${wk.resource} (~${Math.max(0, Math.ceil(wk.mineDaysLeft))}d left)`
+          : wk.status === 'returning' ? `Returning ${wk.carrying} ${wk.resource} home`
+          : `En route to a ${wk.resource} deposit`;
+        this.showTip(p, `Worker Party\n${line}\nHP ${Math.ceil(wk.hp)}/${wk.maxHp}`);
+        return;
+      }
+    }
+    // AI party / caravan?
+    for (const ai of GameWorld.aiParties as AIPartyT[]) {
       if (!this.fogLifted(Math.round(ai.col), Math.round(ai.row))) continue;
       if (Phaser.Math.Distance.Between(t.col, t.row, ai.col, ai.row) <= 2) {
         const fac = this.world.factions.find((f: any) => f.key === ai.factionKey);
-        this.showTip(p, `${fac ? fac.name : ai.factionKey}\nEst. army ${ai.armyEstimate}\n${ai.destLabel}`);
+        if (ai.isCaravan) {
+          this.showTip(p, `${fac ? fac.name : ai.factionKey} Caravan\nLaden supply train (guard ${ai.armyEstimate})\nIntercept to raid`);
+        } else {
+          this.showTip(p, `${fac ? fac.name : ai.factionKey}\nEst. army ${ai.armyEstimate}\n${ai.destLabel}`);
+        }
         return;
       }
     }
@@ -984,8 +1460,14 @@ export class ContinentScene extends Phaser.Scene {
       if (!this.fogLifted(s.col, s.row) && s.kind !== 'player_castle') continue;
       if (Phaser.Math.Distance.Between(t.col, t.row, s.col, s.row) <= 2) {
         const founded = !!(s as any).founded;
+        const sid = GameWorld.settlementId(s);
         const status = founded ? 'Founded colony'
-          : s.kind === 'player_castle' ? 'Yours' : s.kind === 'ai_castle' ? 'Enemy hold' : s.kind === 'goblin_camp' ? 'Goblin camp' : s.kind === 'ruin' ? 'Ancient ruin' : 'Neutral';
+          : s.kind === 'player_castle' ? 'Yours'
+          : s.kind === 'ai_castle' ? 'Enemy hold'
+          : s.kind === 'goblin_camp' ? (GameWorld.clearedCamps[sid] ? 'Goblin camp (cleared)' : 'Goblin camp — raidable')
+          : s.kind === 'ruin' ? (GameWorld.exploredRuins[sid] ? 'Ancient ruin (explored)' : 'Ancient ruin — explorable')
+          : s.kind === 'mercenary' ? 'Mercenary camp — hire here'
+          : 'Neutral';
         // (Phase 4) Show the colony's specialty label (from its SettlementState).
         let extra = '';
         if (founded) {
@@ -1169,9 +1651,20 @@ export class ContinentScene extends Phaser.Scene {
     let warn = false;
     for (const ai of GameWorld.aiParties) {
       const d = Phaser.Math.Distance.Between(GameWorld.player.col, GameWorld.player.row, ai.col, ai.row);
+      // (Phase 5) A laden enemy caravan within reach → offer a quick RAID (not a
+      // pitched BattleScene). Only prompt once per interception (guarded by id).
+      if (ai.isCaravan) {
+        if (d <= ENEMY_FIGHT_RANGE) { this.promptCaravanRaid(ai); return; }
+        if (d <= ENEMY_WARN_RANGE && this.fogLifted(Math.round(ai.col), Math.round(ai.row))) warn = true;
+        continue;
+      }
       if (d <= ENEMY_FIGHT_RANGE) { this.startBattle(ai); return; }
       if (d <= ENEMY_WARN_RANGE && this.fogLifted(Math.round(ai.col), Math.round(ai.row))) warn = true;
     }
+    // (Phase 5) Expedition-target proximity: ruins (explore), goblin camps (raid),
+    // mercenary camps (hire). Surfaces a contextual prompt when the main party is
+    // parked on/adjacent to one. Cheap: bails out the instant a modal is open.
+    this.checkExpeditionProximity();
     if (warn && !this._battleWarnShown) {
       this._battleWarnShown = true;
       this.flashBanner('Enemy army approaching!', 0x8c2b2b);
@@ -1294,6 +1787,7 @@ export class ContinentScene extends Phaser.Scene {
     this.detachChunkImages();
     try { this.chunks && this.chunks.destroy(); } catch (e) { /* ignore */ }
     if (this._modal) { try { this._modal(); } catch (e) { /* ignore */ } }
+    if (this._expoPanel) { try { this.closeExpeditionPanel(); } catch (e) { /* ignore */ } }
     if (this._settlementOverlay) { try { this._settlementOverlay(); } catch (e) { /* ignore */ } }
   }
 

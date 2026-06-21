@@ -131,7 +131,40 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       ambush is a proximity-damage model (no pitched escort battle); the in-settlement Send button auto-picks a
       default founding tile (player re-guides on the continent); colony population growth uses the existing local
       Population system. DEFERRED: escort armies protecting pioneers (P5/P6), richer colony economy.
-- [ ] P5 — Living expedition system (parties on the continent)
+- [x] P5 — Living expedition system (parties on the continent)
+      ExpeditionSystem.ts (static helpers, all state in GameWorld, serialization-friendly for P12) + ContinentScene/
+      GameWorld hooks. Expeditions are now VISIBLE continent journeys, not timer buttons. The Phase-4 continent-party
+      framework (A* + per-biome budget, advanced/rendered each frame by ContinentScene) is REUSED for the new worker
+      party type — no new movement engine.
+      1. RUINS EXPLORATION (REAL): walk the main party onto an unexplored ruin → "Explore?" prompt → ~1 game-day
+         on-site dig (party parked, progress tracked) → reward granted on complete + ruin flagged explored (distinct
+         archway icon). exploreRuin(id)/tickRuinExploration. Reward set = gold / resources / artifact / relic, chosen
+         deterministically from the ruin id (save-stable); gold→campaign gold, bulk→nearest player town.
+      2. GOBLIN CAMP RAIDS (REAL): march onto a camp → "Raid?" → real BattleScene (existing launch contract) vs a
+         goblin army scaled per-camp (12–28). raidCamp(id); on win onCampRaidWon clears the camp (struck-skull icon),
+         credits gold + iron/wood loot.
+      3. WORKER EXPEDITION (REAL): sendWorkers(fromId, depositCol, depositRow) spawns a non-combat pickaxe party that
+         travels to a deposit, mines ~2 days, auto-returns to the NEAREST player settlement and deposits the haul
+         (120 units). Vulnerable like pioneers (HP + goblin-proximity damage, escort optional, never crashes without
+         one).
+      4. MERCENARY CAMPS (REAL): 4 merc camps appended to WorldState.settlements (kind:'mercenary', tent icon) at
+         new-game. Travel there → hire veteran warriors straight into the field party at 35 gold/head (a good rate).
+         hireMercenaries(campId, count).
+      5. CARAVAN RAID (REAL, simplified resolve by design): merchant AI parties flagged as laden caravans
+         (cargo wagon icon, lightly guarded). Intercept → quick odds-check skirmish (NOT BattleScene) → steal
+         resources + bank a −20 relation delta in GameWorld.relationDeltas for P7. raidCaravan(id).
+      6. EXPEDITION PANEL (REAL): "E" / button toggles a warm panel showing Active journeys (main/pioneer/worker +
+         purpose + ETA), Discovered locations, and a Quick-travel button (50 gold → main party paths to a known site).
+      VISIBLE PARTIES: crown=main, cart=pioneer, pickaxe=worker, tent=merc camp, wagon=caravan — all with tooltips +
+      minimap dots. Notifications fire on arrive/deposit/clear/wipe via notifyExpedition; when inside a settlement the
+      message is routed to IsometricScene.notify + queued with an "open the continent map" hint.
+      Audit (headless full new-game flow, /tmp/audit/p5_expeditions.mjs): teleport onto ruin → exploreRuin → tick day
+      → explored + gold 500→851; onto camp → raidCamp + startCampRaid → BattleScene launches → force-win → camp
+      cleared; sendWorkers(home, iron) → worker exists+outbound → fastForwardWorker → home iron 0→120; hireMercenaries
+      → army 80→90, gold 1000→650; raidCaravan → +239g/79w/69s/37i stolen + relationDeltas.purple=-20; panel opens
+      (2 active, 6 discovered). Shots p5_expeditions + p5_parties. FPS 52-54; ZERO console errors; tsc clean; build
+      clean. P4 pioneer + boot audits still green (no regression). DEFERRED (per spec): heroes (P6), diplomacy memory
+      application (P7 reads relationDeltas), late-game (P8).
 - [ ] P6 — Hero world integration (dialogue, quests, stationing)
 - [ ] P7 — Diplomatic narrative continuity (leader memory, honor)
 - [ ] P8 — Late game content (stages 8–9, tournament, imperial)

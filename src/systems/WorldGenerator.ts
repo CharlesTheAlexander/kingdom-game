@@ -120,7 +120,10 @@ export type ResourceType =
 export interface ResourceNode { type: ResourceType; col: number; row: number; }
 
 export type SettlementKind =
-  | 'player_castle' | 'ai_castle' | 'neutral' | 'goblin_camp' | 'ruin';
+  | 'player_castle' | 'ai_castle' | 'neutral' | 'goblin_camp' | 'ruin'
+  // (Phase 5 Mercenary Camps) a roaming sellsword camp the player can travel to
+  // and hire troops directly into the field party at a favourable rate.
+  | 'mercenary';
 
 export interface Settlement {
   kind: SettlementKind;

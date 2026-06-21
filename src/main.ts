@@ -64,4 +64,9 @@ if (import.meta.env.DEV) {
   import('./systems/PioneerSystem.js').then((ps) => {
     (window as any).__PioneerSystem = ps.PioneerSystem;
   });
+  // (Phase 5) Expose the Expedition system so the headless audit can drive
+  // exploreRuin / raidCamp / sendWorkers / hireMercenaries / raidCaravan.
+  import('./systems/ExpeditionSystem.js').then((es) => {
+    (window as any).__ExpeditionSystem = es.ExpeditionSystem;
+  });
 }

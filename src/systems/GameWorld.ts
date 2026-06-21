@@ -64,6 +64,63 @@ export interface AIParty {
   personality: string;
   /** human label for the destination, for the hover tooltip. */
   destLabel: string;
+  /** (Phase 5 Caravan Raid) when true this AI party is a laden enemy CARAVAN: a
+   *  fat, lightly-defended supply train the player can intercept and raid for a
+   *  quick (non-BattleScene) skirmish. `cargo` is the loot it carries. Plain data
+   *  so Phase 12 can serialize it; absent on ordinary war parties. */
+  isCaravan?: boolean;
+  cargo?: { gold: number; wood: number; stone: number; iron: number };
+}
+
+/** (Phase 5 Worker Expedition) A non-combat worker party sent from a player
+ *  settlement to a continent resource deposit (e.g. an iron vein in the
+ *  mountains). It travels to the deposit, MINES there for a couple of game days,
+ *  then auto-returns to the nearest player settlement and deposits the haul into
+ *  that settlement's stockpile. It reuses the exact Phase-4 continent-party
+ *  movement framework (A* + per-biome cost in ContinentScene); ARRIVAL behaviour
+ *  is "mine, then go home" instead of "fight"/"found". Vulnerable like pioneers
+ *  (no combat) — goblin proximity damages its HP. Plain JSON for Phase 12. */
+export interface WorkerParty {
+  id: string;
+  /** real-time continent position (fractional while moving). */
+  col: number;
+  row: number;
+  /** the deposit tile they are mining. */
+  depositCol: number;
+  depositRow: number;
+  /** resource type mined at the deposit (iron / stone / gold / minerals…). */
+  resource: string;
+  /** units of resource carried home once mining completes. */
+  carrying: number;
+  /** which settlement they set out from / will return to (id). Re-targeted on
+   *  the return leg to the NEAREST player settlement (see ExpeditionSystem). */
+  homeSettlementId: string | null;
+  /** the tile they are currently pathing toward (deposit while outbound, the home
+   *  settlement tile while returning). Driven by ContinentScene movement. */
+  destCol: number;
+  destRow: number;
+  /** vulnerability HP (no combat). 0 = the party is lost. */
+  hp: number;
+  maxHp: number;
+  /** lifecycle: outbound → mining (parked at the deposit) → returning → done. */
+  status: 'outbound' | 'mining' | 'returning' | 'done' | 'lost';
+  /** game-days of mining remaining while status === 'mining'. */
+  mineDaysLeft: number;
+  /** human label for the hover tooltip. */
+  label: string;
+}
+
+/** (Phase 5 Ruins) Reward granted for exploring an ancient ruin. */
+export interface RuinReward {
+  /** category for flavour + icon: gold / resources / artifact / relic. */
+  kind: 'gold' | 'resources' | 'artifact' | 'relic';
+  gold: number;
+  /** bulk resources granted into the nearest player settlement (or home). */
+  resources: { wood: number; stone: number; iron: number };
+  /** the named treasure (artifact/relic) recovered, or '' for plain hauls. */
+  treasure: string;
+  /** a one-line summary for the notification + expedition log. */
+  summary: string;
 }
 
 /** (Phase 4 Pioneer) A pioneer/colonist party roaming the continent toward a tile
@@ -130,6 +187,34 @@ class GameWorldState {
 
   /** Monotonic counter for unique pioneer ids (stable across the session). */
   pioneerCounter = 0;
+
+  // --- Phase 5 (Living Expeditions) campaign layer ------------------------
+  /** (Phase 5 Worker Expedition) live worker parties mining continent deposits.
+   *  ContinentScene advances them; ExpeditionSystem owns spawn/mine/return logic. */
+  workers: WorkerParty[] = [];
+
+  /** Monotonic counter for unique worker-party ids (stable across the session). */
+  workerCounter = 0;
+
+  /** (Phase 5 Ruins) ids (Settlement index strings) of ruins already explored,
+   *  so the continent draws a distinct "explored" icon and a ruin grants a reward
+   *  only once. A Record (not Set) so it serialises cleanly for Phase 12. */
+  exploredRuins: Record<string, boolean> = {};
+
+  /** (Phase 5 Goblin Raids) ids of goblin camps the player has cleared. Cleared
+   *  camps change icon, stop ambushing, and cannot be raided again. */
+  clearedCamps: Record<string, boolean> = {};
+
+  /** (Phase 5 Caravan Raid) faction-relation deltas accumulated by raiding enemy
+   *  caravans. Diplomacy isn't wired at the continent level until Phase 7, so we
+   *  bank the −20-per-raid deltas here keyed by faction key for P7 to apply. */
+  relationDeltas: Record<string, number> = {};
+
+  /** (Phase 5 Expedition Panel) ids of continent locations the player has
+   *  DISCOVERED (walked the fog off / interacted with): ruins, goblin camps,
+   *  resource deposits, mercenary camps. Drives the panel's "Discovered" list and
+   *  the quick-travel menu. Keyed by a stable location id (see ExpeditionSystem). */
+  discovered: Record<string, { kind: string; name: string; col: number; row: number; day: number }> = {};
 
   gold = 500;
 
@@ -248,10 +333,58 @@ class GameWorldState {
     this.aiParties = [];
     this.pioneers = [];
     this.pioneerCounter = 0;
+    // --- Phase 5 reset ---
+    this.workers = [];
+    this.workerCounter = 0;
+    this.exploredRuins = {};
+    this.clearedCamps = {};
+    this.relationDeltas = {};
+    this.discovered = {};
     this.settlementStates = {};
     this.pendingNotifications = [];
     this.spawnAIParties();
+    this.spawnMercenaryCamps();
     this.started = true;
+  }
+
+  /** (Phase 5 Mercenary Camps) append 3–5 mercenary camps to the world's
+   *  settlement list (as `kind: 'mercenary'`) on passable land, spread out and
+   *  clear of castles. They render + are travelled-to exactly like any other
+   *  continent location; ExpeditionSystem.hireMercenaries handles the contract. */
+  private spawnMercenaryCamps(): void {
+    if (!this.world) return;
+    const w = this.world;
+    // Deterministic-ish placement from the world seed so a re-rolled world is
+    // stable. We scatter around the map centre, accepting passable, non-water
+    // tiles a sensible distance from existing settlements.
+    let a = (w.seed ^ 0x5e7c0a11) >>> 0;
+    const rnd = () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const target = 4; // within the 3–5 spec range
+    let placed = 0, tries = 0;
+    const MERC_NAMES = ['Free Company', 'Iron Brotherhood', 'The Wandering Blades', 'Crimson Sellswords', 'The Broken Spears'];
+    while (placed < target && tries < 8000) {
+      tries++;
+      const col = Math.floor(rnd() * w.size);
+      const row = Math.floor(rnd() * w.size);
+      const b = w.tileBiome[row * w.size + col];
+      // Passable land only (skip ocean=0 / peaks). biomeData import avoided here to
+      // keep GameWorld light; rely on a cheap "not ocean / not peak" elevation gate.
+      if (b === Biome.OCEAN || b === Biome.MOUNTAIN_PEAK) continue;
+      // Keep clear of any existing settlement (≥ 50 tiles) and other merc camps.
+      let bad = false;
+      for (const s of w.settlements) {
+        const min = s.kind === 'mercenary' ? 120 : 50;
+        if (Math.hypot(s.col - col, s.row - row) < min) { bad = true; break; }
+      }
+      if (bad) continue;
+      w.settlements.push({
+        kind: 'mercenary',
+        name: MERC_NAMES[placed % MERC_NAMES.length] + ' Camp',
+        col, row,
+        biome: b as Biome,
+      });
+      placed++;
+    }
   }
 
   /** 1–3 faction-coloured AI parties per non-player faction, seeded near their
@@ -324,6 +457,13 @@ class GameWorldState {
       gold: this.gold,
       day: this.day,
       currentSettlementId: this.currentSettlementId,
+      // (Phase 5) Living-expedition campaign layer. All plain JSON for Phase 12.
+      workers: this.workers,
+      workerCounter: this.workerCounter,
+      exploredRuins: this.exploredRuins,
+      clearedCamps: this.clearedCamps,
+      relationDeltas: this.relationDeltas,
+      discovered: this.discovered,
       // Per-settlement persisted states (Phase 3). Plain JSON; Phase 12 reloads.
       settlementStates: this.settlementStates,
       started: this.started,
