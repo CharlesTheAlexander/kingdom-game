@@ -40,6 +40,7 @@ export function capture(scene: any) {
     reputation: scene.reputation && scene.reputation.serialize ? scene.reputation.serialize() : null,
     research: scene.research && scene.research.serialize ? scene.research.serialize() : null,
     winConditions: scene.winConditions && scene.winConditions.serialize ? scene.winConditions.serialize() : null,
+    banking: scene.banking && scene.banking.serialize ? scene.banking.serialize() : null,
     stats: { battlesWon: scene._battlesWon || 0 },
     kingdomStats: scene.stats && scene.stats.serialize ? scene.stats.serialize() : null,
     ruins: scene.ruins && scene.ruins.serialize ? scene.ruins.serialize() : null,
@@ -176,6 +177,7 @@ export function applySave(scene: any, data: any) {
     if (scene.updateKingdomTitle) scene.updateKingdomTitle();
   });
   sect('research', () => { if (data.research && scene.research) scene.research.restore(data.research); });
+  sect('banking', () => { if (data.banking && scene.banking) scene.banking.restore(data.banking); });
   sect('winConditions', () => { if (data.winConditions && scene.winConditions) scene.winConditions.restore(data.winConditions); if (data.stats) scene._battlesWon = data.stats.battlesWon || 0; });
   sect('ruins', () => { if (data.ruins && scene.ruins) scene.ruins.restore(data.ruins); });
   sect('factions', () => { if (data.factions && scene.factions) scene.factions.restore(data.factions); });

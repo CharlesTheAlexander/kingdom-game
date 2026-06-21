@@ -91,6 +91,12 @@ export const BuildingTypes: Record<string, BuildingType> = {
     produces: 'cutStone', refineFrom: 'stone', production: true, placeable: true, stageUnlock: 2, tex: 'mine',
     desc: 'Cuts Stone into Cut Stone. 1 worker: 1/2 stone/day. 2: 1/1 stone/day.',
   },
+  // (Completion Phase 3) Treasury — unlocks banking (reserves + loans).
+  treasury: {
+    key: 'treasury', name: 'Treasury', cost: { gold: 200, stone: 100, cutStone: 50 }, maxWorkers: 1, hp: 160,
+    footprint: 2, placeable: true, stageUnlock: 7,
+    desc: 'Banking: deposit gold for 2%/week interest, or take loans (repay +20%).',
+  },
   wall: {
     key: 'wall', name: 'Wall', cost: { stone: 20 }, maxWorkers: 0, hp: 100,
     wall: true, placeable: true, noCap: true, anywhere: true, stageUnlock: 3,
@@ -101,7 +107,7 @@ export const BuildingTypes: Record<string, BuildingType> = {
 // Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now
 // grow automatically by settlement tier. The wall type def is kept above only so
 // old saves containing a placed Wall still load without error.
-export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'library', 'sawmill', 'stonecutter'];
+export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'library', 'sawmill', 'stonecutter', 'treasury'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
 // (Loop 3, Feature #3) Buildings upgrade through 5 levels. Output scales on a

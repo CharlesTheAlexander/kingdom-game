@@ -55,6 +55,7 @@ import Phaser from 'phaser';
 import { GameScene, GAME_W, GAME_H } from './GameScene.js';
 import { Resources } from '../systems/Resources.js';
 import * as AssetGenerator from '../systems/AssetGenerator.js';
+import { Banking } from '../systems/Banking.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -283,6 +284,7 @@ export class IsometricScene extends GameScene {
     this.kingdoms = [this.ai, new AIKingdom(this, FACTIONS.purple), new AIKingdom(this, FACTIONS.yellow)];
     this.DAY_SECONDS = DAY_MS / 1000;
     this.diplomacy = new Diplomacy(this); // Phase 7: relationships with kingdoms
+    this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.caravans = new Caravans(this); // Phase 5: trade routes between settlements
     this.settlements = new SettlementManager(this); // Phase B: neutral settlements
     this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
@@ -920,6 +922,44 @@ export class IsometricScene extends GameScene {
     super.selectBuilding(b);
     if (this._iconHidden && this._iconHidden !== b && this._iconHidden._floatIcon) this._iconHidden._floatIcon.setVisible(true);
     if (b && b._floatIcon) { b._floatIcon.setVisible(false); this._iconHidden = b; }
+    if (b && b.typeKey === 'treasury') this.openTreasuryPanel(); // (Completion Phase 3) banking UI
+    else this.closeTreasuryPanel();
+  }
+
+  // (Completion Phase 3) Treasury banking panel — reserves, interest, loans.
+  closeTreasuryPanel() { if (this._treasuryPanel) { this._treasuryPanel.forEach((o) => o.destroy()); this._treasuryPanel = null; } }
+  openTreasuryPanel() {
+    this.closeTreasuryPanel();
+    const bk = this.banking; if (!bk) return;
+    const fix = (o) => o.setScrollFactor(0).setDepth(120);
+    const W = 460, H = 330, x = (GAME_W - W) / 2, y = (GAME_H - H) / 2, els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.5).setOrigin(0, 0).setInteractive()));
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x161b26, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(x + W / 2, y + 14, 'TREASURY', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    const close = fix(this.add.text(x + W - 14, y + 12, '✕', { fontFamily: 'monospace', fontSize: '18px', color: '#cbb787' }).setOrigin(1, 0).setInteractive({ useHandCursor: true }));
+    close.on('pointerdown', () => this.closeTreasuryPanel()); els.push(close);
+    const line = (ty, txt, col = '#dfe6ee', size = '13px') => els.push(fix(this.add.text(x + 24, ty, txt, { fontFamily: 'monospace', fontSize: size, color: col })));
+    line(y + 48, `Gold on hand: ${Math.floor(this.resources.gold)}`);
+    line(y + 70, `Reserves: ${Math.floor(bk.reserves)}g   ·   Interest: +${bk.weeklyInterest()}/week`, '#9be88a');
+    if (bk.loan) line(y + 92, `Loan: owe ${bk.loan.owed}g, due day ${bk.loan.due}${bk.loan.overdue ? ` (OVERDUE ${bk.loan.overdue}d)` : ''}`, '#ff8a80');
+    else line(y + 92, 'No active loan', '#b9c6d6');
+    // Action buttons.
+    const btn = (bx, by, w, label, fn, col = 0x2d6cb0) => {
+      const b = fix(this.add.rectangle(bx, by, w, 30, col).setOrigin(0, 0).setStrokeStyle(1, 0xf0e6c8, 0.8).setInteractive({ useHandCursor: true }));
+      els.push(b); els.push(fix(this.add.text(bx + w / 2, by + 15, label, { fontFamily: 'monospace', fontSize: '12px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5)));
+      b.on('pointerdown', (p, lx, ly, ev) => { if (ev) ev.stopPropagation(); fn(); });
+    };
+    let by = y + 122;
+    btn(x + 24, by, 130, 'Deposit 50', () => bk.deposit(50)); btn(x + 164, by, 130, 'Deposit 200', () => bk.deposit(200)); btn(x + 304, by, 132, 'Withdraw All', () => bk.withdraw(bk.reserves), 0x3a6a8a);
+    by += 40;
+    btn(x + 24, by, 130, 'Loan 100', () => bk.takeLoan(100), 0x8a6a2a); btn(x + 164, by, 130, 'Loan 300', () => bk.takeLoan(300), 0x8a6a2a); btn(x + 304, by, 132, 'Loan 500', () => bk.takeLoan(500), 0x8a6a2a);
+    by += 40;
+    btn(x + 24, by, 200, bk.loan ? `Repay (${bk.loan.owed}g)` : 'No loan to repay', () => bk.repayLoan(), bk.loan ? 0x2e8b57 : 0x39393f);
+    // History.
+    line(by + 44, 'Recent:', '#cbb787', '12px');
+    (bk.history || []).slice(0, 4).forEach((h, i) => line(by + 62 + i * 16, `· ${h.text} (day ${h.day})`, '#9aa6b6', '11px'));
+    this._treasuryPanel = els;
+    if (this.routeCameras) this.routeCameras();
   }
 
   clearSelection() {
@@ -3476,6 +3516,7 @@ export class IsometricScene extends GameScene {
     if (this.worldEvents) this.worldEvents.onNewDay(); // (Expansion Phase 3) world events
     if (this.reputation) { this.reputation.onNewDay(); this.updateKingdomTitle(); } // (Phase 4)
     if (this.research) this.research.onNewDay(); // (Phase 5) research progress
+    if (this.banking) this.banking.onNewDay(); // (Completion Phase 3) interest + loan handling
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
     if (this.factions) this.factions.onNewDay(); // (Session-1 Phase 2) wandering factions daily
     this.checkTaxRevolt(); // (Session-1 Phase 5) tax revolt check

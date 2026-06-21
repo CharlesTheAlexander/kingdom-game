@@ -246,6 +246,17 @@ const BUILD: Record<string, (g: any, A: number) => void> = {
     merlons(g, 14, 34, 36, STONE);
     g.lineStyle(1, STONE_D, 0.8); g.beginPath(); g.moveTo(14, 46); g.lineTo(50, 46); g.moveTo(26, 38); g.lineTo(26, 56); g.moveTo(38, 38); g.lineTo(38, 56); g.strokePath(); // block seams
   },
+  treasury: (g, A) => {
+    box(g, 16, 30, 32, 28, STONE);                       // heavy fortified block
+    merlons(g, 16, 26, 32, STONE_D);
+    g.fillStyle(0x3a3a40, 1); g.fillCircle(32, 46, 9);   // vault door
+    g.lineStyle(2, 0x9aa0a6, 1); g.strokeCircle(32, 46, 9);
+    g.fillStyle(0x9aa0a6, 1); for (let a = 0; a < 8; a++) g.fillCircle(32 + Math.cos(a / 8 * 6.28) * 6.5, 46 + Math.sin(a / 8 * 6.28) * 6.5, 1.1); // bolts
+    g.fillStyle(0x6f6f68, 1); g.fillRect(31, 38, 2, 16);
+    g.fillStyle(0xc9a84c, 1); g.fillCircle(32, 22, 3.2); g.fillStyle(STONE_D, 1); g.fillRect(31.3, 20.5, 1.4, 5); // gold coin sign
+    g.fillStyle(0x2a2a30, 1); g.fillRect(20, 36, 3, 6); g.fillRect(41, 36, 3, 6); // barred windows
+    g.lineStyle(1, 0x9aa0a6, 1); g.beginPath(); g.moveTo(21.5, 36); g.lineTo(21.5, 42); g.moveTo(42.5, 36); g.lineTo(42.5, 42); g.strokePath();
+  },
 };
 
 // Castle stages share a builder, growing with the tier.
