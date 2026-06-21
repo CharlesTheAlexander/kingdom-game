@@ -155,8 +155,9 @@ export class Building {
     if (this.typeKey === 'mine' && this._mineIron && scene && scene.ironNodeNear) {
       const node = scene.ironNodeNear(this);
       if (node) {
-        resources.add('iron', Math.max(1, Math.round(rate * 0.5)));
-        if (Math.random() < 0.2 && node.harvest) node.harvest();
+        // (Balance pass 2) Iron is a scarce strategic resource — a 3-worker iron
+        // mine yields ~30/day (chance per tick scales with workers), not 600/day.
+        if (Math.random() < 0.04 * this.workers) { resources.add('iron', 1); if (Math.random() < 0.5 && node.harvest) node.harvest(); }
         return;
       }
     }

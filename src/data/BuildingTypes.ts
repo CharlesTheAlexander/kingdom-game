@@ -16,8 +16,10 @@ export const BuildingTypes: Record<string, BuildingType> = {
     // (Polish Phase 6 balance) Trimmed 2 -> 1.5 gold/sec. Sim showed ~600 gold/day
     // vs early costs of 30-150 made gold trivially oversupplied; 1.5/s (~450/day)
     // is still comfortable but less absurd. See BALANCE_REPORT.md.
-    produces: 'gold', rate: 1.5, placeable: false,
-    desc: 'The heart of your kingdom. Always generates 1.5 gold/sec. Protect it!',
+    // (Balance pass 2) 1.5 -> 1.2 gold/sec: gold was oversupplied (~9k by day 20)
+    // even with the new gold sinks; 1.2/s keeps it comfortable but less trivial.
+    produces: 'gold', rate: 1.2, placeable: false,
+    desc: 'The heart of your kingdom. Always generates 1.2 gold/sec. Protect it!',
   },
   house: {
     key: 'house', name: 'House', cost: { wood: 30 }, maxWorkers: 0, hp: 80,
