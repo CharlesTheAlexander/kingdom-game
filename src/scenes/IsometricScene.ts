@@ -61,6 +61,7 @@ import { Roads } from '../systems/Roads.js';
 import { FactionLeaders } from '../systems/FactionLeaders.js';
 import { Heroes } from '../systems/Heroes.js';
 import { Maintenance } from '../systems/Maintenance.js';
+import { RoyalCourt } from '../systems/RoyalCourt.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -293,6 +294,7 @@ export class IsometricScene extends GameScene {
     this.heroes = new Heroes(this); // (V2 Phase 3) named heroes
     this.maintenance = new Maintenance(this); // (V2 Phase 6) building aging + disasters
     this._plagueMult = 1;
+    this.court = new RoyalCourt(this); // (V2 Phase 7) advisors
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -953,6 +955,47 @@ export class IsometricScene extends GameScene {
     else this.closeHeroPanel();
     if (b && b._onFire) this.openFirePanel(b); // (V2 Phase 6)
     else this.closeFirePanel();
+    if (b && b.typeKey === 'castle') this.openCourtPanel(); // (V2 Phase 7) the seat of the court
+    else this.closeCourtPanel();
+  }
+
+  // (V2 Phase 7) Royal Court — advisors, loyalty, and weekly suggestions.
+  closeCourtPanel() { if (this._courtPanel) { this._courtPanel.forEach((o) => o.destroy()); this._courtPanel = null; } }
+  openCourtPanel() {
+    this.closeCourtPanel();
+    const C = this.court; if (!C) return;
+    const fix = (o) => o.setScrollFactor(0).setDepth(122);
+    const W = 540, ht = 92 + C.advisors.length * 70, x = (GAME_W - W) / 2, y = (GAME_H - ht) / 2, els = [];
+    els.push(fix(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.5).setOrigin(0, 0).setInteractive()));
+    els.push(fix(this.add.rectangle(x, y, W, ht, 0x171320, 0.99).setOrigin(0, 0).setStrokeStyle(3, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.text(x + W / 2, y + 12, 'THE ROYAL COURT', { fontFamily: 'monospace', fontSize: '20px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(x + W / 2, y + 36, 'Your advisors counsel you. Heed them to keep their loyalty.', { fontFamily: 'monospace', fontSize: '11px', color: '#b6a98c' }).setOrigin(0.5, 0)));
+    const close = fix(this.add.text(x + W - 14, y + 10, '✕', { fontFamily: 'monospace', fontSize: '18px', color: '#cbb787' }).setOrigin(1, 0).setInteractive({ useHandCursor: true }));
+    close.on('pointerdown', () => this.closeCourtPanel()); els.push(close);
+    let ry = y + 62;
+    for (const a of C.advisors) {
+      els.push(fix(this.add.text(x + 18, ry + 6, a.icon, { fontFamily: 'monospace', fontSize: '22px' }).setOrigin(0.5, 0)));
+      els.push(fix(this.add.text(x + 44, ry, `${a.title} ${a.name}`, { fontFamily: 'monospace', fontSize: '14px', color: '#ffe9b0', fontStyle: 'bold' })));
+      // loyalty bar
+      const lc = a.loyalty >= 60 ? 0x4ad66b : a.loyalty >= 30 ? 0xd6c04a : 0xd64a4a;
+      els.push(fix(this.add.rectangle(x + 44, ry + 19, 120, 7, 0x000000, 0.6).setOrigin(0, 0)));
+      els.push(fix(this.add.rectangle(x + 44, ry + 19, 120 * a.loyalty / 100, 7, lc).setOrigin(0, 0)));
+      els.push(fix(this.add.text(x + 170, ry + 16, `loyalty ${a.loyalty}`, { fontFamily: 'monospace', fontSize: '10px', color: '#cfc1a6' })));
+      if (a.suggestion) {
+        els.push(fix(this.add.text(x + 44, ry + 32, '"' + a.suggestion.text + '"', { fontFamily: 'monospace', fontSize: '9px', color: '#c9bfa6', fontStyle: 'italic', wordWrap: { width: 300 } })));
+        const heed = fix(this.add.rectangle(x + W - 120, ry + 6, 64, 22, 0x2e5a3a, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0x4ad66b, 0.9).setInteractive({ useHandCursor: true }));
+        const heedT = fix(this.add.text(x + W - 88, ry + 17, 'Heed', { fontFamily: 'monospace', fontSize: '11px', color: '#cfeecb' }).setOrigin(0.5));
+        const ign = fix(this.add.rectangle(x + W - 120, ry + 32, 64, 22, 0x5a2e2e, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0xd64a4a, 0.9).setInteractive({ useHandCursor: true }));
+        const ignT = fix(this.add.text(x + W - 88, ry + 43, 'Ignore', { fontFamily: 'monospace', fontSize: '11px', color: '#eecbcb' }).setOrigin(0.5));
+        heed.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.court.heed(a); this.openCourtPanel(); });
+        ign.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this.court.ignore(a); this.openCourtPanel(); });
+        els.push(heed, heedT, ign, ignT);
+      } else {
+        els.push(fix(this.add.text(x + 44, ry + 34, 'No counsel pending. Reports arrive weekly.', { fontFamily: 'monospace', fontSize: '10px', color: '#7d7768', fontStyle: 'italic' })));
+      }
+      ry += 70;
+    }
+    this._courtPanel = els;
   }
 
   // (V2 Phase 6) Quick response panel for a burning building.
@@ -3816,6 +3859,7 @@ export class IsometricScene extends GameScene {
     if (this.greatCouncil) this.greatCouncil.onNewDay(); // (Completion Phase 4) council effects
     if (this.heroes) this.heroes.checkArrivals(); // (V2 Phase 3) hero arrivals
     if (this.maintenance) this.maintenance.onNewDay(); // (V2 Phase 6) aging + disasters
+    if (this.court) this.court.onNewDay(); // (V2 Phase 7) royal court weekly reports
     // (Completion Phase 7) Advance Siege Workshop training.
     for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
