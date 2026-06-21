@@ -792,3 +792,24 @@ auto-scale and unit animation spritesheets are untouched.
   explosion/dust FX generated; 258 generated textures, 0 missing.
 - **P9 Verify:** headless playthrough + battle, FPS ~34, zero console errors/warnings,
   clean `npm run build`.
+
+---
+
+## SECTION: PRE-PLAYTEST IMPROVEMENT SESSION ✅
+
+A self-directed play→fix→improve pass. Multiple full headless playthroughs
+(economy to day 33, real-time AI/wildlife/pawns, army→AI-castle→live battle→
+resolution, save/load round-trip, every panel) found **zero console errors** —
+the game is functionally robust. Improvements made:
+
+- **Content / variety:** world events 28 → **36** (iron vein, carpenters' guild,
+  knight errant, bountiful harvest, bandit toll, siege engineer, comet, royal
+  betrothal); ruin rewards 6 → **10 types** (armory, hoard, relic, stoneworks)
+  shuffled across **8 ruins** (was 6) so each playthrough reveals a different set.
+- **Flow:** victory/defeat screens now route to the Main Menu (consistent
+  menu-first hub); defeat offers Try Again + Main Menu.
+- **Clarity:** building upgrade buttons now show AND gate on refined-goods cost
+  (e.g. "194G + 20 planks") instead of a silently-disabled button.
+
+All changes verified headless with a clean `npm run build`, `tsc --noEmit` at 0
+errors, and zero console errors/warnings. See FINAL_STATE_REPORT.md.
