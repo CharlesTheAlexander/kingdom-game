@@ -22,11 +22,31 @@ function scale(color: number, f: number): number {
 const darken = (c: number, frac: number) => scale(c, 1 - frac);
 const lighten = (c: number, frac: number) => scale(c, 1 + frac);
 
+// Linear blend between two packed RGB colours (t in 0..1).
+function mix(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | bl;
+}
+
+// Northgard warm light/shadow constants (light source = top-left).
+const WARM_LIGHT = 0xfff5e0;
+const WARM_SHADOW = 0x2a1f0f;
+
 // Top-face diamond outline (for fills) and a slightly inset version (for detail).
 const TOP = [{ x: 32, y: 0 }, { x: 64, y: 16 }, { x: 32, y: 32 }, { x: 0, y: 16 }];
 // Is (x,y) inside the top diamond (optionally inset) — keeps detail off the faces.
 function inTop(x: number, y: number, inset = 0.9): boolean {
   return Math.abs(x - 32) / 32 + Math.abs(y - 16) / 16 <= inset;
+}
+
+// Seedable PRNG so each variant index gets a stable-but-distinct texture layout.
+function rng(seed: number) {
+  let s = (seed * 2654435761) >>> 0;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
 }
 
 // Scatter n dots of radius r inside the top face.
@@ -41,78 +61,323 @@ function dots(g: any, color: number, n: number, r: number, alpha = 1) {
   }
 }
 
+// Scatter n dots using a supplied PRNG so layouts are deterministic per variant.
+function dotsR(g: any, R: () => number, color: number, n: number, r: number, alpha = 1, inset = 0.82) {
+  g.fillStyle(color, alpha);
+  let placed = 0, guard = 0;
+  while (placed < n && guard++ < 300) {
+    const x = 4 + R() * 56, y = 2 + R() * 28;
+    if (!inTop(x, y, inset)) continue;
+    g.fillCircle(x, y, r);
+    placed++;
+  }
+}
+
+// Warm diagonal gradient across the top face: lit toward the top-left corner,
+// shaded toward the bottom-right, built from stacked translucent diamond bands.
+function gradientTop(g: any, base: number, lit = 0.22, shade = 0.18, bands = 6) {
+  for (let i = 0; i < bands; i++) {
+    const t = i / (bands - 1);
+    const k = 32 * t;                              // band offset toward centre
+    // Lit wedge sweeping in from the top-left edge.
+    g.fillStyle(mix(lighten(base, lit), base, t), 0.45);
+    g.fillPoints([{ x: 0 + k, y: 16 }, { x: 32, y: 0 + k * 0.5 }, { x: 32, y: 16 }], true);
+    g.fillPoints([{ x: 0 + k, y: 16 }, { x: 32, y: 32 - k * 0.5 }, { x: 32, y: 16 }], true);
+    // Shaded wedge sweeping in from the bottom-right edge.
+    g.fillStyle(mix(darken(base, shade), base, t), 0.45);
+    g.fillPoints([{ x: 64 - k, y: 16 }, { x: 32, y: 0 + k * 0.5 }, { x: 32, y: 16 }], true);
+    g.fillPoints([{ x: 64 - k, y: 16 }, { x: 32, y: 32 - k * 0.5 }, { x: 32, y: 16 }], true);
+  }
+}
+
+// Soft warm centre crown + cool bottom-right ambient occlusion. Call AFTER detail
+// so it unifies the tile into a slightly domed, painted top face.
+function topShading(g: any, base: number) {
+  g.fillStyle(mix(WARM_LIGHT, lighten(base, 0.2), 0.5), 0.22);
+  g.fillEllipse(28, 14, 30, 15);
+  g.fillStyle(mix(WARM_LIGHT, lighten(base, 0.3), 0.4), 0.16);
+  g.fillEllipse(26, 13, 16, 8);
+  // Cool AO hugging the lower-right rim.
+  g.fillStyle(mix(WARM_SHADOW, base, 0.5), 0.18);
+  g.fillPoints([{ x: 64, y: 16 }, { x: 32, y: 32 }, { x: 38, y: 18 }], true);
+}
+
+// Soft outer-rim treatment so adjacent same-biome tiles read seamlessly: a faint
+// warm highlight on the lit edges and a feathered base line on the lower edges,
+// instead of a hard outline.
+function rimFade(g: any, base: number) {
+  g.lineStyle(1.5, mix(base, WARM_LIGHT, 0.32), 0.28);
+  g.beginPath(); g.moveTo(1, 16); g.lineTo(32, 1); g.lineTo(63, 16); g.strokePath();
+  g.lineStyle(2, base, 0.5);
+  g.beginPath(); g.moveTo(2, 16); g.lineTo(32, 31); g.lineTo(62, 16); g.strokePath();
+}
+
 // ---- core tile builder -----------------------------------------------------
-// base = top colour; detail(g) draws extra marks on the top face.
-function makeTile(scene: any, key: string, base: number, detail?: (g: any) => void) {
+// base = top colour; detail(g, R) draws biome texture on the top face using the
+// supplied seeded PRNG R (so variants differ deterministically).
+function makeTile(scene: any, key: string, base: number, detail?: (g: any, R: () => number) => void, seed = 0) {
   if (scene.textures.exists(key)) return; // generate once; textures persist across scene.restart
+  const R = rng(seed || (key.split('').reduce((a, ch) => a + ch.charCodeAt(0), 0)));
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
   const D = 16; // side-face depth (matches the HH row step so faces tile cleanly)
-  // Side faces first (top face will overlap their upper edge).
-  g.fillStyle(darken(base, 0.30), 1);
+  // Side faces first (top face overlaps their upper edge). Warm-shaded so the
+  // stacked-floor "walls" sit in cool shadow against the lit top.
+  g.fillStyle(mix(darken(base, 0.34), WARM_SHADOW, 0.18), 1);
   g.fillPoints([{ x: 0, y: 16 }, { x: 32, y: 32 }, { x: 32, y: 32 + D }, { x: 0, y: 16 + D }], true);
-  g.fillStyle(darken(base, 0.20), 1);
+  g.fillStyle(mix(darken(base, 0.22), WARM_SHADOW, 0.1), 1);
   g.fillPoints([{ x: 32, y: 32 }, { x: 64, y: 16 }, { x: 64, y: 16 + D }, { x: 32, y: 32 + D }], true);
-  // Top face.
+  // Faint vertical strata streaks on the side faces.
+  g.lineStyle(1, darken(base, 0.42), 0.35);
+  for (const sx of [10, 22, 44, 56]) { g.beginPath(); g.moveTo(sx, 22); g.lineTo(sx, 22 + D); g.strokePath(); }
+  // Top face: solid base, then warm diagonal gradient.
   g.fillStyle(base, 1);
   g.fillPoints(TOP, true);
-  if (detail) detail(g);
-  // Warm top-left edge highlight + faint bottom-right rim for readability.
-  g.lineStyle(1, lighten(base, 0.28), 0.55);
-  g.beginPath(); g.moveTo(0, 16); g.lineTo(32, 0); g.lineTo(64, 16); g.strokePath();
+  gradientTop(g, base);
+  if (detail) detail(g, R);
+  topShading(g, base);
+  rimFade(g, base);
   g.generateTexture(key, 64, 64);
   g.destroy();
 }
 
-// ---- PHASE 1: terrain ------------------------------------------------------
-export function generateTerrain(scene: any) {
-  // Grass (warm bright base, darker variant, flowered variant).
-  makeTile(scene, 'iso_grass', 0x4a7c3f, (g) => dots(g, darken(0x4a7c3f, 0.22), 6, 1.3));
-  makeTile(scene, 'iso_grass2', 0x3d6b34, (g) => dots(g, darken(0x3d6b34, 0.2), 4, 1.4));
-  makeTile(scene, 'iso_grass3', 0x4a7c3f, (g) => {
-    dots(g, darken(0x4a7c3f, 0.22), 3, 1.2);
-    // 2-3 tiny flowers (white + yellow centres)
-    const fx = [[24, 12], [40, 18], [32, 8]];
-    for (const [x, y] of fx) { if (!inTop(x, y)) continue; g.fillStyle(0xf4f0e0, 1); g.fillCircle(x, y, 1.5); g.fillStyle(0xe8c84a, 1); g.fillCircle(x, y, 0.7); }
-  });
+// ---- terrain decoration helpers --------------------------------------------
+// Each draws biome-specific surface detail on the top face. They take the shared
+// graphics object and a seeded PRNG so variants are deterministic and distinct.
 
-  // Water (deeper base, lighter top inset, animated-look shimmer stripes). Three
-  // variants offset their shimmer so the river/sea reads as moving water.
-  const waterTile = (key: string, off: number) => makeTile(scene, key, 0x2a5a8a, (g) => {
-    g.fillStyle(lighten(0x2a5a8a, 0.18), 0.5); g.fillPoints([{ x: 32, y: 4 }, { x: 56, y: 16 }, { x: 32, y: 28 }, { x: 8, y: 16 }], true);
-    g.lineStyle(1.4, lighten(0x2a5a8a, 0.5), 0.7);
-    for (const yy of [10 + off, 18 + off]) { const y = ((yy - 2) % 26) + 4; g.beginPath(); g.moveTo(14, y); g.lineTo(28, y); g.strokePath(); g.beginPath(); g.moveTo(36, y + 3); g.lineTo(50, y + 3); g.strokePath(); }
-  });
-  waterTile('iso_water', 0); waterTile('iso_water2', 3); waterTile('iso_water3', 6);
-
-  // Rocky boulder tile (stone gray + a couple of boulders).
-  makeTile(scene, 'iso_rock', 0x8a8a7a, (g) => {
-    g.fillStyle(darken(0x8a8a7a, 0.18), 1); g.fillEllipse(26, 16, 14, 8); g.fillEllipse(40, 13, 10, 6);
-    g.fillStyle(lighten(0x8a8a7a, 0.18), 0.8); g.fillEllipse(24, 14, 6, 3);
-  });
-
-  // Mountain rock (dark gray + light crack lines).
-  makeTile(scene, 'iso_mtn', 0x5a5a4a, (g) => {
-    g.lineStyle(1, lighten(0x5a5a4a, 0.4), 0.8);
-    g.beginPath(); g.moveTo(18, 12); g.lineTo(30, 18); g.lineTo(26, 24); g.strokePath();
-    g.beginPath(); g.moveTo(44, 10); g.lineTo(38, 18); g.strokePath();
-  });
-
-  // Forest floor (dark green + scattered fallen leaves). 8 variants for variety;
-  // the trees themselves come from world-object sprites (Phase 6) + decorations.
-  for (let i = 1; i <= 8; i++) {
-    makeTile(scene, `iso_forest${i}`, 0x1a3a0f, (g) => {
-      dots(g, darken(0x1a3a0f, 0.3), 2, 1.3);
-      const leaves = 3 + (i % 2);
-      for (let k = 0; k < leaves; k++) { const x = 8 + Math.random() * 48, y = 4 + Math.random() * 24; if (!inTop(x, y, 0.8)) continue; g.fillStyle(k % 2 ? 0x6b4423 : 0x8a5a2a, 0.9); g.fillCircle(x, y, 1.4); }
-    });
+// A clump of upright grass blades fanning from a base point.
+function grassBlade(g: any, x: number, y: number, color: number, h: number, R: () => number) {
+  g.lineStyle(1, color, 0.85);
+  for (let b = 0; b < 3; b++) {
+    const dx = (b - 1) * 1.6 + (R() - 0.5) * 1.2;
+    g.beginPath(); g.moveTo(x + (b - 1) * 1.2, y); g.lineTo(x + dx, y - h - R() * 2); g.strokePath();
   }
+}
 
-  // Extra standalone tiles requested by the spec (generated + available for
-  // future use; not wired into the current biome roll).
-  makeTile(scene, 'iso_dirt', 0x6b4423, (g) => { g.lineStyle(1, lighten(0x6b4423, 0.25), 0.6); for (const y of [12, 18]) { g.beginPath(); g.moveTo(12, y); g.lineTo(28, y - 2); g.strokePath(); g.beginPath(); g.moveTo(36, y + 2); g.lineTo(52, y); g.strokePath(); } });
-  makeTile(scene, 'iso_path', 0x8a8a7a, (g) => { g.fillStyle(lighten(0x8a8a7a, 0.22), 0.5); g.fillPoints([{ x: 32, y: 2 }, { x: 30, y: 16 }, { x: 0, y: 16 }], true); g.fillStyle(darken(0x8a8a7a, 0.22), 0.5); g.fillPoints([{ x: 34, y: 16 }, { x: 64, y: 16 }, { x: 32, y: 32 }], true); });
-  makeTile(scene, 'iso_sand', 0xc4a35a, (g) => dots(g, darken(0xc4a35a, 0.16), 7, 1.1));
-  makeTile(scene, 'iso_snow', 0xe8e8f0);
+// Grass: warm green base + many small darker/lighter blade clusters + the odd
+// flower or mushroom on flowered/variant tiles.
+function decoGrass(g: any, R: () => number, base: number, opt: { flowers?: boolean; mushrooms?: boolean } = {}) {
+  // Mottled patches of lighter/darker grass.
+  dotsR(g, R, mix(base, WARM_LIGHT, 0.18), 5, 2.4, 0.22);
+  dotsR(g, R, darken(base, 0.2), 5, 2.2, 0.22);
+  // Blade clusters.
+  const dark = darken(base, 0.28), lite = lighten(base, 0.3);
+  for (let i = 0; i < 9; i++) {
+    const x = 8 + R() * 48, y = 6 + R() * 22;
+    if (!inTop(x, y, 0.78)) continue;
+    grassBlade(g, x, y, R() < 0.5 ? dark : lite, 2.5 + R() * 2, R);
+  }
+  if (opt.flowers) {
+    for (let i = 0; i < 3; i++) {
+      const x = 12 + R() * 40, y = 8 + R() * 16;
+      if (!inTop(x, y, 0.7)) continue;
+      const petal = R() < 0.5 ? 0xf2ede0 : 0xe6b8d8;
+      g.fillStyle(petal, 1); g.fillCircle(x, y, 1.6);
+      g.fillStyle(0xe8c84a, 1); g.fillCircle(x, y, 0.8);
+    }
+  }
+  if (opt.mushrooms) {
+    for (let i = 0; i < 2; i++) {
+      const x = 16 + R() * 32, y = 12 + R() * 12;
+      if (!inTop(x, y, 0.65)) continue;
+      g.fillStyle(0xe8e0d0, 1); g.fillRect(x - 0.5, y, 1.4, 2.5);          // stalk
+      g.fillStyle(0xa8442e, 1); g.fillEllipse(x, y, 3.2, 1.8);            // red cap
+      g.fillStyle(0xf2ede0, 1); g.fillCircle(x - 0.8, y - 0.2, 0.4); g.fillCircle(x + 0.9, y, 0.4); // spots
+    }
+  }
+}
+
+// Forest floor: dark earthy base + moss patches, fallen leaves, twigs/roots.
+function decoForest(g: any, R: () => number, base: number) {
+  // Moss in lighter greens, soil shadows in darker.
+  dotsR(g, R, mix(base, 0x3a6a28, 0.6), 4, 3.0, 0.28);
+  dotsR(g, R, darken(base, 0.4), 4, 2.6, 0.28);
+  // Roots / twigs (short brown strokes).
+  g.lineStyle(1.4, 0x4a3018, 0.7);
+  for (let i = 0; i < 3; i++) {
+    const x = 10 + R() * 40, y = 8 + R() * 18;
+    if (!inTop(x, y, 0.72)) continue;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (R() * 8 - 4), y + (R() * 4 - 2)); g.strokePath();
+  }
+  // Fallen leaves — small warm ellipses, occasional gold.
+  const leaf = [0x6b4423, 0x8a5a2a, 0xa8702a, 0xb8842e];
+  for (let i = 0; i < 8; i++) {
+    const x = 8 + R() * 48, y = 4 + R() * 24;
+    if (!inTop(x, y, 0.78)) continue;
+    g.fillStyle(leaf[(R() * leaf.length) | 0], 0.92);
+    g.fillEllipse(x, y, 2.2 + R() * 1.2, 1.3);
+  }
+  // A few moss-green specks for life.
+  dotsR(g, R, 0x5a8a3a, 3, 1.0, 0.7);
+}
+
+// Mountain/stone: cobblestone polygon paving + mortar seams + cracks + lichen.
+function decoStone(g: any, R: () => number, base: number, opt: { cracks?: boolean; boulders?: boolean } = {}) {
+  // Cobblestone cells: irregular quads tiled across the diamond, each shaded.
+  for (let gy = 2; gy < 30; gy += 6) {
+    for (let gx = 6; gx < 58; gx += 8) {
+      const cx = gx + (R() - 0.5) * 3, cy = gy + (R() - 0.5) * 2.5;
+      if (!inTop(cx, cy, 0.72)) continue;
+      const w = 4.5 + R() * 2, h = 2.6 + R() * 1.4;
+      const tone = mix(base, R() < 0.5 ? WARM_LIGHT : WARM_SHADOW, 0.12 + R() * 0.12);
+      g.fillStyle(tone, 0.9);
+      g.fillPoints([
+        { x: cx - w, y: cy }, { x: cx - w * 0.4, y: cy - h }, { x: cx + w * 0.6, y: cy - h * 0.7 },
+        { x: cx + w, y: cy + h * 0.3 }, { x: cx, y: cy + h },
+      ], true);
+      // Lit top edge of each cobble.
+      g.lineStyle(0.8, lighten(tone, 0.25), 0.5);
+      g.beginPath(); g.moveTo(cx - w, cy); g.lineTo(cx - w * 0.4, cy - h); g.strokePath();
+    }
+  }
+  if (opt.cracks) {
+    g.lineStyle(1, darken(base, 0.45), 0.7);
+    for (let i = 0; i < 2; i++) {
+      let x = 12 + R() * 16, y = 6 + R() * 6;
+      g.beginPath(); g.moveTo(x, y);
+      for (let s = 0; s < 3; s++) { x += 6 + R() * 6; y += R() * 6 - 1; if (inTop(x, y, 0.7)) g.lineTo(x, y); }
+      g.strokePath();
+    }
+  }
+  if (opt.boulders) {
+    g.fillStyle(darken(base, 0.16), 1); g.fillEllipse(26, 15, 13, 7); g.fillEllipse(40, 12, 9, 5);
+    g.fillStyle(mix(lighten(base, 0.22), WARM_LIGHT, 0.3), 0.7); g.fillEllipse(23, 13, 6, 2.6);
+  }
+  // Lichen + pebbles.
+  dotsR(g, R, 0x8a9a5a, 3, 1.2, 0.55);
+  dotsR(g, R, lighten(base, 0.18), 4, 0.9, 0.6);
+}
+
+// Water: deep base + lighter inner pool, ripple lines, drifting light reflections
+// and a foam-touched edge. off shifts ripple phase between the 3 variants.
+function decoWater(g: any, R: () => number, base: number, off: number) {
+  const lite = lighten(base, 0.2), hi = 0x6abaff;
+  // Lighter inner pool (depth illusion).
+  g.fillStyle(lite, 0.45); g.fillPoints([{ x: 32, y: 4 }, { x: 56, y: 16 }, { x: 32, y: 28 }, { x: 8, y: 16 }], true);
+  g.fillStyle(mix(lite, hi, 0.3), 0.3); g.fillPoints([{ x: 32, y: 8 }, { x: 48, y: 16 }, { x: 32, y: 24 }, { x: 16, y: 16 }], true);
+  // Ripple lines — gentle parallel diamonds, phase-shifted by off.
+  g.lineStyle(1.3, mix(lite, hi, 0.5), 0.6);
+  for (const yy of [9 + off, 15 + off, 21 + off]) {
+    const y = ((yy - 4) % 22) + 6;
+    g.beginPath(); g.moveTo(12, y); g.lineTo(26, y - 1.5); g.strokePath();
+    g.beginPath(); g.moveTo(34, y + 2); g.lineTo(52, y + 0.5); g.strokePath();
+  }
+  // Drifting bright light reflections (sun glints).
+  g.fillStyle(mix(hi, WARM_LIGHT, 0.4), 0.55);
+  for (let i = 0; i < 3; i++) {
+    const x = 14 + ((off * 3 + i * 18) % 38), y = 10 + ((off * 2 + i * 7) % 14);
+    if (!inTop(x, y, 0.6)) continue;
+    g.fillEllipse(x, y, 2.6, 1.0);
+  }
+  // Foam edge along the upper rim.
+  g.fillStyle(0xdfeefb, 0.4);
+  g.fillPoints([{ x: 0, y: 16 }, { x: 32, y: 0 }, { x: 32, y: 2.5 }, { x: 4, y: 16 }], true);
+}
+
+// Sand: warm dune base + wind ripple lines + scattered pebbles + grain mottle.
+function decoSand(g: any, R: () => number, base: number) {
+  dotsR(g, R, mix(base, WARM_LIGHT, 0.2), 6, 2.2, 0.24);
+  dotsR(g, R, darken(base, 0.14), 5, 2.0, 0.24);
+  // Wind ripples — long shallow curves following the iso flow.
+  g.lineStyle(1, darken(base, 0.18), 0.5);
+  for (let i = 0; i < 4; i++) {
+    const y = 8 + i * 4 + (R() * 2 - 1);
+    g.beginPath(); g.moveTo(8 + R() * 4, y + 1.5); g.lineTo(32, y); g.lineTo(56 - R() * 4, y + 1.5); g.strokePath();
+  }
+  // Pebbles.
+  dotsR(g, R, 0x9a8050, 4, 1.1, 0.8);
+  dotsR(g, R, lighten(base, 0.22), 4, 0.8, 0.7);
+}
+
+// Snow: cool-warm white base + soft bumps + frozen blue cracks + sparkles.
+function decoSnow(g: any, R: () => number, base: number) {
+  // Soft bumps (drifts) — alternating warm-lit and cool-shaded.
+  for (let i = 0; i < 5; i++) {
+    const x = 10 + R() * 44, y = 6 + R() * 20;
+    if (!inTop(x, y, 0.7)) continue;
+    g.fillStyle(mix(base, WARM_LIGHT, 0.6), 0.5); g.fillEllipse(x, y, 5, 2.6);
+    g.fillStyle(mix(base, 0x9aa8c8, 0.5), 0.3); g.fillEllipse(x + 1.5, y + 1.5, 4, 2.0);
+  }
+  // Frozen cracks (pale blue).
+  g.lineStyle(1, 0xaecbe8, 0.6);
+  let x = 14 + R() * 12, y = 8 + R() * 6;
+  g.beginPath(); g.moveTo(x, y);
+  for (let s = 0; s < 4; s++) { x += 6 + R() * 5; y += R() * 5 - 1; if (inTop(x, y, 0.7)) g.lineTo(x, y); }
+  g.strokePath();
+  // Sparkles.
+  g.fillStyle(0xffffff, 0.9);
+  for (let i = 0; i < 5; i++) { const sx = 8 + R() * 48, sy = 4 + R() * 24; if (inTop(sx, sy, 0.7)) g.fillCircle(sx, sy, 0.7); }
+}
+
+// Swamp: murky green-brown base + dark water patches + lily pads + reeds.
+function decoSwamp(g: any, R: () => number, base: number) {
+  // Murky patches (darker pools + lighter algae scum).
+  dotsR(g, R, darken(base, 0.32), 4, 3.4, 0.4);
+  dotsR(g, R, mix(base, 0x6a8a3a, 0.5), 4, 2.6, 0.35);
+  // Lily pads — flat green discs with a notch and a tiny flower.
+  for (let i = 0; i < 3; i++) {
+    const x = 14 + R() * 36, y = 8 + R() * 16;
+    if (!inTop(x, y, 0.65)) continue;
+    g.fillStyle(0x4a7a3a, 0.95); g.fillEllipse(x, y, 4, 2.2);
+    g.fillStyle(lighten(0x4a7a3a, 0.2), 0.7); g.fillEllipse(x - 0.8, y - 0.4, 2, 1.1);
+    if (R() < 0.5) { g.fillStyle(0xe8d8e8, 1); g.fillCircle(x + 1, y - 0.5, 0.9); }
+  }
+  // Reeds poking up.
+  g.lineStyle(1, 0x6a6a2a, 0.7);
+  for (let i = 0; i < 3; i++) {
+    const x = 12 + R() * 40, y = 18 + R() * 8;
+    if (!inTop(x, y, 0.7)) continue;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (R() - 0.5) * 2, y - 5 - R() * 3); g.strokePath();
+  }
+  // Bubbles / specks.
+  dotsR(g, R, 0x2a3a1a, 4, 0.8, 0.6);
+}
+
+// ---- PHASE 1: terrain ------------------------------------------------------
+// Richly re-textured terrain: every tile gets a warm gradient base, biome surface
+// detail, a lit-centre / shaded-edge dome and a feathered rim. All original
+// iso_* keys, the 64x64 frame and the (32,16)-centred diamond geometry are kept so
+// the isometric Blitter atlas keeps working untouched.
+export function generateTerrain(scene: any) {
+  // ---- Grass: warm bright base + two darker variant + a flowered/mushroom one.
+  const GRASS = 0x4a7c3f, GRASS_D = 0x3d6b34;
+  makeTile(scene, 'iso_grass', GRASS, (g, R) => decoGrass(g, R, GRASS), 11);
+  makeTile(scene, 'iso_grass2', GRASS_D, (g, R) => decoGrass(g, R, GRASS_D), 22);
+  makeTile(scene, 'iso_grass3', GRASS, (g, R) => decoGrass(g, R, GRASS, { flowers: true, mushrooms: true }), 33);
+
+  // ---- Water: deep #2a5a8a base; 3 phase-shifted shimmer variants (river/sea
+  // reads as moving water — the scene assigns these randomly per tile).
+  const WATER = 0x2a5a8a;
+  makeTile(scene, 'iso_water', WATER, (g, R) => decoWater(g, R, WATER, 0), 101);
+  makeTile(scene, 'iso_water2', WATER, (g, R) => decoWater(g, R, WATER, 4), 102);
+  makeTile(scene, 'iso_water3', WATER, (g, R) => decoWater(g, R, WATER, 8), 103);
+
+  // ---- Rocky boulder tile (warm stone, cobbles + boulders + lichen).
+  const ROCK = 0x8a7a6a;
+  makeTile(scene, 'iso_rock', ROCK, (g, R) => decoStone(g, R, ROCK, { boulders: true }), 201);
+
+  // ---- Mountain rock (cooler dark stone, cobbles + cracks).
+  const MTN = 0x6a6258;
+  makeTile(scene, 'iso_mtn', MTN, (g, R) => decoStone(g, R, MTN, { cracks: true }), 202);
+
+  // ---- Forest floor (dark earth + moss, leaves, roots). 8 deterministic variants.
+  const FOREST = 0x244012;
+  for (let i = 1; i <= 8; i++) makeTile(scene, `iso_forest${i}`, FOREST, (g, R) => decoForest(g, R, FOREST), 300 + i);
+
+  // ---- Extra standalone tiles (generated + available; not in the current roll).
+  const DIRT = 0x6b4423;
+  makeTile(scene, 'iso_dirt', DIRT, (g, R) => {
+    dotsR(g, R, darken(DIRT, 0.2), 5, 2.2, 0.26); dotsR(g, R, lighten(DIRT, 0.18), 4, 1.6, 0.26);
+    g.lineStyle(1, lighten(DIRT, 0.22), 0.45); for (const y of [12, 18]) { g.beginPath(); g.moveTo(12, y); g.lineTo(28, y - 2); g.strokePath(); g.beginPath(); g.moveTo(36, y + 2); g.lineTo(52, y); g.strokePath(); }
+    dotsR(g, R, 0x4a3018, 4, 1.0, 0.6); // small stones/clods
+  }, 401);
+  const PATH = 0x8a7a6a;
+  makeTile(scene, 'iso_path', PATH, (g, R) => decoStone(g, R, PATH), 402);
+  const SAND = 0xc4a35a;
+  makeTile(scene, 'iso_sand', SAND, (g, R) => decoSand(g, R, SAND), 403);
+  const SNOW = 0xe8eaf0;
+  makeTile(scene, 'iso_snow', SNOW, (g, R) => decoSnow(g, R, SNOW), 404);
+  const SWAMP = 0x4a5a32;
+  makeTile(scene, 'iso_swamp', SWAMP, (g, R) => decoSwamp(g, R, SWAMP), 405);
 }
 
 // ---- building drawing primitives -------------------------------------------
