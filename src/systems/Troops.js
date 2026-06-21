@@ -430,6 +430,18 @@ export class TroopManager {
     return k;
   }
 
+  // (Loop 3, Feature #3) Elite Warrior — a Barracks Lv4+ veteran (+50% HP & dmg).
+  spawnElite(home) {
+    const hx = home.x + Phaser.Math.Between(-22, 22);
+    const hy = home.y + Phaser.Math.Between(20, 40);
+    const w = new Warrior(this.scene, hx, hy, hx, hy, { hp: 75, dps: 18, scale: 46 / 192, tint: 0xc8e0a0, label: 'Elite' });
+    w.elite = true;
+    this.warriors.push(w);
+    return w;
+  }
+
+  championCount() { return this.warriors.filter((w) => w.champion).length; }
+
   // (Session-1) Champion "The Ancient": a unique legendary warrior from a ruin.
   // HP 200, 40 dmg, large gold-tinted sprite. Counts as one unit but fights like five.
   spawnChampion() {

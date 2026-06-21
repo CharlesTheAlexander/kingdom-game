@@ -88,6 +88,8 @@ const TRAIN_DEFS = {
   monk: { label: 'Monk', time: 50, cost: { gold: 50, food: 10, stone: 10 } },
   // (Phase 3) Knight — needs Barracks Lv2 + an operational Blacksmith + Equipment.
   knight: { label: 'Knight', time: 90, cost: { gold: 80, food: 30, equipment: 1 } },
+  // (Loop 3, Feature #3) Champion — unique legendary unit from a Barracks Lv5.
+  champion: { label: 'Champion', time: 120, cost: { gold: 200, food: 40, equipment: 2 } },
 };
 
 export class GameScene extends Phaser.Scene {
@@ -1142,7 +1144,7 @@ export class GameScene extends Phaser.Scene {
 
       // Train buttons (top row), gated by level + free slots.
       let tx = 452;
-      for (const type of ['warrior', 'archer', 'monk', 'knight']) {
+      for (const type of ['warrior', 'archer', 'monk', 'knight', 'champion']) {
         const def = TRAIN_DEFS[type];
         const need = this.unitUnlockLevel(type);
         const needSmith = type === 'knight';
@@ -1281,7 +1283,7 @@ export class GameScene extends Phaser.Scene {
   // (Bug 4) Barracks level → training slots & unlocked unit types.
   // Lv1: Warrior, 1 slot.  Lv2: +Archer, 2 slots.  Lv3: +Monk, 3 slots.
   unitUnlockLevel(type) {
-    return { warrior: 1, archer: 2, monk: 3, knight: 2 }[type];
+    return { warrior: 1, archer: 2, monk: 3, knight: 2, champion: 5 }[type];
   }
 
   // (Phase 3) Hard soldier cap = 5 per Barracks built.
@@ -1306,6 +1308,12 @@ export class GameScene extends Phaser.Scene {
     if (type === 'knight' && (!this.hasBlacksmith || !this.hasBlacksmith())) {
       this.showToast('Knights need an operational Blacksmith');
       return;
+    }
+    // (Loop 3, Feature #3) Only one Champion may exist (or be in training) at a time.
+    if (type === 'champion') {
+      const inTraining = this.buildings.buildings.some((b) => b.slots && b.slots.some((s) => s.type === 'champion'));
+      const exists = this.troops.championCount && this.troops.championCount() > 0;
+      if (exists || inTraining) { this.showToast('You may only have one Champion'); return; }
     }
     if (this.soldierTotal() >= this.soldierCap()) {
       this.showToast(`Soldier cap reached (${this.soldierCap()}) — build another Barracks`);

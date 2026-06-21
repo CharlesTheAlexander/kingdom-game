@@ -110,7 +110,14 @@ export class Building {
     if (scene && this.typeKey === 'castle' && scene.traitBonuses && scene.traitBonuses.goldMult) rate *= scene.traitBonuses.goldMult;
     // (Session-1 Phase 5) Tax rate scales Castle gold income.
     if (scene && this.typeKey === 'castle' && this.type.produces === 'gold' && scene._goldTaxMult) rate *= scene._goldTaxMult;
+    // (Loop 3, Feature #3) Level 5 perks on the producers.
+    if (this.typeKey === 'lumberyard' && this.level >= 5) rate *= 1.25; // L5: surplus output
     if (rate > 0) resources.add(this.type.produces, rate);
+    // (Feature #3) Mine L4+: occasionally finds iron ore without an expedition.
+    if (scene && this.typeKey === 'mine' && this.level >= 4 && this.workers > 0 && Math.random() < 0.10) {
+      resources.add('iron', 1);
+      if (scene.floatText) scene.floatText(this.x, this.y - 30, '+1 iron', '#9fb8d8');
+    }
   }
 
   // Building upgrades cost GOLD only (see BuildingTypes.upgradeCost).

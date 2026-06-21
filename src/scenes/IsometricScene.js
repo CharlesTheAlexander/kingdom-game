@@ -2609,11 +2609,16 @@ export class IsometricScene extends GameScene {
     const bar = this.buildings.buildings.find((b) => b.typeKey === 'barracks' && b.alive);
     const tx = 230;
     if (bar) {
-      const types = [['warrior', 1], ['archer', 2], ['monk', 3], ['knight', 2]];
+      // (Feature #3) Champion unlocks at Barracks L5 (1 max). Warriors trained at
+      // an L4+ barracks arrive as Elites (+50% stats) automatically.
+      const types = [['warrior', 1], ['archer', 2], ['monk', 3], ['knight', 2], ['champion', 5]];
       types.forEach(([t, lvl], i) => {
-        const can = bar.level >= lvl && this.soldierRoom() > 0 && (t !== 'knight' || (this.hasBlacksmith && this.hasBlacksmith()));
-        this.spriteButton(tx + i * 104, this.PANEL_Y + 28, 96, 30, `Train ${t}`, '', can, () => this.trainUnit(bar, t));
+        let can = bar.level >= lvl && this.soldierRoom() > 0 && (t !== 'knight' || (this.hasBlacksmith && this.hasBlacksmith()));
+        if (t === 'champion' && this.troops.championCount && this.troops.championCount() > 0) can = false; // 1 max
+        const label = t === 'warrior' && bar.level >= 4 ? 'Train elite' : `Train ${t}`;
+        this.spriteButton(tx + i * 104, this.PANEL_Y + 28, 96, 30, label, t === 'champion' ? 'Lv5 · 1 max' : '', can, () => this.trainUnit(bar, t));
       });
+      this.panelText(tx, this.PANEL_Y + 64, `Barracks Lv ${bar.level}/5${bar.level >= 4 ? ' — trains Elites' : ''}${bar.level >= 5 ? ' + Champion' : ''}`, { color: '#cfc1a6', size: '11px' });
     } else {
       this.panelText(tx, this.PANEL_Y + 34, 'Build a Barracks to train soldiers.', { color: '#9aa0a6', size: '11px' });
     }
@@ -3516,7 +3521,9 @@ export class IsometricScene extends GameScene {
     if (this.dayTimer >= DAY_MS) {
       this.dayTimer -= DAY_MS;
       this.gameDay += 1;
-      const eat = Math.round(this.troops.dailyUpkeep() * (this._seasonFoodUpkeepMult || 1) * (this.traitBonuses ? this.traitBonuses.foodMult : 1)); // (Phase 3 season + Phase 4 Warlord)
+      // (Loop 3, Feature #3) Farm L5 auto-feeds the army from its stockpile → halves upkeep.
+      const autoFeed = this.buildings.buildings.some((b) => b.typeKey === 'farm' && b.alive && b.level >= 5) ? 0.5 : 1;
+      const eat = Math.round(this.troops.dailyUpkeep() * (this._seasonFoodUpkeepMult || 1) * (this.traitBonuses ? this.traitBonuses.foodMult : 1) * autoFeed); // (Phase 3 season + Phase 4 Warlord + Loop 3 farm L5)
       this.resources.food = Math.max(0, this.resources.food - eat);
       this.onNewDay(eat);
     }
@@ -3712,6 +3719,8 @@ export class IsometricScene extends GameScene {
         if (slot.type === 'archer') this.troops.spawnArcher(b);
         else if (slot.type === 'monk') this.troops.spawnMonk(b);
         else if (slot.type === 'knight') this.troops.spawnKnight(b);
+        else if (slot.type === 'champion') this.troops.spawnChampion(); // (Feature #3) Barracks L5
+        else if (b.level >= 4 && this.troops.spawnElite) this.troops.spawnElite(b); // (Feature #3) L4 → Elite
         else this.troops.spawn(b);
         finished = true;
         if (this.stats) this.stats.note('soldiersTrained'); // (Phase 6)

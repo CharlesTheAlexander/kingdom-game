@@ -90,15 +90,19 @@ export const BuildingTypes = {
 export const BUILD_ORDER = ['house', 'lumberyard', 'mine', 'farm', 'barracks', 'tower', 'watchtower', 'market', 'tavern', 'blacksmith', 'library'];
 export const PLACEABLE = BUILD_ORDER.map((k) => BuildingTypes[k]);
 
-export const MAX_LEVEL = 3;
+// (Loop 3, Feature #3) Buildings upgrade through 5 levels. Output scales on a
+// gentle curve (not the old 2^level, which would be 16x at L5). Levels 4–5 also
+// grant per-building perks (see Building.produce / trainUnit).
+export const MAX_LEVEL = 5;
 
-// Building upgrades stay simple: they cost GOLD only (doubling each level) and
-// double the building's output. (Settlement tiers are the main progression.)
+const OUTPUT_CURVE = [1, 1.5, 2.25, 3, 4]; // index = level-1
+
+// Upgrades cost GOLD only and rise each level (gates the high tiers).
 export function upgradeCost(type, level) {
-  return Math.round(60 * Math.pow(2, level - 1));
+  return Math.round(60 * Math.pow(1.8, level - 1));
 }
 export function outputMultiplier(level) {
-  return Math.pow(2, level - 1);
+  return OUTPUT_CURVE[Math.max(0, Math.min(OUTPUT_CURVE.length - 1, level - 1))] || 1;
 }
 
 const RES_ABBR = { gold: 'G', wood: 'W', stone: 'S', food: 'F', iron: 'Fe', equipment: 'Eq' };
