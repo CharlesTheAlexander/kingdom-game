@@ -36,6 +36,7 @@ const STATS: Record<string, any> = {
   knight: { hp: 120, dmg: 25, speed: 34, range: 0, tex: 'blue_lancer', heal: 0, area: true, tank: true },
   goblin: { hp: 15, dmg: 8, speed: 74, range: 0, tex: 'goblin_idle', heal: 0 },
   garrison: { hp: 50, dmg: 15, speed: 0, range: 0, tex: 'blue_warrior_idle', heal: 0, hold: true },
+  siege: { hp: 80, dmg: 8, speed: 18, range: 0, tex: 'siege_unit', heal: 0, siege: true }, // smashes walls (50/s), weak vs units
 };
 const FACTION_WARRIOR: Record<string, string> = { red: 'warrior_idle', purple: 'purple_warrior_idle', yellow: 'yellow_warrior_idle', neutral: 'blue_warrior_idle', goblin: 'goblin_idle' };
 const FACTION_LABEL: Record<string, string> = { red: 'Red Kingdom', purple: 'Purple Kingdom', yellow: 'Yellow Kingdom', neutral: 'Free Company', goblin: 'Goblin Horde' };
@@ -177,6 +178,14 @@ export class BattleScene extends Phaser.Scene {
     this.spawnArmy('enemy', this.cfg.enemyArmy || [], null);
     this.applyFormation('player', 'LINE');
     this.applyFormation('enemy', 'LINE');
+
+    // (Completion Phase 7) Defender walls — attackers must breach them. Siege
+    // units smash fast (50/s); without siege the attacker is debuffed.
+    if (this.cfg.defenderWalls) {
+      this.makeWall();
+      const hasSiege = this.sideUnits('player').some((u) => u.type === 'siege');
+      if (!hasSiege) { this.morale.player = Math.max(0, this.morale.player - 15); this._noSiegeUntil = 30; }
+    }
 
     this.buildHud();
     this.createStartButton(); // (Phase 5) skip the pre-battle timer
@@ -557,6 +566,8 @@ export class BattleScene extends Phaser.Scene {
     if (pc > 0 && ec >= pc * 2) this.morale.player = Math.max(0, this.morale.player - dt);
     if (ec > 0 && pc >= ec * 2) this.morale.enemy = Math.max(0, this.morale.enemy - dt);
 
+    if (this._noSiegeUntil > 0) this._noSiegeUntil -= dt; // (Phase 7) no-siege debuff timer
+    this.updateWall(dt); // (Phase 7) wall breach state
     for (const u of this.units) { if (u.alive) this.updateUnit(u, dt); }
     this.units = this.units.filter((u) => u.alive || u.spr.active);
     this.updateMoraleBars();
@@ -591,8 +602,53 @@ export class BattleScene extends Phaser.Scene {
     this.applyFormation('enemy', eHasArchers ? 'LINE' : this.faction === 'goblin' ? 'FLANK' : 'WEDGE');
   }
 
+  // (Completion Phase 7) Defender wall across the centre of the field.
+  makeWall() {
+    const x = GAME_W * 0.5, top = HORIZON + 80, h = GAME_H - 120 - top;
+    this.wall = { x, hp: 600, maxHp: 600 };
+    this.wallG = this.add.graphics().setDepth(7);
+    this.wallBarBg = this.add.rectangle(x, top - 16, 120, 8, 0x000000, 0.7).setDepth(42);
+    this.wallBar = this.add.rectangle(x - 60, top - 16, 120, 6, 0x9aa0a6).setOrigin(0, 0.5).setDepth(43);
+    this.wallLabel = this.add.text(x, top - 28, 'WALL', { fontFamily: 'monospace', fontSize: '11px', color: '#cbd2da', fontStyle: 'bold' }).setOrigin(0.5).setDepth(43);
+    this.drawWallG(top, h);
+  }
+  drawWallG(top, h) {
+    const g = this.wallG; if (!g) return; const x = this.wall.x; g.clear();
+    g.fillStyle(0x6f6f68, 1); g.fillRect(x - 9, top, 18, h);
+    g.fillStyle(0x82828a, 1); g.fillRect(x - 9, top, 6, h);
+    g.fillStyle(0x55554f, 1); for (let yy = top; yy < top + h; yy += 16) g.fillRect(x - 9, yy, 18, 2); // courses
+    for (let cx = x - 9; cx < x + 9; cx += 8) g.fillRect(cx, top - 6, 5, 6); // merlons
+  }
+  updateWall(dt) {
+    if (!this.wall) return;
+    this.wallBar.width = 120 * Phaser.Math.Clamp(this.wall.hp / this.wall.maxHp, 0, 1);
+    if (this.wall.hp <= 0) {
+      this.dmgNumber(this.wall.x, HORIZON + 90, 0, '#fff');
+      if (this.wallG) this.wallG.destroy(); if (this.wallBar) this.wallBar.destroy(); if (this.wallBarBg) this.wallBarBg.destroy(); if (this.wallLabel) this.wallLabel.destroy();
+      this.wall = null; this.banner.setText('The wall is breached!');
+      this.cameras.main.shake(300, 0.01);
+    }
+  }
+
   updateUnit(u, dt) {
     const moraleMul = (this.morale[u.side] <= 30 ? 0.8 : 1) * (u.cmd === 'charge' ? 1.2 : 1);
+    // (Completion Phase 7) While a wall stands, player units assault it instead of
+    // crossing. Siege hits for 50/s; others chip at 5/s (×0.7 with no-siege debuff).
+    if (this.wall && this.wall.hp > 0 && u.side === 'player' && u.cmd !== 'retreat') {
+      const wx = this.wall.x;
+      if (u.x > wx + 22) { this.moveTo(u, wx + 12, u.y, u.speed * moraleMul, dt); playLoop(u.spr, u.anims.run || u.anims.idle); u.sync(); return; }
+      u.atkCd = Math.max(0, u.atkCd - dt);
+      if (u.atkCd <= 0) {
+        u.atkCd = 0.5;
+        let dmg = (u.type === 'siege' ? 25 : 2.5) * (u.count || 1);
+        if (this._noSiegeUntil > 0 && u.type !== 'siege') dmg *= 0.7;
+        this.wall.hp -= dmg; this.dmgNumber(wx, u.y - 20, Math.round(dmg), '#cbd2da');
+        playOnce(u.spr, u.anims.atk, u.anims.idle); sfx.playThrottled('sword_hit', 130);
+      } else playLoop(u.spr, u.anims.idle);
+      u.sync(); return;
+    }
+    // Defenders hold behind their wall until it falls.
+    if (this.wall && this.wall.hp > 0 && u.side === 'enemy') { playLoop(u.spr, u.anims.idle); u.sync(); return; }
     // Commands that override targeting.
     if (u.cmd === 'retreat') { this.moveTo(u, u.side === 'player' ? GAME_W + 40 : -40, u.y, u.speed * 1.1 * moraleMul, dt); u.sync(); return; }
     // (BUG 11) Move to the left/right 30% band, then advance toward the enemy.

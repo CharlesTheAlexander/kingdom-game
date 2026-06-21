@@ -246,6 +246,16 @@ const BUILD: Record<string, (g: any, A: number) => void> = {
     merlons(g, 14, 34, 36, STONE);
     g.lineStyle(1, STONE_D, 0.8); g.beginPath(); g.moveTo(14, 46); g.lineTo(50, 46); g.moveTo(26, 38); g.lineTo(26, 56); g.moveTo(38, 38); g.lineTo(38, 56); g.strokePath(); // block seams
   },
+  siegeworkshop: (g, A) => {
+    box(g, 16, 36, 32, 22, WOOD);                        // open timber workshop
+    g.fillStyle(BEAM, 1); g.fillRect(16, 34, 32, 3);
+    g.fillStyle(darken(WOOD, 0.1), 1); g.fillTriangle(14, 34, 50, 34, 32, 24); // roof
+    // a catapult under the roof
+    g.fillStyle(0x6b4a28, 1); g.fillRect(24, 48, 16, 4); g.fillCircle(26, 54, 3); g.fillCircle(38, 54, 3);
+    g.lineStyle(3, 0x5c3a1e, 1); g.beginPath(); g.moveTo(26, 50); g.lineTo(38, 38); g.strokePath(); // arm
+    g.fillStyle(0x9aa0a6, 1); g.fillCircle(38, 37, 3); // payload
+    flag(g, 31, 16, 8, A);
+  },
   grandhall: (g, A) => {
     box(g, 12, 28, 40, 30, STONE);                       // grand wide hall
     g.fillStyle(ROOF, 1); g.fillRect(10, 22, 44, 8);     // entablature
@@ -553,6 +563,15 @@ export function generateWorldObjects(scene: any) {
     ctx.fillStyle = css(0x7d7d74); ctx.beginPath(); ctx.moveTo(cx - w * 0.4, by); ctx.lineTo(cx - w * 0.22, by - h * 0.42); ctx.lineTo(cx + w * 0.12, by - h * 0.5); ctx.lineTo(cx + w * 0.4, by - h * 0.18); ctx.lineTo(cx + w * 0.34, by); ctx.closePath(); ctx.fill();
     ctx.fillStyle = css(0x95958c); ctx.beginPath(); ctx.moveTo(cx - w * 0.22, by - h * 0.42); ctx.lineTo(cx + w * 0.12, by - h * 0.5); ctx.lineTo(cx - w * 0.02, by - h * 0.28); ctx.closePath(); ctx.fill(); // light face
     ctx.strokeStyle = css(0x55554f); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx, by - h * 0.4); ctx.lineTo(cx + w * 0.06, by - h * 0.16); ctx.stroke();
+  });
+  // Siege engine (catapult) — used by world Troops + BattleScene siege units.
+  objSheet(scene, 'siege_unit', 1, 192, 192, (ctx) => {
+    const cx = 96, gy = 140;
+    ctx.fillStyle = css(0x5c3a1e); ctx.fillRect(cx - 34, gy - 16, 68, 14);     // frame
+    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(cx - 26, gy - 16); ctx.lineTo(cx + 18, gy - 64); ctx.stroke(); // throwing arm
+    ctx.fillStyle = css(0x9aa0a6); ctx.beginPath(); ctx.arc(cx + 20, gy - 66, 11, 0, Math.PI * 2); ctx.fill(); // boulder
+    ctx.fillStyle = css(0x2a2a2e); ctx.beginPath(); ctx.arc(cx - 24, gy, 14, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(cx + 24, gy, 14, 0, Math.PI * 2); ctx.fill(); // wheels
+    ctx.fillStyle = css(0x6b4a28); ctx.fillRect(cx - 38, gy - 30, 8, 30); ctx.fillRect(cx + 30, gy - 30, 8, 30); // supports
   });
   // Iron deposit (Phase 6 of the completion plan uses this) — rust-veined rock.
   reskinImage(scene, 'iron_node', 80, 72, (ctx, w, h) => {

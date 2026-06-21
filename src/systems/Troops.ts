@@ -396,9 +396,9 @@ export class TroopManager {
   // (Phase 1 BattleScene) Snapshot the army by type, then remove every unit from
   // the world (they "march off" to the BattleScene). Survivors are respawned.
   snapshot() {
-    const c = { warrior: 0, mercenary: 0, knight: 0, archer: this.archers.length, monk: this.monks.length };
-    for (const w of this.warriors) { if (w.knight) c.knight++; else if (w.mercenary) c.mercenary++; else c.warrior++; }
-    return Object.entries(c).filter(([, v]) => v > 0).map(([type, count]) => ({ type, count }));
+    const c: any = { warrior: 0, mercenary: 0, knight: 0, siege: 0, archer: this.archers.length, monk: this.monks.length };
+    for (const w of this.warriors) { if (w.knight) c.knight++; else if (w.mercenary) c.mercenary++; else if (w.siege) c.siege++; else c.warrior++; }
+    return (Object.entries(c) as [string, number][]).filter(([, v]) => v > 0).map(([type, count]) => ({ type, count }));
   }
 
   removeAll() {
@@ -409,7 +409,7 @@ export class TroopManager {
   // (Save system) Capture every living unit's type/position/hp.
   serialize() {
     const out: any[] = [];
-    for (const w of this.warriors) if (w.alive) out.push({ t: w.knight ? 'knight' : w.mercenary ? 'mercenary' : 'warrior', x: Math.round(w.x), y: Math.round(w.y), hp: Math.round(w.hp), maxHp: w.maxHp, cmd: !!w.playerCommanded });
+    for (const w of this.warriors) if (w.alive) out.push({ t: w.knight ? 'knight' : w.mercenary ? 'mercenary' : w.siege ? 'siege' : 'warrior', x: Math.round(w.x), y: Math.round(w.y), hp: Math.round(w.hp), maxHp: w.maxHp, cmd: !!w.playerCommanded });
     for (const a of this.archers) if (a.alive) out.push({ t: 'archer', x: Math.round(a.x), y: Math.round(a.y), hp: Math.round(a.hp), maxHp: a.maxHp, cmd: !!a.playerCommanded });
     for (const m of this.monks) if (m.alive) out.push({ t: 'monk', x: Math.round(m.x), y: Math.round(m.y), hp: Math.round(m.hp), maxHp: m.maxHp, cmd: !!m.playerCommanded });
     return out;
@@ -425,6 +425,7 @@ export class TroopManager {
       else if (d.t === 'monk') { u = new Monk(this.scene, x, y); this.monks.push(u); }
       else if (d.t === 'knight') { u = new Warrior(this.scene, x, y, x, y, { knight: true, hp: 120, dps: 25, scale: 44 / 192, tint: 0x9fb8d8, label: 'Knight' }); this.warriors.push(u); }
       else if (d.t === 'mercenary') { u = new Warrior(this.scene, x, y, x, y, { mercenary: true, label: 'Mercenary', idle: 'yellow_warrior_idle', run: 'yellow_warrior_run', attack: 'yellow_warrior_attack' }); this.warriors.push(u); }
+      else if (d.t === 'siege') { u = new Warrior(this.scene, x, y, x, y, { hp: 80, dps: 8, scale: 52 / 192, idle: 'siege_unit', run: 'siege_unit', attack: 'siege_unit', label: 'Siege' }); u.siege = true; this.warriors.push(u); }
       else { u = new Warrior(this.scene, x, y, x, y); this.warriors.push(u); }
       if (d.maxHp) u.maxHp = d.maxHp;
       if (d.hp != null) u.hp = d.hp;
@@ -479,6 +480,20 @@ export class TroopManager {
   }
 
   championCount() { return this.warriors.filter((w) => w.champion).length; }
+  siegeCount() { return this.warriors.filter((w) => w.siege).length; }
+
+  // (Completion Phase 7) Siege engine — HP 80, heavy damage vs structures, slow.
+  // Lives in the warrior list (so it joins armies) but is flagged `siege`.
+  spawnSiege(home) {
+    const hx = home.x + Phaser.Math.Between(-22, 22);
+    const hy = home.y + Phaser.Math.Between(20, 40);
+    const u = new Warrior(this.scene, hx, hy, hx, hy, { hp: 80, dps: 8, scale: 52 / 192, idle: 'siege_unit', run: 'siege_unit', attack: 'siege_unit', label: 'Siege' });
+    u.siege = true; u.canAttackAI = true;
+    this.warriors.push(u);
+    const c = this.scene.buildings.castle;
+    if (c && this.scene.floatText) this.scene.floatText(c.x, c.y - 44, 'A Siege Engine is ready!', '#c9a86a');
+    return u;
+  }
 
   // (Session-1) Champion "The Ancient": a unique legendary warrior from a ruin.
   // HP 200, 40 dmg, large gold-tinted sprite. Counts as one unit but fights like five.

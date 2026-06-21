@@ -2408,7 +2408,7 @@ export class IsometricScene extends GameScene {
     // (Phase 3) K&C category panels.
     else if (this.panelMode === 'cat_castle') this.renderCastlePanel();
     else if (this.panelMode === 'cat_food') this.renderCategoryBuild('FOOD', ['farm', 'tavern', 'house']);
-    else if (this.panelMode === 'cat_industry') this.renderCategoryBuild('INDUSTRY', ['lumberyard', 'mine', 'sawmill', 'stonecutter', 'blacksmith', 'market', 'library', 'watchtower', 'treasury', 'grandhall']);
+    else if (this.panelMode === 'cat_industry') this.renderCategoryBuild('INDUSTRY', ['lumberyard', 'mine', 'sawmill', 'stonecutter', 'blacksmith', 'market', 'library', 'watchtower', 'treasury', 'siegeworkshop', 'grandhall']);
     else if (this.panelMode === 'cat_military') this.renderMilitaryPanel();
     else if (this.panelMode === 'build') this.renderDefaultPanel();
     // (Phase 3) 'none' → no panel (just the category bar). Map filled the screen.
@@ -2441,7 +2441,7 @@ export class IsometricScene extends GameScene {
       this.spriteButton(630, y - 2, 96, 24, 'Supplies', '', true, () => { m.sendSupplies(a); this.refreshPanel(); }, { gold: true });
       this.spriteButton(730, y - 2, 92, 24, 'Disband', '', true, () => { m.disband(a); this.refreshPanel(); });
     });
-    this.spriteButton(GAME_W - 180, this.PANEL_Y + PANEL_H - 36, 168, 28, 'Form New Army', '', list.length < m.maxPlayerArmies, () => { this._armyFormSpec = { warrior: 0, archer: 0, monk: 0, knight: 0, mercenary: 0 }; this.panelMode = 'armyform'; this.refreshPanel(); }, { active: true });
+    this.spriteButton(GAME_W - 180, this.PANEL_Y + PANEL_H - 36, 168, 28, 'Form New Army', '', list.length < m.maxPlayerArmies, () => { this._armyFormSpec = { warrior: 0, archer: 0, monk: 0, knight: 0, mercenary: 0, siege: 0 }; this.panelMode = 'armyform'; this.refreshPanel(); }, { active: true });
     // (Phase 3) Diplomacy + Caravans live under the Armies category.
     this.spriteButton(GAME_W - 180, this.PANEL_Y + 6, 80, 24, 'Diplomacy', '', true, () => { this.panelMode = 'kingdoms'; this.refreshPanel(); });
     this.spriteButton(GAME_W - 96, this.PANEL_Y + 6, 84, 24, 'Caravans', '', !!(this.caravans && this.caravans.sites().length >= 2), () => { this.panelMode = 'caravans'; this.refreshPanel(); });
@@ -2633,8 +2633,17 @@ export class IsometricScene extends GameScene {
     if (b.typeKey === 'market') this.renderMarketPanel(b);
     else if (b.typeKey === 'tavern') this.renderTavernPanel(b);
     else super.renderSelectedPanel(b);
+    if (b.typeKey === 'siegeworkshop') this.addSiegeTrainButton(b); // (Completion Phase 7)
     // (Gameplay change 2) Move + Demolish actions on every building but the Castle.
     if (b.typeKey !== 'castle') this.addBuildingActionButtons(b);
+  }
+
+  // (Completion Phase 7) Train a siege engine at the Siege Workshop (4 days).
+  addSiegeTrainButton(b) {
+    if (b._siegeDays > 0) { this.panelText(GAME_W / 2 - 110, this.PANEL_Y + 40, `Building siege engine: ${b._siegeDays}d left`, { color: '#c9a86a', bold: true }); return; }
+    const cost = { gold: 100, planks: 20, iron: 10 };
+    const can = this.resources.canAfford(cost);
+    this.spriteButton(GAME_W / 2 - 100, this.PANEL_Y + 36, 200, 40, 'Train Siege Unit', '100g · 20 planks · 10 iron · 4d', can, () => { if (this.resources.spend(cost)) { b._siegeDays = 4; this.refreshPanel(); } }, { gold: can });
   }
 
   addBuildingActionButtons(b) {
@@ -2860,6 +2869,7 @@ export class IsometricScene extends GameScene {
     this.scene.launch('BattleScene', {
       playerArmy, enemyArmy, terrainType: this.battleTerrain(), enemyFaction: faction,
       context, playerDefending: !!(context && context.defending), taverMoraleBonus: this.hasTavern && this.hasTavern(),
+      defenderWalls: !!(context && !context.defending && (context.kind === 'settlement' || context.kind === 'castle')), // (Phase 7)
       onComplete: (res) => this.onBattleComplete(res),
     });
     this.scene.pause();
@@ -2960,6 +2970,7 @@ export class IsometricScene extends GameScene {
       enemyArmy: enemyUnits.map((u) => ({ type: u.type, count: u.count })),
       terrainType: this.battleTerrain(), enemyFaction: ctx.faction || 'red',
       context: ctx, playerDefending: !!ctx.defending,
+      defenderWalls: !!(ctx && !ctx.defending && (ctx.kind === 'settlement' || ctx.kind === 'castle')), // (Phase 7)
       onComplete: (res) => this.onArmyBattleComplete(playerArmy, res, ctx),
     });
     this.scene.pause();
@@ -3557,6 +3568,8 @@ export class IsometricScene extends GameScene {
     if (this.research) this.research.onNewDay(); // (Phase 5) research progress
     if (this.banking) this.banking.onNewDay(); // (Completion Phase 3) interest + loan handling
     if (this.greatCouncil) this.greatCouncil.onNewDay(); // (Completion Phase 4) council effects
+    // (Completion Phase 7) Advance Siege Workshop training.
+    for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
     if (this.factions) this.factions.onNewDay(); // (Session-1 Phase 2) wandering factions daily
     this.checkTaxRevolt(); // (Session-1 Phase 5) tax revolt check
