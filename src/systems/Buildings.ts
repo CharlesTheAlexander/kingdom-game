@@ -33,6 +33,7 @@ export class Building {
     this.alive = true;
     this.slots = []; // barracks training slots: [{ type, timeLeft, total }] (Bug 4)
     this.workers = 0; // allocated workers (Phase 2)
+    this.condition = 4; // (V2 P6) 4 Perfect, 3 Good, 2 Weathered, 1 Damaged, 0 Ruined
 
     const { x, y } = scene.tileCenter(col, row);
     this.x = x;
@@ -100,6 +101,11 @@ export class Building {
     else this.workerIcon.setText('!').setColor('#ff5252');
   }
 
+  // (V2 Phase 6) Output penalty from deterioration: Weathered -10%,
+  // Damaged -50% (workers reluctant), Ruined produces nothing.
+  condMult() { return [0, 0.5, 0.9, 1, 1][this.condition] ?? 1; }
+  condName() { return ['Ruined', 'Damaged', 'Weathered', 'Good', 'Perfect'][this.condition] || 'Perfect'; }
+
   // Whole-number production. Called once per second by the manager.
   // (Bug 4) Soldiers are no longer auto-produced — the Barracks trains units
   // manually via its training slots, so 'soldiers' is skipped here.
@@ -161,6 +167,8 @@ export class Building {
         return;
       }
     }
+    if (this.condition < 3) rate *= this.condMult(); // (V2 P6) deterioration cuts output
+    if (scene && scene._plagueMult && this.type.maxWorkers > 0) rate *= scene._plagueMult; // (V2 P6) plague
     if (rate > 0) resources.add(this.type.produces, rate);
     // (Feature #3) Mine L4+: occasionally finds iron ore without an expedition.
     if (scene && this.typeKey === 'mine' && this.level >= 4 && this.workers > 0 && Math.random() < 0.10) {

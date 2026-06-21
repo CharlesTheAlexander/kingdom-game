@@ -60,6 +60,7 @@ import { GreatCouncil } from '../systems/GreatCouncil.js';
 import { Roads } from '../systems/Roads.js';
 import { FactionLeaders } from '../systems/FactionLeaders.js';
 import { Heroes } from '../systems/Heroes.js';
+import { Maintenance } from '../systems/Maintenance.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -290,6 +291,8 @@ export class IsometricScene extends GameScene {
     this.diplomacy = new Diplomacy(this); // Phase 7: relationships with kingdoms
     this.leaders = new FactionLeaders(this); // (V2 Phase 1) named AI rulers
     this.heroes = new Heroes(this); // (V2 Phase 3) named heroes
+    this.maintenance = new Maintenance(this); // (V2 Phase 6) building aging + disasters
+    this._plagueMult = 1;
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -948,6 +951,24 @@ export class IsometricScene extends GameScene {
     else this.closeTreasuryPanel();
     if (b && b.typeKey === 'hallofheroes') this.openHeroPanel(); // (V2 Phase 3)
     else this.closeHeroPanel();
+    if (b && b._onFire) this.openFirePanel(b); // (V2 Phase 6)
+    else this.closeFirePanel();
+  }
+
+  // (V2 Phase 6) Quick response panel for a burning building.
+  closeFirePanel() { if (this._firePanel) { this._firePanel.forEach((o) => o.destroy()); this._firePanel = null; } }
+  openFirePanel(b) {
+    this.closeFirePanel();
+    const fix = (o) => o.setScrollFactor(0).setDepth(122);
+    const W = 320, ht = 130, x = (GAME_W - W) / 2, y = 90, els = [];
+    els.push(fix(this.add.rectangle(x, y, W, ht, 0x241410, 0.98).setOrigin(0, 0).setStrokeStyle(3, 0xff8c3a, 0.95)));
+    els.push(fix(this.add.text(x + W / 2, y + 12, `🔥 ${b.type.name} is on fire!`, { fontFamily: 'monospace', fontSize: '15px', color: '#ffb066', fontStyle: 'bold' }).setOrigin(0.5, 0)));
+    els.push(fix(this.add.text(x + W / 2, y + 38, 'It will burn down in 2 days and may\nspread to nearby buildings.', { fontFamily: 'monospace', fontSize: '11px', color: '#e7c9b0', align: 'center' }).setOrigin(0.5, 0)));
+    const btn = fix(this.add.rectangle(x + W / 2, y + 92, 220, 30, 0x8a3a2a, 0.95).setStrokeStyle(2, 0xffb066, 0.9).setInteractive({ useHandCursor: true }));
+    const bt = fix(this.add.text(x + W / 2, y + 92, 'Send workers — 20 gold', { fontFamily: 'monospace', fontSize: '12px', color: '#ffe9d0', fontStyle: 'bold' }).setOrigin(0.5));
+    btn.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); if (this.maintenance.extinguishFire(b)) { this.closeFirePanel(); this.refreshPanel(); } });
+    els.push(btn, bt);
+    this._firePanel = els;
   }
 
   // (V2 Phase 3) Hall of Heroes — living heroes (assign to army) + fallen.
@@ -1978,6 +1999,23 @@ export class IsometricScene extends GameScene {
     this.decorateBuilding(b);
     this.placeFX(b);
     if (this.territory) this.territory.recompute();
+  }
+
+  // (V2 Phase 6) Destroy a building lost to fire or disaster — no refund, with
+  // a smoke puff. Mirrors demolishBuilding's footprint cleanup.
+  razeBuilding(b) {
+    if (!b || b.typeKey === 'castle') return;
+    if (b._fireFx) { b._fireFx.destroy(); b._fireFx = null; }
+    for (const cell of (b._cells || [])) if (this.buildings.grid[cell.r] && this.buildings.grid[cell.r][cell.c] === b) this.buildings.grid[cell.r][cell.c] = null;
+    if (this.buildings.grid[b.row] && this.buildings.grid[b.row][b.col] === b) this.buildings.grid[b.row][b.col] = null; // anchor (covers 1×1 without _cells)
+    if (b._floatIcon) { b._floatIcon.destroy(); b._floatIcon = null; }
+    if (b._snowCap) { b._snowCap.destroy(); b._snowCap = null; }
+    this.hideBuildingName && this.hideBuildingName(b);
+    if (this.floatText) this.floatText(b.x, b.y - 30, '💨 rubble', '#9a8f80');
+    b.destroy();
+    if (this.selectedBuilding === b) { this.selectedBuilding = null; this.clearSelection(); }
+    if (this.territory) this.territory.recompute();
+    this.refreshPanel();
   }
 
   demolishBuilding(b) {
@@ -3777,6 +3815,7 @@ export class IsometricScene extends GameScene {
     if (this.banking) this.banking.onNewDay(); // (Completion Phase 3) interest + loan handling
     if (this.greatCouncil) this.greatCouncil.onNewDay(); // (Completion Phase 4) council effects
     if (this.heroes) this.heroes.checkArrivals(); // (V2 Phase 3) hero arrivals
+    if (this.maintenance) this.maintenance.onNewDay(); // (V2 Phase 6) aging + disasters
     // (Completion Phase 7) Advance Siege Workshop training.
     for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
