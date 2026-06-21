@@ -1517,55 +1517,403 @@ function reskinImage(scene: any, key: string, fallbackW: number, fallbackH: numb
 }
 
 // ---- PHASE 6: world objects ------------------------------------------------
+// Northgard-style world art helpers. Warm top-left key light (#fff5e0),
+// warm-dark shadow (#2a1f0f). Everything below builds depth through layers.
+
+// Deterministic tiny PRNG so per-frame organic detail is stable across redraws.
+function mkRand(seed: number) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+// A scalloped, slightly irregular leaf "blob" — the building block of a canopy
+// mass. The rim is drawn with many small arcs to suggest clustered foliage.
+function leafBlob(ctx: any, cx: number, cy: number, r: number, fill: number, seed: number, squash = 0.85) {
+  const R = mkRand(seed);
+  const lobes = Math.max(10, Math.round(r * 0.9));
+  ctx.fillStyle = css(fill);
+  ctx.beginPath();
+  for (let i = 0; i <= lobes; i++) {
+    const a = (i / lobes) * Math.PI * 2;
+    const wob = r * (0.86 + R() * 0.22);        // jagged scalloped edge
+    const x = cx + Math.cos(a) * wob;
+    const y = cy + Math.sin(a) * wob * squash;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Vertical bark grain on a trunk: alternating light/dark warm bands.
+function barkGrain(ctx: any, x: number, y: number, w: number, h: number, base: number) {
+  fillRect2(ctx, x, y, w, h, base);
+  const R = mkRand((x * 31 + y * 7 + w) | 0);
+  for (let i = 0; i < Math.round(w / 3); i++) {
+    const gx = x + 1 + R() * (w - 2);
+    const light = R() > 0.5;
+    ctx.strokeStyle = csa(light ? WARM_LIGHT : WARM_SHADOW, light ? 0.18 : 0.32);
+    ctx.lineWidth = 1 + R() * 1.4;
+    ctx.beginPath();
+    let yy = y + R() * 6;
+    ctx.moveTo(gx, yy);
+    while (yy < y + h) { yy += 6 + R() * 8; ctx.lineTo(gx + (R() - 0.5) * 3, yy); }
+    ctx.stroke();
+  }
+}
+
+// Warm-gray boulder with a top-left lit face, shadow side, crack + moss.
+function drawBoulder(ctx: any, w: number, h: number, seed: number) {
+  const cx = w / 2, by = h * 0.84;
+  const R = mkRand(seed);
+  // soft contact shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath(); ctx.ellipse(cx, by + h * 0.04, w * 0.42, h * 0.13, 0, 0, Math.PI * 2); ctx.fill();
+  // chunky angular silhouette (varies by seed)
+  const top = by - h * (0.46 + R() * 0.1);
+  const pts = [
+    [cx - w * (0.40 + R() * 0.05), by],
+    [cx - w * (0.34 + R() * 0.06), top + h * 0.16],
+    [cx - w * (0.10 + R() * 0.05), top],
+    [cx + w * (0.14 + R() * 0.06), top - h * 0.02],
+    [cx + w * (0.36 + R() * 0.05), top + h * 0.18],
+    [cx + w * (0.40 + R() * 0.04), by - h * 0.04],
+    [cx + w * 0.30, by],
+  ];
+  ctx.fillStyle = css(0x756f64);
+  ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.fill();
+  // lit top-left facet
+  ctx.fillStyle = css(0x9c968a);
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.34, top + h * 0.16);
+  ctx.lineTo(cx - w * 0.10, top);
+  ctx.lineTo(cx + w * 0.10, top - h * 0.01);
+  ctx.lineTo(cx - w * 0.04, top + h * 0.2);
+  ctx.closePath(); ctx.fill();
+  // brightest highlight sliver
+  ctx.fillStyle = csa(WARM_LIGHT, 0.4);
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.1, top);
+  ctx.lineTo(cx + w * 0.06, top);
+  ctx.lineTo(cx - w * 0.02, top + h * 0.1);
+  ctx.closePath(); ctx.fill();
+  // shadow side (right/lower)
+  ctx.fillStyle = csa(WARM_SHADOW, 0.28);
+  ctx.beginPath();
+  ctx.moveTo(cx + w * 0.14, top - h * 0.02);
+  ctx.lineTo(cx + w * 0.40, by - h * 0.04);
+  ctx.lineTo(cx + w * 0.30, by);
+  ctx.lineTo(cx + w * 0.06, by - h * 0.1);
+  ctx.closePath(); ctx.fill();
+  // crack line
+  ctx.strokeStyle = css(0x4d473e); ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(cx + w * 0.02, top + h * 0.04);
+  ctx.lineTo(cx + w * 0.08, top + h * 0.22);
+  ctx.lineTo(cx - w * 0.02, by - h * 0.12);
+  ctx.stroke();
+  // a little moss on the lit shoulder
+  for (let i = 0; i < 5; i++) {
+    const mx = cx - w * 0.28 + R() * w * 0.3;
+    const my = top + h * 0.04 + R() * h * 0.18;
+    ctx.fillStyle = csa(0x5f7a3a, 0.5 + R() * 0.3);
+    ctx.beginPath(); ctx.arc(mx, my, 1.4 + R() * 2.2, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
 export function generateWorldObjects(scene: any) {
-  // Oak (tree1) — round canopy. 128x256 frame, trunk base at bottom-centre.
+  // ---- OAK (tree1, 128x256) — massive ancient tree. Trunk base ~y=210 ----
   objSheet(scene, 'tree1', 1, 128, 256, (ctx) => {
-    fillRect2(ctx, 56, 150, 16, 102, 0x5c3a1e); fillRect2(ctx, 52, 232, 24, 20, 0x4a2e16); // trunk
-    for (const [x, y, r, c] of [[64, 110, 46, 0x1f5a22], [40, 130, 34, 0x1a4a1c], [88, 130, 34, 0x1a4a1c], [64, 80, 36, 0x256a28]] as any[]) disc(ctx, x, y, r, c);
-    disc(ctx, 50, 92, 16, 0x2f7a30); // highlight
+    const R = mkRand(101);
+    // ground contact shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath(); ctx.ellipse(64, 212, 46, 12, 0, 0, Math.PI * 2); ctx.fill();
+    // spreading roots
+    ctx.fillStyle = css(0x4a2e16);
+    for (const dx of [-26, -12, 14, 28]) {
+      ctx.beginPath();
+      ctx.moveTo(64 + dx * 0.4, 200);
+      ctx.lineTo(64 + dx, 214);
+      ctx.lineTo(64 + dx + (dx > 0 ? 7 : -7), 214);
+      ctx.lineTo(64 + dx * 0.4 + 9, 200);
+      ctx.closePath(); ctx.fill();
+    }
+    // gnarled wide trunk (tapered) with bark grain, slightly leaning
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(50, 210); ctx.lineTo(54, 130);
+    ctx.quadraticCurveTo(60, 118, 72, 124);   // flare into branches
+    ctx.lineTo(78, 210);
+    ctx.closePath(); ctx.clip();
+    barkGrain(ctx, 46, 118, 36, 96, 0x5c3a1e);
+    ctx.restore();
+    // root buttress shading + lit left edge of trunk
+    ctx.fillStyle = csa(WARM_LIGHT, 0.16); ctx.fillRect(50, 124, 5, 86);
+    ctx.fillStyle = csa(WARM_SHADOW, 0.3); ctx.fillRect(72, 124, 6, 86);
+    // a couple of bare dead branches reaching out
+    ctx.strokeStyle = css(0x4a3018); ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(60, 150); ctx.lineTo(30, 120); ctx.lineTo(22, 108); ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(68, 140); ctx.lineTo(98, 112); ctx.lineTo(108, 104); ctx.stroke();
+
+    // CANOPY — several overlapping irregular masses (not one circle).
+    // 1) dark interior shadow base
+    const masses = [
+      [64, 96, 50], [38, 116, 34], [90, 116, 36], [58, 70, 38], [86, 84, 30], [42, 84, 28],
+    ];
+    for (const [x, y, r] of masses) leafBlob(ctx, x, y, r, 0x143d18, 1 + x * 3, 0.9);
+    // 2) mid green body, pulled up-left a touch
+    for (const [x, y, r] of masses) leafBlob(ctx, x - 2, y - 4, r * 0.92, 0x256d2a, 2 + x * 5, 0.88);
+    // 3) sunlit highlight patches on the top-left of each mass
+    for (const [x, y, r] of masses) leafBlob(ctx, x - r * 0.32, y - r * 0.4, r * 0.5, 0x3f9740, 3 + x * 7, 0.85);
+    // 4) tiny scalloped speckle of brightest leaves catching the sun
+    ctx.fillStyle = csa(0xbfe87a, 0.5);
+    for (let i = 0; i < 60; i++) {
+      const m = masses[(R() * masses.length) | 0];
+      const a = R() * Math.PI * 2, rr = R() * m[2] * 0.55;
+      const lx = m[0] - m[2] * 0.2 + Math.cos(a) * rr;
+      const ly = m[1] - m[2] * 0.28 + Math.sin(a) * rr * 0.85;
+      if (lx < m[0] && ly < m[1]) { ctx.beginPath(); ctx.arc(lx, ly, 1 + R() * 1.6, 0, Math.PI * 2); ctx.fill(); }
+    }
   });
-  // Pine (tree2) — three triangle layers. 128x256.
+
+  // ---- PINE / FIR (tree2, 128x256) — tall narrow conical, tiered ----
   objSheet(scene, 'tree2', 1, 128, 256, (ctx) => {
-    fillRect2(ctx, 58, 180, 12, 72, 0x5c3a1e);
-    const tri = (cy: number, w: number, c: number) => { ctx.fillStyle = css(c); ctx.beginPath(); ctx.moveTo(64, cy - 60); ctx.lineTo(64 + w, cy); ctx.lineTo(64 - w, cy); ctx.closePath(); ctx.fill(); };
-    tri(190, 50, 0x18441a); tri(140, 44, 0x1d5020); tri(96, 36, 0x236526);
+    const cx = 64;
+    // ground shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.ellipse(cx, 212, 30, 9, 0, 0, Math.PI * 2); ctx.fill();
+    // trunk with bark grain
+    ctx.save(); ctx.beginPath(); ctx.rect(cx - 7, 150, 14, 62); ctx.clip();
+    barkGrain(ctx, cx - 7, 150, 14, 62, 0x4f331c); ctx.restore();
+    ctx.fillStyle = csa(WARM_SHADOW, 0.3); ctx.fillRect(cx + 2, 150, 5, 62);
+    // 7 tiered fir branch layers, darker than oak; each a jagged skirt.
+    const tiers = 7;
+    const topY = 26, botY = 168, span = botY - topY;
+    for (let i = tiers - 1; i >= 0; i--) {
+      const f = i / (tiers - 1);                 // 0 = bottom widest
+      const ty = topY + f * span;
+      const halfW = 14 + f * 40;
+      const skirtH = 26 + f * 8;
+      const shade = mix(0x123a16, 0x2a6e2c, 1 - f); // top tiers a bit lighter
+      // jagged drooping skirt
+      ctx.fillStyle = css(shade);
+      ctx.beginPath();
+      ctx.moveTo(cx, ty - skirtH * 0.5);
+      const teeth = 5 + i;
+      for (let t = 0; t <= teeth; t++) {
+        const tf = t / teeth;
+        const ex = cx - halfW + tf * halfW * 2;
+        ctx.lineTo(ex, ty + skirtH * (0.4 + (t % 2) * 0.25));
+        if (t < teeth) ctx.lineTo(cx - halfW + (tf + 0.5 / teeth) * halfW * 2, ty + skirtH * 0.08);
+      }
+      ctx.lineTo(cx, ty - skirtH * 0.5);
+      ctx.closePath(); ctx.fill();
+      // sunlit left edge of the tier
+      ctx.fillStyle = csa(0x4f9c4a, 0.5);
+      ctx.beginPath();
+      ctx.moveTo(cx, ty - skirtH * 0.4);
+      ctx.lineTo(cx - halfW * 0.92, ty + skirtH * 0.42);
+      ctx.lineTo(cx - halfW * 0.5, ty + skirtH * 0.18);
+      ctx.lineTo(cx - 2, ty - skirtH * 0.2);
+      ctx.closePath(); ctx.fill();
+      // optional light snow dust on each tier shoulder
+      ctx.fillStyle = csa(0xf4f6ff, 0.5);
+      ctx.beginPath();
+      ctx.moveTo(cx - halfW * 0.7, ty + skirtH * 0.1);
+      ctx.lineTo(cx - halfW * 0.2, ty - skirtH * 0.1);
+      ctx.lineTo(cx + halfW * 0.05, ty + skirtH * 0.04);
+      ctx.lineTo(cx - halfW * 0.4, ty + skirtH * 0.18);
+      ctx.closePath(); ctx.fill();
+    }
+    // single pointed top
+    ctx.fillStyle = css(0x2a6e2c);
+    ctx.beginPath(); ctx.moveTo(cx, 14); ctx.lineTo(cx + 10, 40); ctx.lineTo(cx - 10, 40); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = csa(0x6cba5a, 0.6);
+    ctx.beginPath(); ctx.moveTo(cx, 14); ctx.lineTo(cx - 7, 38); ctx.lineTo(cx - 1, 34); ctx.closePath(); ctx.fill();
   });
-  // Sheep (food node) — 128x128, 6 frames with a gentle graze bob.
+
+  // ---- SHEEP (sheep_idle, 128x128, 6 frames) — fluffy cloud wool ----
   objSheet(scene, 'sheep_idle', 6, 128, 128, (ctx, t) => {
-    const b = Math.sin(t * Math.PI * 2) * 2;
-    fillRect2(ctx, 50, 96 + b, 6, 16, 0x2a2a2a); fillRect2(ctx, 74, 96 + b, 6, 16, 0x2a2a2a); // legs
-    for (const [x, y] of [[64, 78], [48, 82], [80, 82], [56, 70], [72, 70]] as any[]) disc(ctx, x, y + b, 16, 0xf0eee6); // fluffy body
-    disc(ctx, 88, 84 + b, 9, 0x2a2a2a); // head
+    const bob = Math.sin(t * Math.PI * 2) * 2;          // gentle body bob
+    const graze = Math.max(0, Math.sin(t * Math.PI * 2)) * 5; // head dips to graze
+    const cy = 74 + bob;
+    // contact shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.ellipse(62, 100, 34, 8, 0, 0, Math.PI * 2); ctx.fill();
+    // thin dark legs
+    ctx.strokeStyle = css(0x2b2620); ctx.lineWidth = 3; ctx.lineCap = 'round';
+    for (const lx of [44, 56, 70, 82]) { ctx.beginPath(); ctx.moveTo(lx, cy + 14); ctx.lineTo(lx, cy + 30); ctx.stroke(); }
+    ctx.lineCap = 'butt';
+    // wool body: overlapping clumps, lit top / shaded bottom
+    const clumps = [
+      [44, cy - 2, 15], [58, cy - 8, 17], [74, cy - 4, 16], [86, cy + 2, 14],
+      [50, cy + 8, 15], [68, cy + 9, 15], [80, cy + 10, 12], [38, cy + 6, 12],
+    ];
+    // base shade underside
+    for (const [x, y, r] of clumps) disc(ctx, x, y + 3, r, 0xcfc9bd);
+    // main wool
+    for (const [x, y, r] of clumps) disc(ctx, x, y, r, 0xf2efe6);
+    // sunlit tops
+    for (const [x, y, r] of clumps) { ctx.fillStyle = csa(WARM_LIGHT, 0.55); ctx.beginPath(); ctx.arc(x - r * 0.25, y - r * 0.4, r * 0.5, 0, Math.PI * 2); ctx.fill(); }
+    // soft lower shading
+    ctx.fillStyle = csa(WARM_SHADOW, 0.14);
+    ctx.beginPath(); ctx.ellipse(62, cy + 12, 30, 10, 0, 0, Math.PI * 2); ctx.fill();
+    // small dark head (right side), dips down when grazing
+    const hx = 96, hy = cy + 4 + graze;
+    disc(ctx, hx, hy, 9, 0x33302a);                      // head
+    disc(ctx, hx + 4, hy + 4, 5, 0x2a2620);              // muzzle
+    ctx.fillStyle = css(0x232019);                        // ears
+    ctx.beginPath(); ctx.ellipse(hx - 5, hy - 6, 3, 5, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = css(0xfff4d8);                        // eye glint
+    ctx.beginPath(); ctx.arc(hx + 1, hy - 1, 1.3, 0, Math.PI * 2); ctx.fill();
+    // tuft of wool on forehead
+    disc(ctx, hx - 3, hy - 7, 5, 0xf2efe6);
   });
-  // Gold deposit (gold node).
+
+  // ---- GOLD DEPOSIT (gold_stone, 96x96) — treasure: branching gold veins ----
   reskinImage(scene, 'gold_stone', 96, 96, (ctx, w, h) => {
-    const cx = w / 2, by = h * 0.82;
-    ctx.fillStyle = css(0x6f6f68); ctx.beginPath(); ctx.ellipse(cx, by, w * 0.4, h * 0.26, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = css(0xe8c84a); ctx.lineWidth = Math.max(2, w * 0.04);
-    ctx.beginPath(); ctx.moveTo(cx - w * 0.25, by); ctx.lineTo(cx - w * 0.05, by - h * 0.12); ctx.moveTo(cx + w * 0.05, by - h * 0.05); ctx.lineTo(cx + w * 0.22, by - h * 0.16); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.fillRect(cx - w * 0.18, by - h * 0.12, 3, 3); // glint
+    const cx = w / 2, by = h * 0.84, R = mkRand(77);
+    // warm glow halo
+    const glow = ctx.createRadialGradient(cx, by - h * 0.18, 4, cx, by - h * 0.18, w * 0.5);
+    glow.addColorStop(0, 'rgba(255,220,110,0.35)'); glow.addColorStop(1, 'rgba(255,220,110,0)');
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, w, h);
+    // contact shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath(); ctx.ellipse(cx, by + 3, w * 0.42, h * 0.1, 0, 0, Math.PI * 2); ctx.fill();
+    // base rock (chunky, warm-gray)
+    const top = by - h * 0.5;
+    ctx.fillStyle = css(0x6f685c);
+    ctx.beginPath();
+    ctx.moveTo(cx - w * 0.4, by); ctx.lineTo(cx - w * 0.3, top + h * 0.1);
+    ctx.lineTo(cx - w * 0.05, top); ctx.lineTo(cx + w * 0.22, top + h * 0.06);
+    ctx.lineTo(cx + w * 0.4, by - h * 0.05); ctx.lineTo(cx + w * 0.3, by);
+    ctx.closePath(); ctx.fill();
+    // lit facet
+    ctx.fillStyle = css(0x938b7c);
+    ctx.beginPath(); ctx.moveTo(cx - w * 0.3, top + h * 0.1); ctx.lineTo(cx - w * 0.05, top); ctx.lineTo(cx + w * 0.05, top + h * 0.2); ctx.lineTo(cx - w * 0.12, top + h * 0.24); ctx.closePath(); ctx.fill();
+    // shaded right side
+    ctx.fillStyle = csa(WARM_SHADOW, 0.26);
+    ctx.beginPath(); ctx.moveTo(cx + w * 0.22, top + h * 0.06); ctx.lineTo(cx + w * 0.4, by - h * 0.05); ctx.lineTo(cx + w * 0.3, by); ctx.lineTo(cx + w * 0.1, by - h * 0.1); ctx.closePath(); ctx.fill();
+    // BRANCHING GOLD VEINS — recursive forks
+    const drawVein = (x: number, y: number, ang: number, len: number, wdt: number, depth: number) => {
+      if (depth <= 0 || len < 3) return;
+      const nx = x + Math.cos(ang) * len, ny = y + Math.sin(ang) * len;
+      ctx.strokeStyle = css(0xf0c830); ctx.lineWidth = wdt; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+      ctx.strokeStyle = csa(0xfff080, 0.8); ctx.lineWidth = Math.max(0.6, wdt * 0.4);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+      // intersection star-glint
+      ctx.fillStyle = '#fffce0';
+      ctx.beginPath(); ctx.arc(x, y, Math.max(1, wdt * 0.6), 0, Math.PI * 2); ctx.fill();
+      drawVein(nx, ny, ang - 0.5 - R() * 0.4, len * 0.72, wdt * 0.72, depth - 1);
+      if (R() > 0.35) drawVein(nx, ny, ang + 0.5 + R() * 0.4, len * 0.7, wdt * 0.7, depth - 1);
+    };
+    drawVein(cx - w * 0.16, by - h * 0.12, -1.0, 14, 3.2, 4);
+    drawVein(cx + w * 0.04, by - h * 0.06, -1.5, 13, 3.0, 4);
+    // bright star sparkles at a few nodes
+    ctx.strokeStyle = '#fffef0'; ctx.lineWidth = 1;
+    for (const [sx, sy, s] of [[cx - w * 0.1, top + h * 0.22, 4], [cx + w * 0.06, top + h * 0.3, 3], [cx - w * 0.2, by - h * 0.2, 3]] as any[]) {
+      ctx.beginPath(); ctx.moveTo(sx - s, sy); ctx.lineTo(sx + s, sy); ctx.moveTo(sx, sy - s); ctx.lineTo(sx, sy + s); ctx.stroke();
+      ctx.fillStyle = '#fffef0'; ctx.beginPath(); ctx.arc(sx, sy, 1.2, 0, Math.PI * 2); ctx.fill();
+    }
   });
-  // Stone rocks (rock1-4) — gray boulders with a light face + crack.
-  for (const k of ['rock1', 'rock2', 'rock3', 'rock4']) reskinImage(scene, k, 64, 56, (ctx, w, h) => {
-    const cx = w / 2, by = h * 0.82;
-    ctx.fillStyle = css(0x7d7d74); ctx.beginPath(); ctx.moveTo(cx - w * 0.4, by); ctx.lineTo(cx - w * 0.22, by - h * 0.42); ctx.lineTo(cx + w * 0.12, by - h * 0.5); ctx.lineTo(cx + w * 0.4, by - h * 0.18); ctx.lineTo(cx + w * 0.34, by); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = css(0x95958c); ctx.beginPath(); ctx.moveTo(cx - w * 0.22, by - h * 0.42); ctx.lineTo(cx + w * 0.12, by - h * 0.5); ctx.lineTo(cx - w * 0.02, by - h * 0.28); ctx.closePath(); ctx.fill(); // light face
-    ctx.strokeStyle = css(0x55554f); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx, by - h * 0.4); ctx.lineTo(cx + w * 0.06, by - h * 0.16); ctx.stroke();
-  });
-  // Siege engine (catapult) — used by world Troops + BattleScene siege units.
+
+  // ---- STONE ROCKS (rock1-4, 64x56) — warm-gray boulders, seeded variety ----
+  let rockSeed = 11;
+  for (const k of ['rock1', 'rock2', 'rock3', 'rock4']) {
+    const seed = rockSeed += 137;
+    reskinImage(scene, k, 64, 56, (ctx, w, h) => drawBoulder(ctx, w, h, seed));
+  }
+
+  // ---- SIEGE ENGINE (siege_unit, 192x192) — proper warm-lit catapult ----
   objSheet(scene, 'siege_unit', 1, 192, 192, (ctx) => {
-    const cx = 96, gy = 140;
-    ctx.fillStyle = css(0x5c3a1e); ctx.fillRect(cx - 34, gy - 16, 68, 14);     // frame
-    ctx.strokeStyle = css(0x6b4a28); ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(cx - 26, gy - 16); ctx.lineTo(cx + 18, gy - 64); ctx.stroke(); // throwing arm
-    ctx.fillStyle = css(0x9aa0a6); ctx.beginPath(); ctx.arc(cx + 20, gy - 66, 11, 0, Math.PI * 2); ctx.fill(); // boulder
-    ctx.fillStyle = css(0x2a2a2e); ctx.beginPath(); ctx.arc(cx - 24, gy, 14, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(cx + 24, gy, 14, 0, Math.PI * 2); ctx.fill(); // wheels
-    ctx.fillStyle = css(0x6b4a28); ctx.fillRect(cx - 38, gy - 30, 8, 30); ctx.fillRect(cx + 30, gy - 30, 8, 30); // supports
+    const cx = 96, gy = 150;
+    // ground shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(cx, gy + 16, 60, 12, 0, 0, Math.PI * 2); ctx.fill();
+    const beam = (x1: number, y1: number, x2: number, y2: number, wd: number, base = 0x6b4a28) => {
+      const a = Math.atan2(y2 - y1, x2 - x1);
+      const ox = Math.sin(a) * wd / 2, oy = -Math.cos(a) * wd / 2;
+      ctx.fillStyle = css(base);
+      ctx.beginPath(); ctx.moveTo(x1 + ox, y1 + oy); ctx.lineTo(x2 + ox, y2 + oy); ctx.lineTo(x2 - ox, y2 - oy); ctx.lineTo(x1 - ox, y1 - oy); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = csa(WARM_LIGHT, 0.25); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x1 + ox * 0.7, y1 + oy * 0.7); ctx.lineTo(x2 + ox * 0.7, y2 + oy * 0.7); ctx.stroke();
+      ctx.strokeStyle = csa(WARM_SHADOW, 0.35);
+      ctx.beginPath(); ctx.moveTo(x1 - ox * 0.7, y1 - oy * 0.7); ctx.lineTo(x2 - ox * 0.7, y2 - oy * 0.7); ctx.stroke();
+    };
+    const wheel = (x: number) => {
+      disc(ctx, x, gy + 4, 17, 0x3a2a18);              // tyre
+      disc(ctx, x, gy + 4, 13, 0x5c3f22);
+      disc(ctx, x, gy + 4, 4, 0x2a1c10);               // hub
+      ctx.strokeStyle = css(0x2a1c10); ctx.lineWidth = 2.5;
+      for (let s = 0; s < 6; s++) { const a = s * Math.PI / 3; ctx.beginPath(); ctx.moveTo(x, gy + 4); ctx.lineTo(x + Math.cos(a) * 12, gy + 4 + Math.sin(a) * 12); ctx.stroke(); }
+      ctx.fillStyle = csa(WARM_LIGHT, 0.3); ctx.beginPath(); ctx.arc(x - 5, gy - 2, 4, 0, Math.PI * 2); ctx.fill();
+    };
+    wheel(cx - 38); wheel(cx + 38);
+    // heavy timber base frame
+    beam(cx - 50, gy - 6, cx + 50, gy - 6, 12, 0x5c3f22);
+    beam(cx - 44, gy + 2, cx + 44, gy + 2, 8, 0x4a3018);
+    // A-frame uprights supporting the arm pivot
+    beam(cx - 30, gy - 8, cx + 4, gy - 58, 9);
+    beam(cx + 30, gy - 8, cx + 4, gy - 58, 9);
+    beam(cx - 30, gy - 8, cx + 30, gy - 8, 7, 0x5c3f22);
+    // throwing arm (raised, holding boulder) + sling counterweight
+    beam(cx + 4, gy - 56, cx - 44, gy - 18, 7);        // arm down to counterweight
+    beam(cx + 4, gy - 56, cx + 40, gy - 88, 8);        // arm up to boulder
+    ctx.fillStyle = css(0x3a2a18);                      // counterweight box
+    ctx.fillRect(cx - 54, gy - 24, 16, 16);
+    ctx.fillStyle = csa(WARM_LIGHT, 0.2); ctx.fillRect(cx - 54, gy - 24, 16, 4);
+    // boulder in the sling
+    disc(ctx, cx + 42, gy - 90, 12, 0x8a8076);
+    ctx.fillStyle = csa(WARM_LIGHT, 0.4); ctx.beginPath(); ctx.arc(cx + 37, gy - 94, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = csa(WARM_SHADOW, 0.3); ctx.beginPath(); ctx.arc(cx + 46, gy - 86, 5, 0, Math.PI * 2); ctx.fill();
+    // pivot peg
+    disc(ctx, cx + 4, gy - 56, 4, 0x2a1c10);
+    // iron lashings at joints
+    ctx.fillStyle = css(0x2a2a2e);
+    ctx.fillRect(cx + 1, gy - 60, 7, 4); ctx.fillRect(cx - 32, gy - 10, 6, 5); ctx.fillRect(cx + 26, gy - 10, 6, 5);
   });
-  // Iron deposit (Phase 6 of the completion plan uses this) — rust-veined rock.
+
+  // ---- IRON DEPOSIT (iron_node, 80x72) — charcoal rock, rust-orange veins ----
   reskinImage(scene, 'iron_node', 80, 72, (ctx, w, h) => {
-    const cx = w / 2, by = h * 0.82;
-    ctx.fillStyle = css(0x55555c); ctx.beginPath(); ctx.ellipse(cx, by - h * 0.18, w * 0.4, h * 0.3, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = css(0xb5651d); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx - w * 0.22, by - h * 0.1); ctx.lineTo(cx + w * 0.05, by - h * 0.3); ctx.moveTo(cx - w * 0.02, by - h * 0.08); ctx.lineTo(cx + w * 0.2, by - h * 0.26); ctx.stroke();
+    const cx = w / 2, by = h * 0.84, R = mkRand(53);
+    // contact shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.24)';
+    ctx.beginPath(); ctx.ellipse(cx, by + 2, w * 0.42, h * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+    // jagged charcoal rock body
+    const top = by - h * 0.52;
+    ctx.fillStyle = css(0x3b3a40);
+    ctx.beginPath();
+    ctx.moveTo(cx - w * 0.42, by);
+    ctx.lineTo(cx - w * 0.36, top + h * 0.18);
+    ctx.lineTo(cx - w * 0.12, top + h * 0.02);
+    ctx.lineTo(cx + w * 0.02, top - h * 0.04);
+    ctx.lineTo(cx + w * 0.2, top + h * 0.1);
+    ctx.lineTo(cx + w * 0.4, by - h * 0.06);
+    ctx.lineTo(cx + w * 0.3, by);
+    ctx.closePath(); ctx.fill();
+    // angular lit facets (cooler steel-gray)
+    ctx.fillStyle = css(0x5a5a64);
+    ctx.beginPath(); ctx.moveTo(cx - w * 0.36, top + h * 0.18); ctx.lineTo(cx - w * 0.12, top + h * 0.02); ctx.lineTo(cx - w * 0.02, top + h * 0.22); ctx.lineTo(cx - w * 0.2, top + h * 0.34); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = csa(WARM_LIGHT, 0.22);
+    ctx.beginPath(); ctx.moveTo(cx - w * 0.12, top + h * 0.02); ctx.lineTo(cx + w * 0.02, top - h * 0.04); ctx.lineTo(cx + w * 0.04, top + h * 0.16); ctx.closePath(); ctx.fill();
+    // deep shadow side
+    ctx.fillStyle = csa(WARM_SHADOW, 0.34);
+    ctx.beginPath(); ctx.moveTo(cx + w * 0.2, top + h * 0.1); ctx.lineTo(cx + w * 0.4, by - h * 0.06); ctx.lineTo(cx + w * 0.3, by); ctx.lineTo(cx + w * 0.12, by - h * 0.1); ctx.closePath(); ctx.fill();
+    // rust-orange ore veins (jagged), with brighter highlight
+    const vein = (x: number, y: number) => {
+      ctx.strokeStyle = css(0xc85030); ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x, y);
+      let px = x, py = y;
+      for (let i = 0; i < 4; i++) { px += (R() - 0.3) * 9; py -= 4 + R() * 6; ctx.lineTo(px, py); }
+      ctx.stroke();
+      ctx.strokeStyle = css(0xe87050); ctx.lineWidth = 1.1;
+      ctx.beginPath(); ctx.moveTo(x, y); px = x; py = y;
+      for (let i = 0; i < 4; i++) { px += (R() - 0.3) * 9; py -= 4 + R() * 6; ctx.lineTo(px, py); }
+      ctx.stroke();
+    };
+    vein(cx - w * 0.2, by - h * 0.12);
+    vein(cx + w * 0.02, by - h * 0.08);
+    vein(cx + w * 0.16, by - h * 0.16);
+    // a few rust speckles / glints
+    for (let i = 0; i < 8; i++) { ctx.fillStyle = csa(0xe87050, 0.6 + R() * 0.3); ctx.beginPath(); ctx.arc(cx - w * 0.2 + R() * w * 0.45, top + h * 0.1 + R() * h * 0.5, 0.8 + R() * 1.2, 0, Math.PI * 2); ctx.fill(); }
   });
 }
 
