@@ -224,5 +224,6 @@ export class Territory {
     for (const u of s.troops.allUnits()) mark(u.x, u.y);
     for (const p of s.pawns.pawns) mark(p.x, p.y);
     for (const [c, r] of seen) { const bob = s.terrainTiles[r][c]; if (bob) bob.setTint(this.tintFor(c, r)); }
+    if (seen.length) s._fogDirty = true; // (BUG 7) refresh the fog overlay when new tiles open
   }
 }

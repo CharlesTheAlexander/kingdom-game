@@ -51,24 +51,33 @@ const TERRAIN = {
 };
 
 class BUnit {
-  constructor(scene, side, type, x, y, texOverride) {
+  constructor(scene, side, type, x, y, texOverride, opts = {}) {
     this.scene = scene;
     this.side = side; // 'player' | 'enemy'
     this.type = type;
     const s = STATS[type] || STATS.warrior;
-    this.maxHp = s.hp; this.hp = s.hp; this.dmg = s.dmg; this.speed = s.speed;
+    // (BUG 12) Block mode: one entity stands for `count` units (large battles).
+    this.block = !!opts.block; this.count = opts.count || 1; this.unitHp = s.hp;
+    this.maxHp = s.hp * this.count; this.hp = this.maxHp; this.dmg = s.dmg; this.speed = s.speed;
     this.range = s.range; this.heal = s.heal; this.area = !!s.area; this.tank = !!s.tank; this.hold = !!s.hold;
     this.x = x; this.y = y; this.alive = true; this.cmd = null; this.atkCd = 0;
     const tex = texOverride || s.tex;
-    // Phase 3: larger units (56px, knights 64px) and a soft ground shadow.
     const px = type === 'knight' ? 64 : 56;
     this.shadow = scene.add.ellipse(x, y + 22, px * 0.5, px * 0.2, 0x000000, 0.28).setDepth(8);
-    this.spr = scene.add.sprite(x, y, scene.textures.exists(tex) ? tex : 'blue_warrior_idle', 0).setScale(px / 192).setDepth(10);
-    // (Polish Phase 1) walk + attack animation states keyed off the idle texture.
+    if (this.block) {
+      // Formation block: sized by count (max 80px wide), unit sprite centered, count label.
+      const bw = Phaser.Math.Clamp(34 + this.count * 2.2, 40, 80);
+      this.blockW = bw;
+      this.blockRect = scene.add.rectangle(x, y, bw, 46, side === 'player' ? 0x1d3b6b : 0x6b1d1d, 0.55).setStrokeStyle(2, side === 'player' ? 0x4a7bd5 : 0xd64a4a, 0.9).setDepth(9);
+      this.spr = scene.add.sprite(x, y - 2, scene.textures.exists(tex) ? tex : 'blue_warrior_idle', 0).setScale(40 / 192).setDepth(10);
+      this.label = scene.add.text(x, y + 16, `x${this.count}`, { fontFamily: 'monospace', fontSize: '12px', color: '#ffffff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(12);
+    } else {
+      this.spr = scene.add.sprite(x, y, scene.textures.exists(tex) ? tex : 'blue_warrior_idle', 0).setScale(px / 192).setDepth(10);
+    }
     this.anims = { idle: this.spr.texture.key, run: ANIM_SET[this.spr.texture.key] ? ANIM_SET[this.spr.texture.key].run : null, atk: ANIM_SET[this.spr.texture.key] ? ANIM_SET[this.spr.texture.key].atk : null };
     if (this.spr.texture.frameTotal > 1 && scene.anims.exists(this.spr.texture.key)) this.spr.play(this.spr.texture.key);
     this.spr.setFlipX(side === 'player'); // players (right) face left; enemies (left) face right
-    this.hpW = 30;
+    this.hpW = this.block ? (this.blockW - 6) : 30;
     this.hpBg = scene.add.rectangle(x, y - 30, this.hpW + 2, 5, 0x000000, 0.6).setDepth(11);
     this.hpFill = scene.add.rectangle(x - this.hpW / 2, y - 30, this.hpW, 3, side === 'player' ? 0x4ad66b : 0xd64a4a).setOrigin(0, 0.5).setDepth(12);
   }
@@ -76,6 +85,10 @@ class BUnit {
     if (!this.alive) return;
     this.hp -= a;
     this.hpFill.width = this.hpW * Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
+    if (this.block) { // (BUG 12) shrink the displayed count as the block takes losses
+      const c = Math.max(0, Math.ceil(this.hp / this.unitHp));
+      if (c !== this.count) { this.count = c; if (this.label) this.label.setText(`x${this.count}`); }
+    }
     this.spr.setTintFill(0xff5555);
     this.scene.time.delayedCall(60, () => { if (this.alive) this.spr.clearTint(); });
     this.scene.dmgNumber(this.x, this.y - 24, Math.round(a), this.side === 'player' ? '#ff6b6b' : '#ffffff');
@@ -87,13 +100,17 @@ class BUnit {
     sfx.playThrottled(this.side === 'player' ? 'soldier_dies' : 'enemy_dies', 110); // (Polish Phase 2)
     this.scene.onUnitDeath(this);
     this.hpBg.destroy(); this.hpFill.destroy();
+    if (this.blockRect) this.blockRect.destroy();
+    if (this.label) this.label.destroy();
     this.scene.tweens.add({ targets: this.shadow, alpha: 0, duration: 500, onComplete: () => this.shadow.destroy() });
     this.spr.setTintFill(0xff3333);
     this.scene.tweens.add({ targets: this.spr, alpha: 0, angle: this.side === 'player' ? 30 : -30, y: this.y + 6, duration: 600, onComplete: () => this.spr.destroy() });
   }
   sync() {
-    this.spr.x = this.x; this.spr.y = this.y;
+    this.spr.x = this.x; this.spr.y = this.block ? this.y - 2 : this.y;
     this.shadow.x = this.x; this.shadow.y = this.y + 22;
+    if (this.blockRect) { this.blockRect.x = this.x; this.blockRect.y = this.y; }
+    if (this.label) { this.label.x = this.x; this.label.y = this.y + 16; }
     this.hpBg.x = this.x; this.hpBg.y = this.y - 30;
     this.hpFill.x = this.x - this.hpW / 2; this.hpFill.y = this.y - 30;
   }
@@ -191,12 +208,19 @@ export class BattleScene extends Phaser.Scene {
   // armyData: [{type, count}]
   spawnArmy(side, armyData) {
     const x = side === 'player' ? GAME_W * 0.80 : GAME_W * 0.20;
+    const total = (armyData || []).reduce((s, g) => s + (g.count || 0), 0);
+    // (BUG 12) Over 10 units a side renders as formation BLOCKS (one per type),
+    // so 100+ unit battles stay readable instead of overflowing the screen.
+    const blockMode = total > 10;
     for (const grp of armyData) {
-      for (let i = 0; i < grp.count; i++) {
-        let tex;
-        if (side === 'enemy') tex = grp.type === 'archer' ? 'red_archer_idle' : (FACTION_WARRIOR[this.faction] || 'warrior_idle');
-        const u = new BUnit(this, side, grp.type, x, GAME_H * 0.54, tex);
+      if (!grp.count) continue;
+      let tex;
+      if (side === 'enemy') tex = grp.type === 'archer' ? 'red_archer_idle' : (FACTION_WARRIOR[this.faction] || 'warrior_idle');
+      if (blockMode) {
+        const u = new BUnit(this, side, grp.type, x, GAME_H * 0.54, tex, { block: true, count: grp.count });
         this.units.push(u);
+      } else {
+        for (let i = 0; i < grp.count; i++) this.units.push(new BUnit(this, side, grp.type, x, GAME_H * 0.54, tex));
       }
     }
   }
@@ -348,17 +372,30 @@ export class BattleScene extends Phaser.Scene {
     else { g.beginPath(); g.moveTo(x + 6, y); g.lineTo(x - 6, y); g.strokePath(); g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x - 6, y); g.lineTo(x, y + 5); g.strokePath(); } // RETREAT
   }
 
-  // Player command (applies to all player units — selection simplified).
+  // Player command. (BUG 11) Flank L/R sends non-archer units to the left/right
+  // 30% of the battlefield, then they advance — with a brief arrow cue.
   command(name) {
-    const us = this.sideUnits('player');
+    const all = this.sideUnits('player');
+    const sel = (this.selected && this.selected.length) ? this.selected.filter((u) => u.alive) : null;
+    const us = sel || all;
     if (name === 'CHARGE') us.forEach((u) => { u.cmd = 'charge'; });
     else if (name === 'HOLD') us.forEach((u) => { u.cmd = 'hold'; });
-    else if (name === 'FLANK L') us.forEach((u) => { u.cmd = 'flankL'; });
-    else if (name === 'FLANK R') us.forEach((u) => { u.cmd = 'flankR'; });
-    else if (name === 'RETREAT') { us.forEach((u) => { u.cmd = 'retreat'; }); this._retreating = true; }
+    else if (name === 'FLANK L') { (sel || all.filter((u) => u.type !== 'archer')).forEach((u) => { u.cmd = 'flankL'; }); this.flankArrow('L'); }
+    else if (name === 'FLANK R') { (sel || all.filter((u) => u.type !== 'archer')).forEach((u) => { u.cmd = 'flankR'; }); this.flankArrow('R'); }
+    else if (name === 'RETREAT') { all.forEach((u) => { u.cmd = 'retreat'; }); this._retreating = true; }
     this.activeCmd = name;
     this.cmdBtns.forEach((b) => b.setActive(b.label === name));
     this.banner.setText(`Order: ${name}`);
+  }
+
+  // (BUG 11) Brief arrow animation showing the flank direction.
+  flankArrow(dir) {
+    const y = GAME_H * 0.5, x0 = GAME_W / 2;
+    const g = this.add.graphics().setDepth(60);
+    const col = 0xffd24a;
+    const draw = (cx) => { g.clear(); g.lineStyle(8, col, 0.9); const d = dir === 'L' ? -1 : 1; g.beginPath(); g.moveTo(cx - d * 40, y); g.lineTo(cx + d * 40, y); g.strokePath(); g.beginPath(); g.moveTo(cx + d * 10, y - 24); g.lineTo(cx + d * 44, y); g.lineTo(cx + d * 10, y + 24); g.strokePath(); };
+    draw(x0);
+    this.tweens.addCounter({ from: 0, to: 1, duration: 700, onUpdate: (tw) => { const t = tw.getValue(); draw(x0 + (dir === 'L' ? -1 : 1) * t * 120); g.setAlpha(1 - t); }, onComplete: () => g.destroy() });
   }
 
   dmgNumber(x, y, n, color) {
@@ -445,8 +482,9 @@ export class BattleScene extends Phaser.Scene {
     const moraleMul = (this.morale[u.side] <= 30 ? 0.8 : 1) * (u.cmd === 'charge' ? 1.2 : 1);
     // Commands that override targeting.
     if (u.cmd === 'retreat') { this.moveTo(u, u.side === 'player' ? GAME_W + 40 : -40, u.y, u.speed * 1.1 * moraleMul, dt); u.sync(); return; }
-    if (u.cmd === 'flankL') { if (u.y > 70) { this.moveTo(u, u.x, 60, u.speed * moraleMul, dt); u.sync(); return; } u.cmd = 'charge'; }
-    if (u.cmd === 'flankR') { if (u.y < GAME_H - 130) { this.moveTo(u, u.x, GAME_H - 140, u.speed * moraleMul, dt); u.sync(); return; } u.cmd = 'charge'; }
+    // (BUG 11) Move to the left/right 30% band, then advance toward the enemy.
+    if (u.cmd === 'flankL') { if (u.x > GAME_W * 0.30) { this.moveTo(u, GAME_W * 0.14, u.y, u.speed * moraleMul, dt); playLoop(u.spr, u.anims.run || u.anims.idle); u.sync(); return; } u.cmd = 'charge'; }
+    if (u.cmd === 'flankR') { if (u.x < GAME_W * 0.70) { this.moveTo(u, GAME_W * 0.86, u.y, u.speed * moraleMul, dt); playLoop(u.spr, u.anims.run || u.anims.idle); u.sync(); return; } u.cmd = 'charge'; }
 
     const { foe, dist } = this.nearestEnemyOf(u);
     if (!foe) { u.sync(); return; }
@@ -468,8 +506,9 @@ export class BattleScene extends Phaser.Scene {
       if (u.cmd === 'hold' || u.range > 0 || u.hold || true) {
         if (u.atkCd <= 0) {
           u.atkCd = 0.5;
-          if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(u.dmg * 0.5); } }
-          else foe.takeDamage(u.dmg * 0.5);
+          const power = u.dmg * 0.5 * (u.count || 1); // (BUG 12) block damage scales with its count
+          if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(power); } }
+          else foe.takeDamage(power);
           if (u.range > 0) { this.projectile(u.x, u.y, foe.x, foe.y); sfx.playThrottled('arrow_shoot', 120); }
           else sfx.playThrottled('sword_hit', 130);
           playOnce(u.spr, u.anims.atk, u.anims.idle); // (Polish Phase 1) swing / shoot
@@ -528,7 +567,7 @@ export class BattleScene extends Phaser.Scene {
     // Survivors by type.
     const survivors = {};
     let keepFrac = victory ? 1 : retreated ? 0.6 : 0.4;
-    for (const u of this.sideUnits('player')) survivors[u.type] = (survivors[u.type] || 0) + 1;
+    for (const u of this.sideUnits('player')) survivors[u.type] = (survivors[u.type] || 0) + (u.count || 1); // (BUG 12) blocks carry a count
     const army = Object.entries(survivors).map(([type, count]) => ({ type, count: Math.max(0, Math.round(count * keepFrac)) }));
     // Loot from defeated enemies (victory only).
     const enemyDead = (this.cfg.enemyArmy || []).reduce((s, g) => s + g.count, 0);

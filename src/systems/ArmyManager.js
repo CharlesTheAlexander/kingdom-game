@@ -92,9 +92,19 @@ export class ArmyManager {
   }
 
   // Create an AI army at a position (Phase 2).
+  // (BUG 4) Hard cap on units in a single AI army.
+  aiArmiesFor(faction) { return this.armies.filter((a) => a.faction === faction); }
   spawnAIArmy(faction, col, row, unitCounts, name) {
-    const units = Object.entries(unitCounts).filter(([, n]) => n > 0).map(([type, count]) => ({ type, count, hp: UNIT_HP[type] || 50, maxHp: UNIT_HP[type] || 50 }));
-    if (!units.length) return null;
+    // (BUG 4) Cap each AI army at 15 units total.
+    let budget = 15;
+    const units = [];
+    for (const [type, n] of Object.entries(unitCounts)) {
+      if (n <= 0 || budget <= 0) continue;
+      const count = Math.min(n, budget); budget -= count;
+      units.push({ type, count, hp: UNIT_HP[type] || 50, maxHp: UNIT_HP[type] || 50 });
+    }
+    // (BUG 3) Never form a 0-unit army.
+    if (!units.length || units.reduce((s, u) => s + u.count, 0) <= 0) return null;
     const army = { id: 'army_' + (++this._idc), name: name || (faction + ' army'), faction, units, col, row, state: 'idle', marchTargetCol: null, marchTargetRow: null, marchProgress: 0, garrisonSettlementId: null, morale: 75, supplyDays: 99, sprite: null, attackTarget: null, _warned: false };
     this.armies.push(army);
     this.makeIcon(army);
@@ -150,6 +160,8 @@ export class ArmyManager {
   update(gdeltaMs) {
     const hours = (gdeltaMs / DAY_MS) * 24;
     for (const army of this.armies) {
+      // (BUG 5) Mid-march AI armies pause for a few days after a save load.
+      if (army._resumeDay && (this.scene.gameDay || 0) < army._resumeDay) continue;
       if (army.marchTargetCol != null) {
         const dc = army.marchTargetCol - army.col, dr = army.marchTargetRow - army.row;
         const dist = Math.hypot(dc, dr);

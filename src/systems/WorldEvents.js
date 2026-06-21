@@ -61,7 +61,7 @@ export class WorldEvents {
         ] },
       { id: 'mercs', type: 'choice', title: 'Mercenary Company', body: () => 'A company of fighters seeks employment.',
         choices: [
-          { label: 'Hire (200 gold → 6 mercs)', enabled: () => s.resources.gold >= 200, effect: () => { s.resources.gold -= 200; for (let i = 0; i < 6; i++) if (s.troops.spawnMercenary) s.troops.spawnMercenary(); } },
+          { label: 'Hire (200 gold → 6 mercs)', enabled: () => s.resources.gold >= 200, effect: () => { s.resources.gold -= 200; const room = s.soldierRoom ? s.soldierRoom() : 6; const n = Math.min(6, room); for (let i = 0; i < n; i++) if (s.troops.spawnMercenary) s.troops.spawnMercenary(); if (n < 6) s.showToast && s.showToast(`Only ${n} mercenaries hired (soldier cap)`); } }, // (BUG 1) cap-aware
           { label: 'Decline', effect: () => {} },
         ] },
       { id: 'spy', type: 'choice', title: 'Spy Caught', body: () => `Guards caught a spy from ${this.rngKingdomName()}.`,
@@ -94,12 +94,12 @@ export class WorldEvents {
       // -- player choice events --
       { id: 'wounded', type: 'choice', title: 'Wounded Soldier', body: () => 'A badly wounded soldier from a destroyed village stumbles into your kingdom seeking refuge.',
         choices: [
-          { label: 'Heal them (20 food)', enabled: () => s.resources.food >= 20, effect: () => { s.resources.food -= 20; const w = s.troops.spawnAt ? s.troops.spawnAt(s.buildings.castle.x, s.buildings.castle.y) : null; const u = s.troops.warriors[s.troops.warriors.length - 1]; if (u) { u.hp = 75; u.maxHp = Math.max(u.maxHp, 75); } if (s.reputation) s.reputation.add('protector', 5); } },
+          { label: 'Heal them (20 food)', enabled: () => s.resources.food >= 20 && (!s.soldierRoom || s.soldierRoom() > 0), effect: () => { s.resources.food -= 20; if (s.troops.spawnAt) s.troops.spawnAt(s.buildings.castle.x, s.buildings.castle.y); const u = s.troops.warriors[s.troops.warriors.length - 1]; if (u) { u.hp = 75; u.maxHp = Math.max(u.maxHp, 75); } if (s.reputation) s.reputation.add('protector', 5); } },
           { label: 'Turn away', effect: () => { if (s.population) s.population.addTempMod('Turned away the wounded', -5, 3); } },
         ] },
       { id: 'rogue_archer', type: 'choice', title: 'The Rogue Archer', body: () => 'A skilled archer offers their services — but they are known to desert at the first sign of defeat.',
         choices: [
-          { label: 'Hire (80 gold)', enabled: () => s.resources.gold >= 80, effect: () => { s.resources.gold -= 80; if (s.troops.spawnArcher) s.troops.spawnArcher(s.buildings.castle); const a = s.troops.archers[s.troops.archers.length - 1]; if (a) a.flaky = true; } },
+          { label: 'Hire (80 gold)', enabled: () => s.resources.gold >= 80 && (!s.soldierRoom || s.soldierRoom() > 0), effect: () => { s.resources.gold -= 80; if (s.troops.spawnArcher) s.troops.spawnArcher(s.buildings.castle); const a = s.troops.archers[s.troops.archers.length - 1]; if (a) a.flaky = true; } },
           { label: 'Decline', effect: () => {} },
         ] },
       { id: 'weapon_cache', type: 'choice', title: 'Ancient Weapon Cache', body: () => 'Farmers digging a new well found a cache of old weapons.',

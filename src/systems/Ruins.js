@@ -203,6 +203,7 @@ export class Ruins {
     for (let r = 0; r < s.ROWS; r++) for (let c = 0; c < s.COLS; c++) {
       if (!t.explored[r][c]) { t.explored[r][c] = true; const bob = s.terrainTiles[r] && s.terrainTiles[r][c]; if (bob) bob.setTint(t.tintFor(c, r)); }
     }
+    s._fogDirty = true; // (BUG 7)
   }
 
   // --- save ----------------------------------------------------------------

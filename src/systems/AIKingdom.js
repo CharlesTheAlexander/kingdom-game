@@ -256,16 +256,26 @@ export class AIKingdom {
     }
   }
 
+  // (BUG 4) How many marching armies this kingdom already has on the map.
+  myArmies() { return (this.scene.armyMgr ? this.scene.armyMgr.aiArmiesFor(this.cfg.key) : []); }
+  // (BUG 4) Total marching units this kingdom currently fields.
+  myFieldedUnits() { return this.myArmies().reduce((s, a) => s + (this.scene.armyMgr.totalUnits(a) || 0), 0); }
+
   launchWave() {
+    // (BUG 4) Max 2 armies per kingdom, and a 30-unit standing-army cap.
+    if (this.scene.armyMgr && this.myArmies().length >= 2) return;
     this.waveNumber += 1;
     this.regrouping = false;
     // (Audit FIX 3) First wave is at least 4 units, boosted by the standing garrison.
-    const count = Math.max(4, Math.round(2 * this.barracksCount * this.cfg.countMul) + (this.cfg.garrison || 0));
+    let count = Math.max(4, Math.round(2 * this.barracksCount * this.cfg.countMul) + (this.cfg.garrison || 0));
+    // (BUG 4) Clamp to the per-army cap (15) and the kingdom's 30-unit training cap.
+    count = Math.min(count, 15, Math.max(0, 30 - this.myFieldedUnits()));
+    if (count <= 0) return; // (BUG 3/4) nothing to send
     // (Expansion Phase 2) March a visible army from the AI castle instead of
     // edge-spawning loose units. Falls back to the legacy spawn if unavailable.
     if (this.scene.spawnAIArmyAttack) {
-      const archers = this.barracksCount >= 3 ? Math.max(1, Math.floor(this.barracksCount / 3)) : 0;
-      this.scene.spawnAIArmyAttack(this, { warrior: count, archer: archers });
+      const archers = this.barracksCount >= 3 ? Math.min(Math.max(1, Math.floor(this.barracksCount / 3)), Math.max(0, count - 1)) : 0;
+      this.scene.spawnAIArmyAttack(this, { warrior: Math.max(1, count - archers), archer: archers });
       return;
     }
     const hp = Math.round((30 + this.waveNumber * 8) * this.cfg.hpMul);

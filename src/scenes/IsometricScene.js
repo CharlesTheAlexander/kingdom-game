@@ -284,7 +284,7 @@ export class IsometricScene extends GameScene {
     this._popHud = null; this._kingName = null; this._kingTitle = null; this._kingEls = null; this._logEls = null;
     this._logBtnBadge = null; this._logOpen = false; this._pauseBtn = null; this._paused = false; // (Phase 7) reset on restart
     this._endScreenEls = null; this._speedBeforeEnd = null; this._repExpanded = false; // (Audit FIX 2/5) reset on restart
-    this._discEls = null; this._promptEls = null; this._taxText = null; this._statsEls = null; // (Session-1) reset transient UI
+    this._discEls = null; this._promptEls = null; this._taxText = null; this._statsEls = null; this._discQueue = []; this._discActive = []; // (Session-1) reset transient UI
 
     // Day cycle (new this rebuild).
     this.gameDay = 1;
@@ -395,6 +395,7 @@ export class IsometricScene extends GameScene {
     this.goblinCamps = new GoblinCampManager(this); // Phase B: goblin camps
     this.territory = new Territory(this); // Phase 4: territory + fog of war
     this.ruins = new Ruins(this); // (Session-1 Phase 1) ancient ruins
+    this.createFogOverlay(); // (BUG 7) opaque fog above world objects
     this.factions = new WanderingFactions(this); // (Session-1 Phase 2) caravans/tribes/pilgrims
     this.discovery = new Discovery(this); // (Session-1 Phase 4) location histories
     if (this.taxIndex == null) this.taxIndex = 1; this.applyTax(); // (Session-1 Phase 5) tax system
@@ -496,6 +497,15 @@ export class IsometricScene extends GameScene {
   // The game-over overlay is built here, but update() returns early once game
   // over, so route its (screen-fixed) elements to the uiCamera immediately —
   // otherwise the main camera also renders them, zoomed (BUG 1 regression).
+  // (BUG 1) Soldiers in player armies also count toward the cap, so forming an
+  // army no longer frees capacity to over-train.
+  armySoldierCount() {
+    if (!this.armyMgr) return 0;
+    return this.armyMgr.playerArmies().reduce((s, a) => s + this.armyMgr.totalUnits(a), 0);
+  }
+  soldierTotal() { return super.soldierTotal() + this.armySoldierCount(); }
+  soldierRoom() { return Math.max(0, this.soldierCap() - this.soldierTotal()); } // free capacity
+
   triggerGameOver() {
     if (this.isGameOver) return;
     this.isGameOver = true; // (Audit FIX 2) richer defeat screen replaces the minimal one
@@ -540,22 +550,46 @@ export class IsometricScene extends GameScene {
     this.logEvent && this.logEvent('Tax revolt — workers struck, 2 soldiers defected', 'red');
   }
 
-  // (Session-1 Phase 4) Brief discovery card, bottom-center, auto-dismissing.
+  // (BUG 13) Discovery toasts slide in from the bottom-right, small and queued
+  // (max 2 visible), auto-dismiss after 4s, never blocking the build/resource bars.
   showDiscovery(type, name, history) {
-    const fix = (o) => o.setScrollFactor(0).setDepth(96);
-    if (this._discEls) this._discEls.forEach((o) => o.destroy());
-    const W = 520, H = 70, x = (GAME_W - W) / 2, y = this.PANEL_Y - H - 18, els = [];
-    els.push(fix(this.add.rectangle(x, y, W, H, 0x16120a, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
-    const LETTER = { settlement: 'S', ruin: 'R', camp: 'G', castle: 'K', biome: 'B', tribe: 'T' };
-    const icon = { settlement: 0x8ab0e6, ruin: 0xffe066, camp: 0xcc4444, castle: 0xd6a4ff, biome: 0x66cc88, tribe: 0xe08a2a }[type] || 0xffffff;
-    els.push(fix(this.add.circle(x + 26, y + H / 2, 14, icon, 0.9)));
-    els.push(fix(this.add.text(x + 26, y + H / 2, LETTER[type] || '*', { fontFamily: 'monospace', fontSize: '14px', color: '#1a1a1a', fontStyle: 'bold' }).setOrigin(0.5)));
-    els.push(fix(this.add.text(x + 52, y + 10, `Discovered: ${name}`, { fontFamily: 'monospace', fontSize: '14px', color: '#ffe9b0', fontStyle: 'bold' })));
-    els.push(fix(this.add.text(x + 52, y + 30, history, { fontFamily: 'monospace', fontSize: '11px', color: '#e8e0cc', wordWrap: { width: W - 70 }, lineSpacing: 2 })));
-    this._discEls = els;
     this.logEvent && this.logEvent(`Discovered: ${name}`, 'gold');
+    this._discQueue = this._discQueue || [];
+    this._discActive = this._discActive || [];
+    this._discQueue.push({ type, name, history });
+    this._pumpDiscovery();
+  }
+  _pumpDiscovery() {
+    this._discActive = (this._discActive || []).filter((d) => d.alive);
+    while (this._discActive.length < 2 && this._discQueue.length) {
+      const d = this._discQueue.shift();
+      this._discActive.push(this._spawnDiscovery(d));
+      this._relayoutDiscovery();
+    }
+  }
+  _spawnDiscovery(d) {
+    const fix = (o) => o.setScrollFactor(0).setDepth(96);
+    const W = 200, H = 56, x = GAME_W + 10, y = 0; // y set by relayout
+    const cont = this.add.container(x, y).setScrollFactor(0).setDepth(96);
+    const LETTER = { settlement: 'S', ruin: 'R', camp: 'G', castle: 'K', biome: 'B', tribe: 'T' };
+    const icon = { settlement: 0x8ab0e6, ruin: 0xffe066, camp: 0xcc4444, castle: 0xd6a4ff, biome: 0x66cc88, tribe: 0xe08a2a }[d.type] || 0xffffff;
+    cont.add(this.add.rectangle(0, 0, W, H, 0x16120a, 0.95).setOrigin(0, 0).setStrokeStyle(1, 0xc9a14a, 0.6));
+    cont.add(this.add.circle(16, H / 2, 9, icon, 0.9));
+    cont.add(this.add.text(16, H / 2, LETTER[d.type] || '*', { fontFamily: 'monospace', fontSize: '11px', color: '#1a1a1a', fontStyle: 'bold' }).setOrigin(0.5));
+    cont.add(this.add.text(32, 7, name7(d.name), { fontFamily: 'monospace', fontSize: '11px', color: '#ffe9b0', fontStyle: 'bold' }));
+    cont.add(this.add.text(32, 22, d.history, { fontFamily: 'monospace', fontSize: '8px', color: '#e8e0cc', wordWrap: { width: W - 40 }, lineSpacing: 1 }));
+    function name7(n) { return n.length > 24 ? n.slice(0, 23) + '…' : n; }
+    const rec = { cont, alive: true };
+    this.tweens.add({ targets: cont, x: GAME_W - W - 12, duration: 320, ease: 'Cubic.out' });
+    this.time.delayedCall(4000, () => {
+      this.tweens.add({ targets: cont, alpha: 0, x: GAME_W + 10, duration: 350, onComplete: () => { cont.destroy(); rec.alive = false; this._pumpDiscovery(); } });
+    });
     this.routeCameras && this.routeCameras();
-    this.time.delayedCall(5000, () => { if (this._discEls === els) { els.forEach((o) => o.destroy()); this._discEls = null; } });
+    return rec;
+  }
+  _relayoutDiscovery() {
+    const baseY = this.PANEL_Y - 70;
+    (this._discActive || []).forEach((d, i) => { if (d.alive) d.cont.y = baseY - i * 64; });
   }
 
   // (Audit FIX 2) Shared VICTORY / DEFEAT overlay with a stats panel.
@@ -1200,6 +1234,7 @@ export class IsometricScene extends GameScene {
   // Permanently reveal fog within `rad` tiles of (col,row) — Watchtower / vision.
   revealAround(col, row, rad) {
     if (!this.territory) return;
+    this._fogDirty = true; // (BUG 7) refresh the fog overlay
     for (let dr = -rad; dr <= rad; dr++) for (let dc = -rad; dc <= rad; dc++) {
       const nc = col + dc, nr = row + dr;
       if (nc < 0 || nr < 0 || nc >= this.COLS || nr >= this.ROWS || dc * dc + dr * dr > rad * rad) continue;
@@ -1893,7 +1928,6 @@ export class IsometricScene extends GameScene {
     b.col = col; b.row = row;
     b._isoDone = false; // force decorateBuilding to recompute anchor + cells + regrid
     if (b._floatIcon) { b._floatIcon.destroy(); b._floatIcon = null; }
-    if (b._torch) { b._torch.destroy(); b._torch = null; }
     if (b._snowCap) { b._snowCap.destroy(); b._snowCap = null; }
     this.decorateBuilding(b);
     this.placeFX(b);
@@ -1911,7 +1945,6 @@ export class IsometricScene extends GameScene {
     // Free the WHOLE footprint (Buildings.remove only frees the anchor cell).
     for (const cell of (b._cells || [])) if (this.buildings.grid[cell.r] && this.buildings.grid[cell.r][cell.c] === b) this.buildings.grid[cell.r][cell.c] = null;
     if (b._floatIcon) { b._floatIcon.destroy(); b._floatIcon = null; }
-    if (b._torch) { b._torch.destroy(); b._torch = null; }
     if (b._snowCap) { b._snowCap.destroy(); b._snowCap = null; }
     this.hideBuildingName && this.hideBuildingName(b);
     b.destroy(); // sprites + alive=false; reap() then drops it from the array & lowers the worker cap (Houses)
@@ -2278,8 +2311,8 @@ export class IsometricScene extends GameScene {
     set('wood', Math.floor(r.wood)); set('stone', Math.floor(r.stone)); set('food', Math.floor(r.food));
     set('gold', Math.floor(r.gold)); set('iron', Math.floor(r.iron || 0)); set('equipment', Math.floor(r.equipment || 0));
     this.chips.workers.value.setText(`${this.buildings.workersUsed()}/${r.workersCap}`);
-    const deployed = this.expeditions && this.expeditions.deployedSoldiers ? this.expeditions.deployedSoldiers() : 0; // (Bug 5) count expedition soldiers
-    this.chips.soldiers.value.setText(`${this.troops.count + deployed}/${this.soldierCap()}`);
+    // (BUG 1) Show the true total (pool + training + expeditions + armies) vs cap.
+    this.chips.soldiers.value.setText(`${this.soldierTotal()}/${this.soldierCap()}`);
     this.chips.day.value.setText(`${this.gameDay}`);
     this.chips.season.value.setText(this.seasonHint(this.gameDay));
     if (this.seasonIcon) this.seasonIcon.setFillStyle(this.seasonColor(this.gameDay));
@@ -2566,8 +2599,8 @@ export class IsometricScene extends GameScene {
     this.panelText(20, this.PANEL_Y + 40, '+10 starting morale in battle while built.', { color: '#cfe0ff', size: '12px' });
     this.panelText(20, this.PANEL_Y + 60, b._recruitCd > 0 ? `Recruit ready in ${b._recruitCd} day(s)` : 'A mercenary is available to recruit.', { color: '#cfc1a6', size: '12px' });
     this.workerControls(b, 20, this.PANEL_Y + 80);
-    const can = b.workers > 0 && (!b._recruitCd || b._recruitCd <= 0) && this.resources.gold >= 50;
-    this.spriteButton(456, this.PANEL_Y + 30, 220, 52, 'Recruit Mercenary', '50 gold', can, () => { this.resources.spend({ gold: 50 }); this.troops.spawnMercenary(); b._recruitCd = 3; this.refreshPanel(); }, { gold: can });
+    const can = b.workers > 0 && (!b._recruitCd || b._recruitCd <= 0) && this.resources.gold >= 50 && this.soldierRoom() > 0; // (BUG 1) mercenaries count toward the cap
+    this.spriteButton(456, this.PANEL_Y + 30, 220, 52, 'Recruit Mercenary', this.soldierRoom() > 0 ? '50 gold' : 'Cap reached', can, () => { this.resources.spend({ gold: 50 }); this.troops.spawnMercenary(); b._recruitCd = 3; this.refreshPanel(); }, { gold: can });
     this.spriteButton(GAME_W - 120, this.PANEL_Y + 30, 104, 52, 'Close', '', true, () => { this.selectedBuilding = null; this.clearSelection(); this.refreshPanel(); });
   }
 
@@ -2765,12 +2798,15 @@ export class IsometricScene extends GameScene {
   // reaching the player castle attacks.
   onArmyArrive(army) {
     if (this._inBattle) return;
+    if (this._loadGraceUntil && this.time.now < this._loadGraceUntil) return; // (BUG 5) settle after load
+    // (BUG 3) An empty army never fights — it disbands on arrival.
+    if (this.armyMgr.totalUnits(army) <= 0) { this.armyMgr.removeArmy(army); return; }
     if (army.faction === 'player') {
       const t = army.attackTarget; army.attackTarget = null;
       if (!t) return;
       if (t.kind === 'settlement' && t.ref.owner === 'neutral') this.resolveSettlementAttack(army, t.ref);
       else if (t.kind === 'aicastle' && t.ref.castleAlive) this.resolveAICastleAttack(army, t.ref);
-      else if (t.kind === 'army' && this.armyMgr.armies.includes(t.ref)) this.startArmyBattle(army, t.ref.units, { faction: t.ref.faction, enemyArmyRef: t.ref });
+      else if (t.kind === 'army' && this.armyMgr.armies.includes(t.ref) && this.armyMgr.totalUnits(t.ref) > 0) this.startArmyBattle(army, t.ref.units, { faction: t.ref.faction, enemyArmyRef: t.ref });
     } else {
       this.aiArmyAttacksPlayer(army);
     }
@@ -2779,6 +2815,7 @@ export class IsometricScene extends GameScene {
   // Two opposing armies within 2 tiles → battle (interception in the wilderness).
   armiesOnInterceptCheck() {
     if (this._inBattle) return;
+    if (this._loadGraceUntil && this.time.now < this._loadGraceUntil) return; // (BUG 5)
     const players = this.armyMgr.playerArmies();
     for (const ai of this.armyMgr.aiArmies()) {
       // 30-tile approach warning (once per AI army).
@@ -2788,7 +2825,9 @@ export class IsometricScene extends GameScene {
         this.threatWarning(`${ai.name} spotted! Approaching (~${this.armyMgr.etaDays(ai).toFixed(1)} days)`, 0xff8a80, true);
         this.logEvent(`${ai.name} is marching on your kingdom`, 'red');
       }
+      if (this.armyMgr.totalUnits(ai) <= 0) { this.armyMgr.removeArmy(ai); continue; } // (BUG 3) skip empty AI armies
       for (const pa of players) {
+        if (this.armyMgr.totalUnits(pa) <= 0) continue;
         if (Phaser.Math.Distance.Between(ai.col, ai.row, pa.col, pa.row) <= 2) {
           this.startArmyBattle(pa, ai.units, { faction: ai.faction, enemyArmyRef: ai });
           return;
@@ -2799,8 +2838,11 @@ export class IsometricScene extends GameScene {
 
   startArmyBattle(playerArmy, enemyUnits, ctx) {
     if (this._inBattle) return;
+    if (this._loadGraceUntil && this.time.now < this._loadGraceUntil) return; // (BUG 5) no battle right after a load
     ctx = ctx || {};
     ctx.enemyCount = (enemyUnits || []).reduce((s, u) => s + (u.count || 0), 0); // (Phase 6) stats
+    // (BUG 3) Never launch a battle with no enemy units.
+    if (ctx.enemyCount <= 0) { if (ctx.enemyArmyRef && this.armyMgr.armies.includes(ctx.enemyArmyRef)) this.armyMgr.removeArmy(ctx.enemyArmyRef); return; }
     this._inBattle = true;
     try { SaveManager.save(this, 0); } catch (e) {}
     this._battleArmy = playerArmy;
@@ -2851,6 +2893,17 @@ export class IsometricScene extends GameScene {
     this.startArmyBattle(army, [{ type: 'warrior', count: n }], { kind: 'aicastle', ref: k, faction: k.cfg.key });
   }
 
+  // (BUG 2) Turn around / dismiss a faction's marching armies (alliance/ceasefire).
+  recallFactionArmies(key) {
+    if (!this.armyMgr) return;
+    const k = this.kingdoms.find((x) => x.cfg.key === key);
+    for (const a of this.armyMgr.aiArmiesFor(key)) {
+      a.attackTarget = null;
+      if (k) this.armyMgr.marchTo(a, k.castleCol, k.castleRow, {});
+      else this.armyMgr.removeArmy(a);
+    }
+  }
+
   // (Phase 2) AI launches a marching army from its castle toward the player.
   spawnAIArmyAttack(kingdom, unitCounts) {
     const a = this.armyMgr.spawnAIArmy(kingdom.cfg.key, kingdom.castleCol, kingdom.castleRow, unitCounts, `${kingdom.cfg.name} army`);
@@ -2861,6 +2914,7 @@ export class IsometricScene extends GameScene {
   // AI army reached the player castle → defend with the home garrison (unassigned troops).
   aiArmyAttacksPlayer(aiArmy) {
     if (this._inBattle) return;
+    if (this.armyMgr.totalUnits(aiArmy) <= 0) { this.armyMgr.removeArmy(aiArmy); return; } // (BUG 3) empty army can't attack
     const defenders = this.troops.snapshot();
     const defTotal = defenders.reduce((s, g) => s + g.count, 0);
     if (defTotal === 0) {
@@ -3083,8 +3137,12 @@ export class IsometricScene extends GameScene {
       } else {
         this.diploButton(580, y + 1, 116, 32, '—', 'no treaty', 0x33333a, 0x33333a, false, null);
       }
-      // Slot 3 — break treaty if any active, else declare war.
-      if (hasTreaty) {
+      // Slot 3 — context: ceasefire if at war, break alliance if allied, else break treaty / declare war.
+      if (this.diplomacy.atWar(key)) {
+        this.diploButton(702, y + 1, 116, 32, 'Ceasefire', '100g → end war', 0x1a4a5c, 0x2a6a8a, this.resources.gold >= 100, () => this.diplomacy.offerCeasefire(key)); // (BUG 10)
+      } else if (tr.alliance) {
+        this.diploButton(702, y + 1, 116, 32, 'Break Ally', '→ -20 rel', 0x5c4a1a, 0x8a722a, true, () => this.diplomacy.breakAlliance(key)); // (BUG 2)
+      } else if (hasTreaty) {
         this.diploButton(702, y + 1, 116, 32, 'Break', '→ -10 rel', 0x5c4a1a, 0x8a722a, true, () => this.diplomacy.breakTreaty(key));
       } else {
         this.diploButton(702, y + 1, 116, 32, 'War', '→ -100 rel', 0x5c1a1a, 0x8a2a2a, !!this.diplomacy, () => this.diplomacy.declareWar(key));
@@ -3134,6 +3192,46 @@ export class IsometricScene extends GameScene {
       u.cmd = { x: tx + ox, y: ty + oy, attackAI, castle };
       u.playerCommanded = true; // (Bug 4/8) ignore the home leash + hold at the destination
     });
+  }
+
+  // (BUG 9) Explicitly recall units to the castle — the only player action that
+  // clears the hold so they resume auto-defense around home.
+  returnUnitsToCastle(units) {
+    const list = units || (this.troops ? this.troops.allUnits() : []);
+    for (const u of list) { u.playerCommanded = false; u.cmd = null; u.target = null; }
+    this.showToast && this.showToast('Units returning to castle');
+  }
+
+  // (BUG 7) Opaque fog overlay drawn ABOVE all world objects (depth 99998, just
+  // under the HUD's uiCamera). Unexplored tiles show nothing behind them. Bounded
+  // to the camera viewport and only redrawn when the view or fog changes.
+  createFogOverlay() {
+    this.fogG = this.add.graphics().setDepth(99998); // world space (main camera)
+    this._fogKey = null; this._fogDirty = true;
+  }
+  updateFogOverlay() {
+    if (!this.territory || !this.fogG) return;
+    const cam = this.cameras.main;
+    const key = `${Math.round(cam.scrollX)},${Math.round(cam.scrollY)},${cam.zoom.toFixed(2)}`;
+    if (key === this._fogKey && !this._fogDirty) return;
+    this._fogKey = key; this._fogDirty = false;
+    const g = this.fogG; g.clear();
+    const view = cam.worldView;
+    const corners = [this.screenToTile(view.x, view.y), this.screenToTile(view.right, view.y), this.screenToTile(view.x, view.bottom), this.screenToTile(view.right, view.bottom)];
+    let c0 = Infinity, c1 = -Infinity, r0 = Infinity, r1 = -Infinity;
+    for (const t of corners) { c0 = Math.min(c0, t.col); c1 = Math.max(c1, t.col); r0 = Math.min(r0, t.row); r1 = Math.max(r1, t.row); }
+    c0 = Math.max(0, c0 - 3); r0 = Math.max(0, r0 - 3); c1 = Math.min(N - 1, c1 + 3); r1 = Math.min(N - 1, r1 + 3);
+    const expl = this.territory.explored;
+    g.fillStyle(0x05070d, 1); // fully opaque fog
+    const w = HW + 1, h = HH + 1; // slight inflate to avoid hairline seams
+    for (let r = r0; r <= r1; r++) {
+      const row = expl[r]; if (!row) continue;
+      for (let c = c0; c <= c1; c++) {
+        if (row[c]) continue;
+        const cx = (c - r) * HW + OX + HW, cy = (c + r) * HH + OY + HH;
+        g.beginPath(); g.moveTo(cx, cy - h); g.lineTo(cx + w, cy); g.lineTo(cx, cy + h); g.lineTo(cx - w, cy); g.closePath(); g.fillPath();
+      }
+    }
   }
 
   // ---- Day / night cycle + day counter (new) -------------------------------
@@ -3265,14 +3363,12 @@ export class IsometricScene extends GameScene {
     const phase = this.dayTimer / DAY_MS;
     const atmo = this.atmosphereAt(phase);
     if (this.dnOverlay) { this.dnOverlay.fillColor = atmo.color; this.dnOverlay.setAlpha(atmo.alpha); }
-    // Night-ness (stars/moon) spans dusk→dawn; torch-ness starts a little earlier.
+    // Night-ness (stars/moon) spans dusk→dawn. (BUG 8) Torches removed entirely —
+    // the day/night sky shift is sufficient atmosphere.
     let night = phase >= 0.85 ? (phase - 0.85) / 0.10 : phase < 0.08 ? 1 - phase / 0.08 : 0;
-    let torch = phase >= 0.78 ? (phase - 0.78) / 0.07 : phase < 0.10 ? 1 - phase / 0.10 : 0;
     night = Phaser.Math.Clamp(night, 0, 1);
-    torch = Phaser.Math.Clamp(torch, 0, 1);
     this._nightness = night;
     this.drawSkyBodies(phase, night);
-    this.updateTorches(torch, gdelta);
     if (this.hud && this.hud.day) this.hud.day.setText(`Day ${this.gameDay}`);
   }
 
@@ -3306,42 +3402,7 @@ export class IsometricScene extends GameScene {
     }
   }
 
-  // (Polish Phase 3) Per-building torches: invisible by day, flickering warm at
-  // night. Rendered screen-fixed ABOVE the night overlay (projected from the
-  // building's world position) so they actually glow instead of being darkened.
-  updateTorches(torch, gdelta) {
-    this._torchFlick = (this._torchFlick || 0) + gdelta;
-    const flick = this._torchFlick > 90;
-    if (flick) this._torchFlick = 0;
-    const cam = this.cameras.main;
-    for (const b of this.buildings.buildings) {
-      if (!b.alive) continue;
-      if (!b._torch && torch > 0.01) this.addTorch(b);
-      if (!b._torch) continue;
-      if (torch <= 0.01) { b._torch.setVisible(false); continue; }
-      // (Bug 1 fix) Project from the camera's actual visible top-left (worldView),
-      // not scrollX/Y — those only match at zoom 1, so torches drifted on zoom.
-      const view = cam.worldView;
-      const sx = (b.x - view.x) * cam.zoom;
-      const sy = (b._torchY - view.y) * cam.zoom;
-      const on = sx > -20 && sx < GAME_W + 20 && sy > -20 && sy < GAME_H + 20;
-      if (flick) b._torchF = Phaser.Math.FloatBetween(0.75, 1.0);
-      b._torch.setVisible(on).setPosition(sx, sy).setScale(cam.zoom).setAlpha(torch * (b._torchF || 0.9));
-    }
-  }
-
-  addTorch(b) {
-    b._torchY = b.y - (14 + (b.baseScale || 1) * 34) + 8; // a little below the building's top
-    b._torchF = 0.9;
-    const t = this.add.container(0, 0).setScrollFactor(0).setDepth(37).setVisible(false);
-    // (Audit FIX 7) Larger, brighter torch glow so night reads warmer.
-    const glow = this.add.circle(0, 0, 20, 0xff7a1a, 0.7).setBlendMode(Phaser.BlendModes.ADD);
-    const glow2 = this.add.circle(0, 0, 11, 0xffc24a, 0.85).setBlendMode(Phaser.BlendModes.ADD);
-    const flame = this.add.ellipse(0, -2, 11, 18, 0xffb030);
-    const core = this.add.ellipse(0, -1, 5.5, 11, 0xfff0b0);
-    t.add([glow, glow2, flame, core]);
-    b._torch = t;
-  }
+  // (BUG 8) Torches removed entirely — the day/night sky shift is the atmosphere.
 
   onNewDay(eat) {
     sfx.play('day_start'); // (Polish Phase 2) dawn bell
@@ -3462,6 +3523,7 @@ export class IsometricScene extends GameScene {
     this.nodes.update(gdelta);
     this.expeditions.update(dt);
     if (this.territory) this.territory.update(dt); // Phase 4: fog reveal around units
+    if (this.updateFogOverlay) this.updateFogOverlay(); // (BUG 7) opaque fog overlay
     if (this.ruins) this.ruins.update(); // (Session-1 Phase 1) ruin discovery
     if (this.factions) this.factions.update(dt); // (Session-1 Phase 2) wandering factions
     if (this.discovery) this.discovery.update(); // (Session-1 Phase 4) location discovery
@@ -3503,7 +3565,6 @@ export class IsometricScene extends GameScene {
 
     for (const b of this.buildings.buildings) {
       if (!b.alive && b._floatIcon) { b._floatIcon.destroy(); b._floatIcon = null; this.hideBuildingName(b); } // (Phase 6) clean up icons of dying buildings
-      if (!b.alive && b._torch) { b._torch.destroy(); b._torch = null; } // (Phase 3) clean up torches
       if (!b.alive && b._snowCap) { b._snowCap.destroy(); b._snowCap = null; } // (Phase 4) clean up snow caps
     }
     if (this.buildings.reap()) {

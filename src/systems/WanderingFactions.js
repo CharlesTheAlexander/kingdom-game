@@ -121,6 +121,10 @@ export class WanderingFactions {
     if (d < 0.6) return true; // arrived
     const m = speed * dt;
     ent.col += (dc / d) * m; ent.row += (dr / d) * m;
+    // (BUG 6) Never let a roaming entity drift to NaN or off-map.
+    const N = this.scene.COLS || 200;
+    if (!isFinite(ent.col) || !isFinite(ent.row)) { ent.col = N / 2; ent.row = N / 2; }
+    ent.col = Phaser.Math.Clamp(ent.col, 0, N - 1); ent.row = Phaser.Math.Clamp(ent.row, 0, N - 1);
     const { x, y } = this.scene.tileCenter(ent.col, ent.row);
     ent.x = x; ent.y = y; if (ent.sprite) ent.sprite.setPosition(x, y);
     return false;
@@ -277,6 +281,7 @@ export class WanderingFactions {
     for (let r = 0; r < s.ROWS; r++) for (let col = 0; col < s.COLS; col++) {
       if (s.biomeAt(col, r) === biome && !t.explored[r][col]) { t.explored[r][col] = true; const bob = s.terrainTiles[r] && s.terrainTiles[r][col]; if (bob) bob.setTint(t.tintFor(col, r)); }
     }
+    s._fogDirty = true; // (BUG 7)
   }
 
   // --- daily ---------------------------------------------------------------

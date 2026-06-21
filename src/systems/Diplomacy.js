@@ -34,11 +34,47 @@ export class Diplomacy {
     this.scene.refreshPanel();
   }
   declareWar(key) {
+    // (BUG 10) Honor the post-ceasefire cooldown.
+    if (this._warCooldown && this._warCooldown[key] && this.scene.gameDay < this._warCooldown[key]) { this.scene.showToast && this.scene.showToast('Ceasefire still in effect'); return; }
     this.rel[key] = -100; this.nap[key] = false; this.ally[key] = false;
+    if (this.treaties[key]) { this.treaties[key].alliance = false; this.treaties[key].trade = false; }
     const k = this.scene.kingdoms.find((x) => x.cfg.key === key);
     if (k) k.startDay = Math.min(k.startDay, this.scene.gameDay);
     this.scene.refreshPanel();
   }
+
+  // (BUG 2) Truly allied = +80 relations OR an active Military Alliance treaty.
+  isAllied(key) { return this.get(key) >= 80 || (this.treaties[key] && this.treaties[key].alliance) || this.ally[key]; }
+
+  // (BUG 10) Offer a ceasefire to end an active war.
+  offerCeasefire(key) {
+    if (!this.scene.resources.spend({ gold: 100 })) { this.scene.showToast('Need 100 gold'); return; }
+    const k = this.scene.kingdoms.find((x) => x.cfg.key === key);
+    const castle = this.scene.buildings.castle;
+    const castleLow = castle && castle.hp < castle.maxHp * 0.5;
+    const theirArmies = this.scene.armyMgr ? this.scene.armyMgr.aiArmiesFor(key).length : 0;
+    const recentlyBeaten = k && k.regrouping;
+    const weak = k && k.estimatedArmy() < 5;
+    // AI refuses if it has armies out AND your castle is hurting; otherwise accepts
+    // (and always accepts if recently beaten or weak).
+    const accept = recentlyBeaten || weak || !(theirArmies > 0 && castleLow);
+    if (!accept) { this.scene.showToast(`${this.kname(key)} refuses the ceasefire`); return; }
+    this.rel[key] = -20; this.nap[key] = false;
+    this._warCooldown = this._warCooldown || {}; this._warCooldown[key] = this.scene.gameDay + 5;
+    if (this.scene.recallFactionArmies) this.scene.recallFactionArmies(key); // turn their armies home
+    this.scene.logEvent && this.scene.logEvent(`Ceasefire with ${this.kname(key)}`, 'green');
+    this.scene.refreshPanel();
+  }
+
+  // (BUG 2) Break an alliance explicitly.
+  breakAlliance(key) {
+    this.tr(key).alliance = false; this.ally[key] = false; this.nap[key] = false;
+    this.change(key, -20, 'broke the alliance');
+    this.scene.logEvent && this.scene.logEvent(`Alliance with ${this.kname(key)} broken`, 'red');
+    this.scene.refreshPanel();
+  }
+
+  atWar(key) { return this.get(key) <= -50 && !this.nap[key] && !this.isAllied(key); }
   acceptPact(key) {
     if (this.get(key) < 50) return;
     const cost = this.get(key) >= 80 ? 200 : 100;
@@ -59,6 +95,8 @@ export class Diplomacy {
     if (this.get(key) < 60) { this.scene.showToast('Need +60 relations'); return; }
     if (!this.scene.resources.spend({ gold: 200 })) { this.scene.showToast('Need 200 gold'); return; }
     this.tr(key).alliance = true; this.nap[key] = true; this.ally[key] = true;
+    // (BUG 2) Any army that faction had marching on us turns around immediately.
+    if (this.scene.recallFactionArmies) this.scene.recallFactionArmies(key);
     this.scene.logEvent && this.scene.logEvent(`Military alliance with ${this.kname(key)}`, 'green');
     this.scene.refreshPanel();
   }
@@ -82,7 +120,9 @@ export class Diplomacy {
   // Multiplier on a kingdom's willingness to attack (0 = will not attack).
   attackModifier(k) {
     const key = k.cfg.key;
-    if (this.nap[key] || this.ally[key] || this.tr(key).vassal) return 0;
+    // (BUG 2) Allies, pacts, vassals, and post-ceasefire cooldown never attack.
+    if (this.nap[key] || this.ally[key] || this.tr(key).vassal || this.isAllied(key)) return 0;
+    if (this._warCooldown && this._warCooldown[key] && this.scene.gameDay < this._warCooldown[key]) return 0;
     const r = this.get(key);
     return r <= -50 ? 1.3 : r >= 50 ? 0 : r >= 0 ? 0.7 : 1;
   }
@@ -109,7 +149,7 @@ export class Diplomacy {
 
   // (Phase 6) Coalition: 2+ kingdoms at -80 form a coordinated assault after 3 days.
   checkCoalition() {
-    const hostiles = this.scene.kingdoms.filter((k) => k.castleAlive && this.get(k.cfg.key) <= -80 && !this.nap[k.cfg.key]);
+    const hostiles = this.scene.kingdoms.filter((k) => k.castleAlive && this.get(k.cfg.key) <= -80 && !this.nap[k.cfg.key] && !this.isAllied(k.cfg.key));
     if (!this._coalitionPending && hostiles.length >= 2) {
       this._coalitionPending = true; this._coalitionDay = this.scene.gameDay + 3;
       this.scene.threatWarning && this.scene.threatWarning('A coalition is forming against your kingdom!', 0xff4d4d, true);
@@ -123,6 +163,6 @@ export class Diplomacy {
     }
   }
 
-  serialize() { return { rel: { ...this.rel }, nap: { ...this.nap }, ally: { ...this.ally }, treaties: JSON.parse(JSON.stringify(this.treaties)), coalitionPending: this._coalitionPending, coalitionDay: this._coalitionDay }; }
-  restore(d) { if (!d) return; Object.assign(this.rel, d.rel || {}); Object.assign(this.nap, d.nap || {}); Object.assign(this.ally, d.ally || {}); if (d.treaties) this.treaties = d.treaties; this._coalitionPending = !!d.coalitionPending; this._coalitionDay = d.coalitionDay || 0; }
+  serialize() { return { rel: { ...this.rel }, nap: { ...this.nap }, ally: { ...this.ally }, treaties: JSON.parse(JSON.stringify(this.treaties)), coalitionPending: this._coalitionPending, coalitionDay: this._coalitionDay, warCooldown: this._warCooldown || {} }; }
+  restore(d) { if (!d) return; Object.assign(this.rel, d.rel || {}); Object.assign(this.nap, d.nap || {}); Object.assign(this.ally, d.ally || {}); if (d.treaties) this.treaties = d.treaties; this._coalitionPending = !!d.coalitionPending; this._coalitionDay = d.coalitionDay || 0; this._warCooldown = d.warCooldown || {}; }
 }

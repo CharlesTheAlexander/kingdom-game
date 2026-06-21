@@ -631,7 +631,9 @@ export class GameScene extends Phaser.Scene {
         u.selRing.destroy();
         u.selRing = null;
       }
-      u.playerCommanded = false; // (Bug 8) deselecting releases the hold → resume auto-defense
+      // (BUG 9) playerCommanded PERSISTS through deselection — units hold their
+      // ordered position. It is only cleared by a new wave, "Return to Castle",
+      // or being added to an army.
     }
     this.selectedUnits = [];
     this.updateSelBadge();

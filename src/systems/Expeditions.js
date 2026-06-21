@@ -179,7 +179,13 @@ export class ExpeditionManager {
 
   marchIn(n) {
     const home = this.homePoint();
-    for (let i = 0; i < n; i++) {
+    // (BUG 1) If the cap shrank while they were away, excess soldiers are
+    // discharged (not re-added) instead of overflowing the cap.
+    const room = this.scene.soldierRoom ? this.scene.soldierRoom() : n;
+    const keep = Math.min(n, room);
+    const discharged = n - keep;
+    if (discharged > 0 && this.scene.floatText) this.scene.floatText(home.x, home.y - 56, `${discharged} discharged (cap reached)`, '#ff8a80');
+    for (let i = 0; i < keep; i++) {
       const spr = this.scene.add
         .sprite(home.x + 620, home.y + Phaser.Math.Between(-10, 20), 'blue_warrior_run', 0)
         .setScale(WSCALE)

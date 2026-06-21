@@ -210,6 +210,14 @@ export function applySave(scene, data) {
   });
   sect('audio', () => { if (data.audio && scene.sfx) { scene.sfx.setVolume(data.audio.volume); if (scene.sfx.muted !== data.audio.muted) scene.sfx.toggleMute(); scene.drawSoundControl && scene.drawSoundControl(); } });
 
+  // (BUG 5) After a load: clear any pending battle, block battles for 10s, and
+  // pause mid-march AI armies for 3 game-days so the player can get oriented.
+  sect('loadGrace', () => {
+    scene._inBattle = false;
+    scene._loadGraceUntil = (scene.time ? scene.time.now : 0) + 10000;
+    if (scene.armyMgr) for (const a of scene.armyMgr.aiArmies()) a._resumeDay = (scene.gameDay || 0) + 3;
+  });
+
   if (scene.refreshPanel) scene.refreshPanel();
   if (scene.updateHud) scene.updateHud();
 }
