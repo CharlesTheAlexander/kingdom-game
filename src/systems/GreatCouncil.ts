@@ -35,7 +35,11 @@ export class GreatCouncil {
     const s = this.scene;
     if (!this.canCall()) { s.showToast && s.showToast('Need +60 relations with 2+ kingdoms'); return; }
     if (!s.resources.spend({ gold: 300 })) { s.showToast && s.showToast('Need 300 gold'); return; }
-    this.openPanel();
+    // (V2 Phase 2) Open the rendered Council hall scene instead of a flat panel.
+    const parts = this.participants().map((k: any) => k.cfg.key);
+    const highKing = !!(s.reputation && s.reputation.scores.conqueror >= 75);
+    try { s.scene.launch('CouncilScene', { participants: parts, highKing }); s.scene.pause(); }
+    catch (e) { this.openPanel(); } // fallback to the legacy panel
   }
 
   // ---- proposals ----------------------------------------------------------

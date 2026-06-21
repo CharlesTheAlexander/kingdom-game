@@ -6,6 +6,7 @@ import { MainMenuScene } from './scenes/MainMenuScene.js';
 import { IsometricScene } from './scenes/IsometricScene.js';
 import { ContinentScene } from './scenes/ContinentScene.js';
 import { BattleScene } from './scenes/BattleScene.js';
+import { CouncilScene } from './scenes/CouncilScene.js';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -21,7 +22,7 @@ const config: Phaser.Types.Core.GameConfig = {
   // MainMenuScene auto-starts (first in the array) and launches IsometricScene
   // on New Kingdom / Continue / Load. GameScene stays registered as reference;
   // ContinentScene is launched on demand (Tab) on top of the local view.
-  scene: [MainMenuScene, IsometricScene, GameScene, ContinentScene, BattleScene],
+  scene: [MainMenuScene, IsometricScene, GameScene, ContinentScene, BattleScene, CouncilScene],
 };
 
 const game = new Phaser.Game(config);
