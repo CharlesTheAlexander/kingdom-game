@@ -2524,7 +2524,7 @@ export class IsometricScene extends GameScene {
       this.spriteButton(630, y - 2, 96, 24, 'Supplies', '', true, () => { m.sendSupplies(a); this.refreshPanel(); }, { gold: true });
       this.spriteButton(730, y - 2, 92, 24, 'Disband', '', true, () => { m.disband(a); this.refreshPanel(); });
     });
-    this.spriteButton(GAME_W - 180, this.PANEL_Y + PANEL_H - 36, 168, 28, 'Form New Army', '', list.length < m.maxPlayerArmies, () => { this._armyFormSpec = { warrior: 0, archer: 0, monk: 0, knight: 0, mercenary: 0, siege: 0 }; this.panelMode = 'armyform'; this.refreshPanel(); }, { active: true });
+    this.spriteButton(GAME_W - 180, this.PANEL_Y + PANEL_H - 36, 168, 28, 'Form New Army', '', list.length < m.maxPlayerArmies, () => { this._armyFormSpec = { warrior: 0, archer: 0, monk: 0, knight: 0, mercenary: 0, siege: 0, spearmen: 0, cavalry: 0 }; this.panelMode = 'armyform'; this.refreshPanel(); }, { active: true });
     // (Phase 3) Diplomacy + Caravans live under the Armies category.
     this.spriteButton(GAME_W - 180, this.PANEL_Y + 6, 80, 24, 'Diplomacy', '', true, () => { this.panelMode = 'kingdoms'; this.refreshPanel(); });
     this.spriteButton(GAME_W - 96, this.PANEL_Y + 6, 84, 24, 'Caravans', '', !!(this.caravans && this.caravans.sites().length >= 2), () => { this.panelMode = 'caravans'; this.refreshPanel(); });
@@ -2666,12 +2666,13 @@ export class IsometricScene extends GameScene {
     if (bar) {
       // (Feature #3) Champion unlocks at Barracks L5 (1 max). Warriors trained at
       // an L4+ barracks arrive as Elites (+50% stats) automatically.
-      const types = [['warrior', 1], ['archer', 2], ['monk', 3], ['knight', 2], ['champion', 5]];
-      types.forEach(([t, lvl], i) => {
-        let can = bar.level >= lvl && this.soldierRoom() > 0 && (t !== 'knight' || (this.hasBlacksmith && this.hasBlacksmith()));
+      // (V2 Phase 4) counter hints teach the rock-paper-scissors without a tutorial.
+      const types = [['warrior', 1, 'beats Spear'], ['archer', 2, 'beats Warrior'], ['spearmen', 2, 'beats Cavalry'], ['cavalry', 3, 'beats Archer'], ['monk', 3, 'support'], ['knight', 2, 'no weakness'], ['champion', 5, 'Lv5·1max']];
+      types.forEach(([t, lvl, hint]: any, i) => {
+        let can = bar.level >= lvl && this.soldierRoom() > 0 && ((t !== 'knight' && t !== 'cavalry') || (this.hasBlacksmith && this.hasBlacksmith()));
         if (t === 'champion' && this.troops.championCount && this.troops.championCount() > 0) can = false; // 1 max
-        const label = t === 'warrior' && bar.level >= 4 ? 'Train elite' : `Train ${t}`;
-        this.spriteButton(tx + i * 104, this.PANEL_Y + 28, 96, 30, label, t === 'champion' ? 'Lv5 · 1 max' : '', can, () => this.trainUnit(bar, t));
+        const label = t === 'warrior' && bar.level >= 4 ? 'Elite' : t.charAt(0).toUpperCase() + t.slice(1);
+        this.spriteButton(tx + i * 86, this.PANEL_Y + 28, 80, 30, label, hint, can, () => this.trainUnit(bar, t));
       });
       this.panelText(tx, this.PANEL_Y + 64, `Barracks Lv ${bar.level}/5${bar.level >= 4 ? ' — trains Elites' : ''}${bar.level >= 5 ? ' + Champion' : ''}`, { color: '#cfc1a6', size: '11px' });
     } else {
@@ -3135,7 +3136,7 @@ export class IsometricScene extends GameScene {
     try { SaveManager.save(this, 0); } catch (e) {}
     this._battleArmy = playerArmy;
     this.scene.launch('BattleScene', {
-      playerArmy: playerArmy.units.map((u) => ({ type: u.type, count: u.count })),
+      playerArmy: playerArmy.units.map((u) => ({ type: u.type, count: u.count, battles: u.battles || 0 })),
       enemyArmy: enemyUnits.map((u) => ({ type: u.type, count: u.count })),
       terrainType: this.battleTerrain(), enemyFaction: ctx.faction || 'red',
       context: ctx, playerDefending: !!ctx.defending,
@@ -3148,7 +3149,9 @@ export class IsometricScene extends GameScene {
   onArmyBattleComplete(army, res, ctx) {
     this._inBattle = false; this.scene.resume();
     if (this.heroes) this.heroes.onBattle(army.id, !!(res && res.victory), (ctx && ctx.enemyCount) || 0); // (V2 Phase 3) hero XP
+    const oldBattles = {}; for (const gg of army.units) oldBattles[gg.type] = gg.battles || 0; // (V2 P4) keep veterancy
     this.armyMgr.setUnitsFromBattle(army, res.army);
+    for (const gg of army.units) gg.battles = (oldBattles[gg.type] || 0) + 1; // survived a battle → +1 veterancy
     if (res && res.victory) {
       this._lastBattleWonDay = this.gameDay;
       this._battlesWon = (this._battlesWon || 0) + 1; // (Audit FIX 2) battle tally
@@ -3906,6 +3909,8 @@ export class IsometricScene extends GameScene {
         else if (slot.type === 'monk') this.troops.spawnMonk(b);
         else if (slot.type === 'knight') this.troops.spawnKnight(b);
         else if (slot.type === 'champion') this.troops.spawnChampion(); // (Feature #3) Barracks L5
+        else if (slot.type === 'spearmen') this.troops.spawnSpearman(b); // (V2 P4)
+        else if (slot.type === 'cavalry') this.troops.spawnCavalry(b); // (V2 P4)
         else if (b.level >= 4 && this.troops.spawnElite) this.troops.spawnElite(b); // (Feature #3) L4 → Elite
         else this.troops.spawn(b);
         finished = true;

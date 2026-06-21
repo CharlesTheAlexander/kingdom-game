@@ -90,6 +90,9 @@ const TRAIN_DEFS: Record<string, any> = {
   knight: { label: 'Knight', time: 90, cost: { gold: 80, food: 30, equipment: 1 } },
   // (Loop 3, Feature #3) Champion — unique legendary unit from a Barracks Lv5.
   champion: { label: 'Champion', time: 120, cost: { gold: 200, food: 40, equipment: 2 } },
+  // (V2 Phase 4) Spearmen (Barracks L2, counter Cavalry) + Cavalry (L3, counter Archers).
+  spearmen: { label: 'Spearman', time: 35, cost: { gold: 25, food: 5 } },
+  cavalry: { label: 'Cavalry', time: 55, cost: { gold: 60, food: 10, equipment: 1 } },
 };
 
 export class GameScene extends Phaser.Scene {
@@ -1290,7 +1293,7 @@ export class GameScene extends Phaser.Scene {
   // (Bug 4) Barracks level → training slots & unlocked unit types.
   // Lv1: Warrior, 1 slot.  Lv2: +Archer, 2 slots.  Lv3: +Monk, 3 slots.
   unitUnlockLevel(type) {
-    return { warrior: 1, archer: 2, monk: 3, knight: 2, champion: 5 }[type];
+    return { warrior: 1, archer: 2, monk: 3, knight: 2, champion: 5, spearmen: 2, cavalry: 3 }[type];
   }
 
   // (Phase 3) Hard soldier cap = 5 per Barracks built.

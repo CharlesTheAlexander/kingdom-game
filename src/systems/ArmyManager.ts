@@ -7,7 +7,7 @@ import Phaser from 'phaser';
 // march from their castle toward the player. Armies march across terrain (speed
 // varies by biome), carry food supply, and have morale that feeds the BattleScene.
 
-const UNIT_HP: Record<string, number> = { warrior: 50, archer: 40, monk: 30, knight: 120, mercenary: 50, siege: 80 };
+const UNIT_HP: Record<string, number> = { warrior: 50, archer: 40, monk: 30, knight: 120, mercenary: 50, siege: 80, spearmen: 45, cavalry: 40 };
 const FACTION_COLOR: Record<string, number> = { player: 0x3a7bd5, red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a };
 const MARCH_SPEED: Record<string, number> = { plains: 3, start: 3, middle: 3, delta: 3, forest: 1.5, mountains: 1, wildlands: 2 }; // tiles per game-hour
 const DAY_MS = 300000;
@@ -35,12 +35,14 @@ export class ArmyManager {
   // --- the unassigned troop pool (units not in any army) -------------------
   availableUnits() {
     const t = this.scene.troops;
-    const w = t.warriors.filter((u) => !u.knight && !u.mercenary && !u.siege).length;
+    const w = t.warriors.filter((u) => !u.knight && !u.mercenary && !u.siege && !u.spear && !u.cav).length;
     return {
       warrior: w,
       knight: t.warriors.filter((u) => u.knight).length,
       mercenary: t.warriors.filter((u) => u.mercenary).length,
       siege: t.warriors.filter((u) => u.siege).length,
+      spearmen: t.warriors.filter((u) => u.spear).length,
+      cavalry: t.warriors.filter((u) => u.cav).length,
       archer: t.archers.length,
       monk: t.monks.length,
     };
@@ -54,7 +56,7 @@ export class ArmyManager {
     if (type === 'archer') { while (taken < count && t.archers.length) { kill(t.archers.pop()); taken++; } }
     else if (type === 'monk') { while (taken < count && t.monks.length) { kill(t.monks.pop()); taken++; } }
     else {
-      const match = (u: any) => (type === 'knight' ? u.knight : type === 'mercenary' ? u.mercenary : type === 'siege' ? u.siege : !u.knight && !u.mercenary && !u.siege);
+      const match = (u: any) => (type === 'knight' ? u.knight : type === 'mercenary' ? u.mercenary : type === 'siege' ? u.siege : type === 'spearmen' ? u.spear : type === 'cavalry' ? u.cav : !u.knight && !u.mercenary && !u.siege && !u.spear && !u.cav);
       for (let i = t.warriors.length - 1; i >= 0 && taken < count; i--) if (match(t.warriors[i])) { kill(t.warriors.splice(i, 1)[0]); taken++; }
     }
     return taken;
@@ -69,6 +71,8 @@ export class ArmyManager {
       else if (u.type === 'knight' && this.scene.troops.spawnKnight) this.scene.troops.spawnKnight(c);
       else if (u.type === 'mercenary' && this.scene.troops.spawnMercenary) this.scene.troops.spawnMercenary();
       else if (u.type === 'siege' && this.scene.troops.spawnSiege) this.scene.troops.spawnSiege(c);
+      else if (u.type === 'spearmen' && this.scene.troops.spawnSpearman) this.scene.troops.spawnSpearman(c);
+      else if (u.type === 'cavalry' && this.scene.troops.spawnCavalry) this.scene.troops.spawnCavalry(c);
       else this.scene.troops.spawnAt(c.x + Phaser.Math.Between(-30, 30), c.y + Phaser.Math.Between(20, 40));
     }
   }
@@ -81,7 +85,7 @@ export class ArmyManager {
     for (const [type, want] of Object.entries(spec)) {
       if (!want) continue;
       const got = this.takeFromPool(type, want);
-      if (got > 0) { units.push({ type, count: got, hp: UNIT_HP[type] || 50, maxHp: UNIT_HP[type] || 50 }); total += got; }
+      if (got > 0) { units.push({ type, count: got, hp: UNIT_HP[type] || 50, maxHp: UNIT_HP[type] || 50, battles: 0 }); total += got; }
     }
     if (total === 0) { this.scene.showToast('Add at least one unit'); return null; }
     const c = this.scene.buildings.castle;

@@ -37,7 +37,11 @@ const STATS: Record<string, any> = {
   goblin: { hp: 15, dmg: 8, speed: 74, range: 0, tex: 'goblin_idle', heal: 0 },
   garrison: { hp: 50, dmg: 15, speed: 0, range: 0, tex: 'blue_warrior_idle', heal: 0, hold: true },
   siege: { hp: 80, dmg: 8, speed: 18, range: 0, tex: 'siege_unit', heal: 0, siege: true }, // smashes walls (50/s), weak vs units
+  spearmen: { hp: 45, dmg: 12, speed: 34, range: 0, tex: 'blue_warrior_idle', heal: 0, spear: true }, // (V2 P4) anti-cavalry, slow
+  cavalry: { hp: 40, dmg: 20, speed: 100, range: 0, tex: 'blue_warrior_idle', heal: 0, charge: true }, // (V2 P4) fast, charges, anti-archer
 };
+// (V2 Phase 4) Rock-paper-scissors: key beats value.
+const COUNTER: Record<string, string> = { warrior: 'spearmen', spearmen: 'cavalry', cavalry: 'archer', archer: 'warrior' };
 const FACTION_WARRIOR: Record<string, string> = { red: 'warrior_idle', purple: 'purple_warrior_idle', yellow: 'yellow_warrior_idle', neutral: 'blue_warrior_idle', goblin: 'goblin_idle' };
 const FACTION_LABEL: Record<string, string> = { red: 'Red Kingdom', purple: 'Purple Kingdom', yellow: 'Yellow Kingdom', neutral: 'Free Company', goblin: 'Goblin Horde' };
 const FACTION_COLOR: Record<string, number> = { red: 0xd64a4a, purple: 0xa45ad6, yellow: 0xd6c04a, neutral: 0x6aa0d6, goblin: 0x6ab04a };
@@ -72,7 +76,11 @@ class BUnit {
     const s = STATS[type] || STATS.warrior;
     // (BUG 12) Block mode: one entity stands for `count` units (large battles).
     this.block = !!opts.block; this.count = opts.count || 1; this.unitHp = s.hp;
-    this.maxHp = s.hp * this.count; this.hp = this.maxHp; this.dmg = s.dmg; this.speed = s.speed;
+    // (V2 Phase 4) Veterancy: 0 green, 1-2 trained(+10%), 3-5 veteran(+25%), 6+ elite(+50%, never routes).
+    const vet = opts.vet || 0;
+    this.vetLevel = vet >= 6 ? 3 : vet >= 3 ? 2 : vet >= 1 ? 1 : 0;
+    this.vetMul = [1, 1.1, 1.25, 1.5][this.vetLevel];
+    this.maxHp = s.hp * this.count * this.vetMul; this.hp = this.maxHp; this.dmg = s.dmg; this.speed = s.speed;
     this.range = s.range; this.heal = s.heal; this.area = !!s.area; this.tank = !!s.tank; this.hold = !!s.hold;
     this.x = x; this.y = y; this.alive = true; this.cmd = null; this.atkCd = 0;
     const tex = texOverride || s.tex;
@@ -94,6 +102,12 @@ class BUnit {
     this.hpW = this.block ? (this.blockW - 6) : 30;
     this.hpBg = scene.add.rectangle(x, y - 30, this.hpW + 2, 5, 0x000000, 0.6).setDepth(11);
     this.hpFill = scene.add.rectangle(x - this.hpW / 2, y - 30, this.hpW, 3, side === 'player' ? 0x4ad66b : 0xd64a4a).setOrigin(0, 0.5).setDepth(12);
+    // (V2 Phase 4) Veterancy badge: white/silver/gold star; elite gets a gold tint.
+    if (this.vetLevel > 0) {
+      const sc = ['#ffffff', '#ffffff', '#cfd2da', '#ffd24a'][this.vetLevel];
+      this.vetStar = scene.add.text(x + (this.block ? this.hpW / 2 : 9), y - 36, '★', { fontFamily: 'monospace', fontSize: '11px', color: sc, stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(13);
+      if (this.vetLevel >= 3) this.spr.setTint(0xffe9a8);
+    }
   }
   takeDamage(a) {
     if (!this.alive) return;
@@ -118,6 +132,7 @@ class BUnit {
     this.hpBg.destroy(); this.hpFill.destroy();
     if (this.blockRect) this.blockRect.destroy();
     if (this.label) this.label.destroy();
+    if (this.vetStar) this.vetStar.destroy();
     if (this._selRing) { this._selRing.destroy(); this._selRing = null; } // (Loop 1)
     this.scene.tweens.add({ targets: this.shadow, alpha: 0, duration: 500, onComplete: () => this.shadow.destroy() });
     this.spr.setTintFill(0xff3333);
@@ -129,6 +144,7 @@ class BUnit {
     if (this.blockRect) { this.blockRect.x = this.x; this.blockRect.y = this.y; }
     if (this.label) { this.label.x = this.x; this.label.y = this.y + 16; }
     if (this._selRing) { this._selRing.x = this.x; this._selRing.y = this.y; } // (Loop 1) follow selection
+    if (this.vetStar) { this.vetStar.x = this.x + (this.block ? this.hpW / 2 : 9); this.vetStar.y = this.y - 36; } // (V2 P4)
     this.hpBg.x = this.x; this.hpBg.y = this.y - 30;
     this.hpFill.x = this.x - this.hpW / 2; this.hpFill.y = this.y - 30;
   }
@@ -327,11 +343,12 @@ export class BattleScene extends Phaser.Scene {
       if (!grp.count) continue;
       let tex;
       if (side === 'enemy') tex = grp.type === 'archer' ? 'red_archer_idle' : (FACTION_WARRIOR[this.faction] || 'warrior_idle');
+      const vet = grp.battles || 0; // (V2 P4) veterancy from the group's battle history
       if (blockMode) {
-        const u = new BUnit(this, side, grp.type, x, GAME_H * 0.54, tex, { block: true, count: grp.count });
+        const u = new BUnit(this, side, grp.type, x, GAME_H * 0.54, tex, { block: true, count: grp.count, vet });
         this.units.push(u);
       } else {
-        for (let i = 0; i < grp.count; i++) this.units.push(new BUnit(this, side, grp.type, x, GAME_H * 0.54, tex));
+        for (let i = 0; i < grp.count; i++) this.units.push(new BUnit(this, side, grp.type, x, GAME_H * 0.54, tex, { vet }));
       }
     }
   }
@@ -531,6 +548,21 @@ export class BattleScene extends Phaser.Scene {
     }
   }
 
+  // (V2 Phase 4) 1.5x when attacker counters defender, 0.6x when countered, else 1.
+  counterMul(atk: string, def: string) {
+    if (COUNTER[atk] === def) return 1.5;
+    if (COUNTER[def] === atk) return 0.6;
+    return 1;
+  }
+  // Brief green ▲ (advantage) / red ▼ (disadvantage) so the player learns counters.
+  counterArrow(u: any, cm: number) {
+    if (cm === 1) return;
+    u._arrowCd = (u._arrowCd || 0) - 1;
+    if (u._arrowCd > 0) return; u._arrowCd = 12;
+    const t = this.add.text(u.x, u.y - 34, cm > 1 ? '▲' : '▼', { fontFamily: 'monospace', fontSize: '14px', color: cm > 1 ? '#4ad66b' : '#ff6b6b', fontStyle: 'bold', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(30);
+    this.tweens.add({ targets: t, y: u.y - 48, alpha: 0, duration: 700, onComplete: () => t.destroy() });
+  }
+
   dmgNumber(x, y, n, color) {
     const t = this.add.text(x, y, `${n}`, { fontFamily: 'monospace', fontSize: '14px', color, fontStyle: 'bold', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(30);
     this.tweens.add({ targets: t, y: y - 28, alpha: 0, duration: 900, onComplete: () => t.destroy() });
@@ -688,8 +720,11 @@ export class BattleScene extends Phaser.Scene {
       if (u.cmd === 'hold' || u.range > 0 || u.hold || true) {
         if (u.atkCd <= 0) {
           u.atkCd = 0.5;
-          // (BUG 12) block damage scales with count; (Feature #2) terrain modifiers.
-          const power = u.dmg * 0.5 * (u.count || 1) * this.terrainAtkMul(u);
+          // (BUG 12) block dmg scales w/ count; (Feature #2) terrain; (V2 P4) veterancy + counters + charge.
+          const cm = this.counterMul(u.type, foe.type);
+          let power = u.dmg * 0.5 * (u.count || 1) * this.terrainAtkMul(u) * (u.vetMul || 1) * cm;
+          if (u.type === 'cavalry' && !u._charged) { power *= 3; u._charged = true; } // CHARGE first strike
+          this.counterArrow(u, cm); // teach the matchup
           if (u.area) { for (const o of this.units) { if (o.alive && o.side !== u.side && Phaser.Math.Distance.Between(u.x, u.y, o.x, o.y) <= MELEE) o.takeDamage(power * this.terrainDefMul(o)); } }
           else foe.takeDamage(power * this.terrainDefMul(foe));
           if (u.range > 0) { this.projectile(u.x, u.y, foe.x, foe.y); sfx.playThrottled('arrow_shoot', 120); }
