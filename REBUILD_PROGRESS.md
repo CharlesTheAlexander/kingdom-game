@@ -165,7 +165,31 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       (2 active, 6 discovered). Shots p5_expeditions + p5_parties. FPS 52-54; ZERO console errors; tsc clean; build
       clean. P4 pioneer + boot audits still green (no regression). DEFERRED (per spec): heroes (P6), diplomacy memory
       application (P7 reads relationDeltas), late-game (P8).
-- [ ] P6 — Hero world integration (dialogue, quests, stationing)
+- [x] P6 — Hero world integration (dialogue, quests, stationing)
+      RE-HOMED the 6-hero roster from the now-inert per-settlement IsometricScene to the CONTINENT. GameWorld now
+      owns a real `Heroes` instance (`GameWorld.heroes`) backed by a tiny world-level host adapter (gameDay/notify/
+      stats stubs) so existing XP/levels/passives keep working; arrivals auto-join (no per-settlement worldEvents).
+      New system `src/systems/HeroWorld.ts` (static, GameWorld-backed, JSON-friendly) owns arrivals, dialogue,
+      interactions, stationing, quests. ContinentScene wiring: bakes hero portrait textures; renders stacked portrait
+      overlays on the party icon + on stationed settlements' icons; ticks arrivals/quests/interactions in onNewDay;
+      fires biome/battle/victory/defeat/ruins/goblin dialogue; Heroes (H) panel for Station/Recall; gold-star quest
+      markers. ARRIVALS: Aldric ~day 8, then Mira/Caelan/Maren/Tomas/Ravel via day/world conditions. DIALOGUE: ~20-32
+      contextual lines/hero (aldric 32, maren 28, caelan 22, mira 21, tomas 24, ravel 24) across ~15 categories,
+      throttled (0.6-day cooldown + one-shot story beats), shown as an auto-dismiss bottom-left speech popup. HERO-HERO:
+      Aldric+Ravel tension, Maren+Tomas, Caelan+Aldric/Mira (occasional). STATIONING: station(id,settlementId) leaves
+      the party + grants +12%/hero defence on the SettlementState + portrait on the town icon; recall() rejoins. QUESTS:
+      all 6 real with travelable markers + real rewards — Aldric→garrison ally flag; Maren→friendly village; Caelan→
+      caravan ally (−200g); Mira→reveals a real hidden 7th goblin fortress; Tomas→reveals a real 7th ruin + flags the
+      4th win condition; Ravel→loyalty maxed + unique ability. Wrote relation/flag deltas into GameWorld.heroFlags for
+      P7/P8. Also hardened a PRE-EXISTING crash in GameWorld.pickAIObjective (fractional candidate index → undefined).
+      Audit (/tmp/audit/p6_heroes.mjs, headless new-game): add 2 heroes → 4 overlay objects on party icon (shot
+      p6_party_heroes); fire 'forest' dialogue → speech popup shows (shot p6_dialogue); add Ravel → Aldric+Ravel "I
+      don't trust you" tension; startQuest+completeQuest mira → marker + 7th fortress revealed (settlements 32→33); all
+      6 quests start+complete clean; Tomas flags 4th win condition; station aldric → bonus 0.12 + portrait on town (shot
+      p6_stationed); recall → back in party; arrival tick at day 9 → aldric joins; hero panel shot p6_hero_panel. 11/11
+      asserts pass; FPS 50-57; ZERO console errors (3 consecutive runs); tsc clean; build clean. P5 expedition + iso-
+      enter regressions still green. DEFERRED (per spec): diplomacy memory/honor (P7 consumes heroFlags/relationDeltas),
+      late-game win-condition implementation (P8 reads fourthWinCondition), save wiring (P12 reads heroes serialize()).
 - [ ] P7 — Diplomatic narrative continuity (leader memory, honor)
 - [ ] P8 — Late game content (stages 8–9, tournament, imperial)
 - [ ] P9 — Battle fog of war + river system

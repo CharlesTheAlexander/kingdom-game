@@ -11,6 +11,8 @@ import { biomeData } from '../data/Biomes.js';
 import { PioneerSystem } from '../systems/PioneerSystem.js';
 import type { PioneerParty, WorkerParty, AIParty as AIPartyT } from '../systems/GameWorld.js';
 import { ExpeditionSystem } from '../systems/ExpeditionSystem.js';
+import { HeroWorld } from '../systems/HeroWorld.js';
+import { generateHeroPortraits } from '../systems/AssetGenerator.js';
 
 // ============================================================================
 // ContinentScene — Phase 2 (Bannerlord rebuild) PRIMARY game loop.
@@ -120,6 +122,21 @@ export class ContinentScene extends Phaser.Scene {
     this.iconLayer = this.add.container(0, 0).setDepth(30);
     this.partyIcon = this.add.container(0, 0).setDepth(40);
     this.buildPartyIcon();
+
+    // (Phase 6) Hero portrait textures (hero_aldric…) are normally only baked by
+    // the per-settlement scene's generateAll(); the continent draws everything
+    // procedurally, so bake JUST the hero portraits here so we can stamp them as
+    // small overlay icons on the party / settlement icons + in dialogue popups.
+    if (!this.textures.exists('hero_aldric')) {
+      try { generateHeroPortraits(this); } catch (e) { /* portraits optional */ }
+    }
+    // Hero portrait overlay icons (stacked on the player party icon), laid out
+    // each frame in layoutIcons(). A separate container above the AI icon layer.
+    this.heroOverlay = this.add.container(0, 0).setDepth(45);
+    // (Phase 6) Re-bind the hero roster to a fresh world host so it never points
+    // at a stale per-settlement scene, and so passives recompute against GameWorld.
+    GameWorld.rebindHeroes();
+    GameWorld.heroes.applyPassives();
 
     // --- Fog of war overlay (screen space image) --------------------------
     this.initFog();
@@ -372,6 +389,11 @@ export class ContinentScene extends Phaser.Scene {
     this.updateWorkers(delta);
     this.tickRuinDigs(dayDelta);
 
+    // --- (Phase 6) Biome-entry hero dialogue -----------------------------
+    // When the party crosses into a biome a hero reacts to (forest/mountain/
+    // winter-by-season), fire a contextual line (throttled inside HeroWorld).
+    this.checkBiomeDialogue();
+
     // --- Camera follow ----------------------------------------------------
     if (this.followParty) {
       const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
@@ -446,6 +468,28 @@ export class ContinentScene extends Phaser.Scene {
       if (Math.random() < 0.15) GameWorld.pickAIObjective(ai);
       if (ai.personality === 'aggressive') { ai.destCol = GameWorld.player.col; ai.destRow = GameWorld.player.row; }
     }
+
+    // --- (Phase 6) HERO daily ticks --------------------------------------
+    // 1. Arrivals (first hero ~day 8, others via their conditions). Heroes that
+    //    join travel WITH the party; surface a welcome banner + dialogue.
+    const joined = HeroWorld.tickArrivals();
+    for (const id of joined) {
+      const h = GameWorld.heroes.byId(id);
+      if (h) this.flashBanner(`${h.name}, ${h.title}, has joined your host!`, 0xc9a14a);
+    }
+    // 2. Hero quests: auto-start eligible quests (notification + travelable marker)
+    //    and auto-complete any whose marker the party reached.
+    const qev = HeroWorld.tickQuests();
+    for (const e of qev) {
+      if (e.type === 'started') { this.flashBanner(`Hero Quest — ${e.title}`, 0xffe08a); this._fogDirty = true; }
+      else this.flashBanner(`Quest complete: ${e.title}`, 0x2a7a4f);
+    }
+    // 3. Occasional hero-hero banter when a pair travels together.
+    const inter = HeroWorld.tryInteraction();
+    if (inter) this.showHeroConversation(inter);
+    // 4. Contextual low-supply / low-gold remarks (throttled by HeroWorld).
+    if (GameWorld.player.supply <= 3) this.fireHeroDialogue('low_supply');
+    else if (GameWorld.gold < 80) this.fireHeroDialogue('low_gold');
   }
 
   // =========================================================================
@@ -679,6 +723,9 @@ export class ContinentScene extends Phaser.Scene {
   // --- Modal: explore a ruin ----------------------------------------------
   promptExploreRuin(ruin: Settlement) {
     const id = GameWorld.settlementId(ruin);
+    // (Phase 6) A hero reacts to arriving at ruins. The 7th ruin (Tomas' quest)
+    // gets a special beat handled by the quest reward, so a plain ruins line here.
+    this.fireHeroDialogue('ruins');
     this.openChoiceModal(`Explore ${ruin.name}?`, 'An ancient ruin lies before you. Exploring takes ~1 day.', 'Explore', () => {
       const res = ExpeditionSystem.exploreRuin(id);
       if (res.ok) this.flashBanner(`Exploring ${ruin.name}… (~${res.etaDays} day)`, 0xc9a14a);
@@ -689,6 +736,8 @@ export class ContinentScene extends Phaser.Scene {
   // --- Modal: raid a goblin camp (launches BattleScene) -------------------
   promptRaidCamp(camp: Settlement) {
     const id = GameWorld.settlementId(camp);
+    // (Phase 6) Hero reaction to goblins; a fortress (Mira's hidden 7th) is graver.
+    this.fireHeroDialogue((camp as any).fortress ? 'goblin_fortress' : 'goblin');
     this.openChoiceModal(`Raid ${camp.name}?`, 'A goblin warband holds this camp. Defeat them to clear it and take their loot.', 'Attack', () => {
       this.startCampRaid(camp);
     });
@@ -1043,6 +1092,11 @@ export class ContinentScene extends Phaser.Scene {
       cg.setPosition(cp.x, cp.y); cg.setScale(sc);
       this.iconLayer.add(cg);
     }
+
+    // (Phase 6) Active hero-quest markers (gold stars) into the icon layer.
+    this.layoutQuestMarkers(sc);
+    // (Phase 6) Hero portrait overlays on the party icon + stationed settlements.
+    this.layoutHeroIcons();
   }
 
   // =========================================================================
@@ -1214,6 +1268,15 @@ export class ContinentScene extends Phaser.Scene {
     eb.on('pointerdown', () => { this._uiClick = true; });
     eb.on('pointerup', () => { this._uiClick = true; this.toggleExpeditionPanel(); });
     this.input.keyboard?.on('keydown-E', () => this.toggleExpeditionPanel());
+
+    // (Phase 6) Heroes panel toggle (roster + station/recall). H key + button.
+    const hb = fix(this.add.rectangle(GAME_W - 70, by + 68, 120, 26, 0x6b4a26).setStrokeStyle(2, 0xe9d6a4, 0.9).setInteractive({ useHandCursor: true }));
+    fix(this.add.text(GAME_W - 70, by + 68, 'Heroes (H)', { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#f5ecd2', fontStyle: 'bold' }).setOrigin(0.5));
+    hb.on('pointerover', () => hb.setFillStyle(0x82602f));
+    hb.on('pointerout', () => hb.setFillStyle(0x6b4a26));
+    hb.on('pointerdown', () => { this._uiClick = true; });
+    hb.on('pointerup', () => { this._uiClick = true; this.openHeroPanel(); });
+    this.input.keyboard?.on('keydown-H', () => this.openHeroPanel());
   }
 
   // =========================================================================
@@ -1675,6 +1738,10 @@ export class ContinentScene extends Phaser.Scene {
   startBattle(ai: AIParty) {
     if (this._inBattle) return;
     this._inBattle = true;
+    // (Phase 6) A hero reacts to entering battle; faction-territory beats fire too.
+    this.fireHeroDialogue('battle');
+    if (ai.factionKey === 'red') this.fireHeroDialogue('red_territory', { force: true });
+    else if (ai.factionKey === 'yellow') this.fireHeroDialogue('yellow_territory', { force: true });
     // Stop moving; remember where we are for the return drop.
     this.cancelPath();
     GameWorld.pendingBattle = {
@@ -1723,9 +1790,17 @@ export class ContinentScene extends Phaser.Scene {
       const i = GameWorld.aiParties.indexOf(ai);
       if (i >= 0) GameWorld.aiParties.splice(i, 1);
       this.flashBanner('Victory! The enemy host is broken.', 0x2a7a4f);
+      // (Phase 6) Grant hero XP to party heroes + fire a victory/first-victory line.
+      this.grantHeroBattleXP(true, (res.kills as number) || 0);
+      GameWorld.heroFlags.battlesWon = (GameWorld.heroFlags.battlesWon || 0) + 1;
+      this.fireHeroDialogue('victory');
+      // Defeating a faction leader is a story beat (one-shot per faction).
+      if (ai.factionKey === 'red') this.fireHeroDialogue('valdris_defeated', { force: true });
     } else {
       // Push the player back home-ward a little on defeat.
       this.flashBanner('Your army was defeated.', 0x8c2b2b);
+      this.grantHeroBattleXP(false, 0);
+      this.fireHeroDialogue('defeat');
       // Move the enemy party off so it doesn't instantly re-trigger.
       ai.col = Phaser.Math.Clamp(ai.col + 6, 1, this.world.size - 2);
       GameWorld.pickAIObjective(ai);
@@ -1735,6 +1810,194 @@ export class ContinentScene extends Phaser.Scene {
     const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
     this.cameras.main.centerOn(pp.x, pp.y);
   }
+
+  // =========================================================================
+  // (Phase 6) HEROES — dialogue popups, biome triggers, overlay icons, the
+  // station/recall panel, and quest markers.
+  // =========================================================================
+
+  // (Phase 6) Grant battle XP to every hero travelling with the party (heroes
+  // aren't army-assigned at the world level, so we use Heroes.grantXP directly,
+  // keeping their existing leveling curve + passive recompute intact).
+  grantHeroBattleXP(won: boolean, kills: number) {
+    const H = GameWorld.heroes;
+    for (const h of HeroWorld.partyHeroes()) {
+      H.grantXP(h, 10 + kills * 5);
+      if (won) h.battlesWon = (h.battlesWon || 0) + 1;
+    }
+    H.applyPassives();
+  }
+
+  // Fire a contextual hero line for a world event; render it if one returns.
+  fireHeroDialogue(event: string, ctx: any = {}) {
+    const line = HeroWorld.trigger(event, ctx);
+    if (line) this.showHeroSpeech(line);
+    return line;
+  }
+
+  // Detect biome crossings + season and fire the matching reaction.
+  checkBiomeDialogue() {
+    const b = this.world.tileBiome[GameWorld.player.row * this.world.size + GameWorld.player.col];
+    if (b === this._lastHeroBiome) {
+      // Still fire a winter remark when the season turns to Winter (once per season).
+      if (GameWorld.season() === 'Winter' && this._lastHeroSeason !== 'Winter') {
+        this._lastHeroSeason = 'Winter'; this.fireHeroDialogue('winter');
+      } else if (GameWorld.season() !== 'Winter') { this._lastHeroSeason = GameWorld.season(); }
+      return;
+    }
+    this._lastHeroBiome = b;
+    // forest (lush/alpine) → 'forest'; highland/peak → 'mountain'.
+    if (b === 7 || b === 9) this.fireHeroDialogue('forest');
+    else if (b === 8) this.fireHeroDialogue('mountain');
+  }
+
+  // A small hero-portrait speech popup (cheap, auto-dismiss). Stacks at the
+  // bottom-left so it never overlaps the minimap.
+  showHeroSpeech(line: { heroId: string; name: string; text: string; portrait: string }) {
+    if (this._closing) return;
+    // Tear down any previous popup so they never stack on screen.
+    if (this._heroSpeech) { try { this._heroSpeech.forEach((o: any) => o.destroy()); } catch (e) { /* ignore */ } this._heroSpeech = null; }
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 35);
+    const els: any[] = [];
+    const W = 360, H = 76, x = 14, y = GAME_H - H - 14;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x1a1410, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    // Portrait (texture if baked, else a coloured disc fallback).
+    if (this.textures.exists(line.portrait)) {
+      els.push(fix(this.add.image(x + 38, y + H / 2, line.portrait).setDisplaySize(56, 56)));
+    } else {
+      els.push(fix(this.add.circle(x + 38, y + H / 2, 26, 0x6b4a26).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    }
+    els.push(fix(this.add.text(x + 74, y + 10, line.name, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+    els.push(fix(this.add.text(x + 74, y + 30, line.text, { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#e6d8b8', fontStyle: 'italic', wordWrap: { width: W - 86 } }).setOrigin(0, 0)));
+    this._heroSpeech = els;
+    // Auto-dismiss after a few seconds.
+    this.time.delayedCall(4200, () => { if (this._heroSpeech === els) { els.forEach(o => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._heroSpeech = null; } });
+  }
+
+  // A two-line hero-hero conversation: show the first line, then the reply.
+  showHeroConversation(lines: Array<{ heroId: string; name: string; text: string; portrait: string }>) {
+    if (!lines || !lines.length) return;
+    this.showHeroSpeech(lines[0]);
+    if (lines[1]) this.time.delayedCall(2100, () => { if (!this._closing) this.showHeroSpeech(lines[1]); });
+  }
+
+  // Lay out hero portrait overlay icons on the player party icon (stack multiple),
+  // and stationed-hero portraits on their settlement icons. Called from layoutIcons.
+  layoutHeroIcons() {
+    if (!this.heroOverlay) return;
+    this.heroOverlay.removeAll(true);
+    const sc = 1 / this.zoom * 0.9 + 0.1;
+    // -- Party heroes: a row of small portrait discs above the party crown. --
+    const party = HeroWorld.partyHeroes();
+    const pp = this.tileToPx(GameWorld.player.col, GameWorld.player.row);
+    party.slice(0, 4).forEach((h: any, i: number) => {
+      const ox = (i - (Math.min(party.length, 4) - 1) / 2) * 16;
+      this.addHeroPortraitIcon(pp.x + ox * sc, pp.y - 30 * sc, h, sc * 0.9);
+    });
+    // -- Stationed heroes: a portrait on their settlement's continent icon. --
+    for (const s of this.world.settlements) {
+      const sid = GameWorld.settlementId(s);
+      const garrison = HeroWorld.heroesStationedAt(sid);
+      if (!garrison.length) continue;
+      if (!this.fogLifted(s.col, s.row) && s.kind !== 'player_castle') continue;
+      const spx = this.tileToPx(s.col, s.row);
+      garrison.slice(0, 3).forEach((h: any, i: number) => {
+        this.addHeroPortraitIcon(spx.x + (i * 13 - 6) * sc, spx.y - 22 * sc, h, sc * 0.8);
+      });
+    }
+  }
+
+  // Draw one hero portrait icon (texture-backed disc with a gold ring + initial).
+  addHeroPortraitIcon(x: number, y: number, h: any, scale: number) {
+    const key = 'hero_' + h.id;
+    if (this.textures.exists(key)) {
+      const img = this.add.image(x, y, key).setDisplaySize(22, 22).setScale(scale);
+      // Round-ish framing via a gold ring drawn behind.
+      const ring = this.add.graphics();
+      ring.fillStyle(0x1a120a, 0.6); ring.fillCircle(0, 0, 13);
+      ring.lineStyle(2, 0xffe08a, 0.95); ring.strokeCircle(0, 0, 12);
+      ring.setPosition(x, y).setScale(scale);
+      this.heroOverlay.add(ring);
+      this.heroOverlay.add(img);
+    } else {
+      const g = this.add.graphics();
+      g.fillStyle(0x6b4a26, 1); g.fillCircle(0, 0, 11);
+      g.lineStyle(2, 0xffe08a, 0.95); g.strokeCircle(0, 0, 11);
+      g.setPosition(x, y).setScale(scale);
+      this.heroOverlay.add(g);
+      const t = this.add.text(x, y, h.name.charAt(0), { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setScale(scale);
+      this.heroOverlay.add(t);
+    }
+  }
+
+  // Draw active hero-quest markers on the continent (gold star) into iconLayer.
+  layoutQuestMarkers(sc: number) {
+    for (const m of HeroWorld.activeQuestMarkers()) {
+      const qp = this.tileToPx(m.col, m.row);
+      const g = this.add.graphics();
+      g.fillStyle(0x1a120a, 0.5); g.fillEllipse(0, 9, 16, 5);
+      // five-point gold star
+      g.fillStyle(0xffe08a, 1);
+      const pts: number[] = [];
+      for (let i = 0; i < 10; i++) {
+        const ang = -Math.PI / 2 + i * Math.PI / 5;
+        const r = i % 2 === 0 ? 10 : 4;
+        pts.push(Math.cos(ang) * r, Math.sin(ang) * r - 2);
+      }
+      g.fillPoints(pts.reduce((acc: any[], v, idx) => { if (idx % 2 === 0) acc.push({ x: v, y: pts[idx + 1] }); return acc; }, []), true);
+      g.lineStyle(1.5, 0x6b4a16, 0.9);
+      g.strokePoints(pts.reduce((acc: any[], v, idx) => { if (idx % 2 === 0) acc.push({ x: v, y: pts[idx + 1] }); return acc; }, []), true, true);
+      g.setPosition(qp.x, qp.y); g.setScale(sc);
+      this.iconLayer.add(g);
+    }
+  }
+
+  // PUBLIC: open the hero roster / station panel (also a test hook). Lists living
+  // heroes with Station/Recall actions when the party is near a settlement.
+  openHeroPanel() {
+    if (this._heroPanel) { this.closeHeroPanel(); return; }
+    const fix = (o: any) => o.setScrollFactor(0).setDepth(HUD_DEPTH + 26);
+    const els: any[] = [];
+    const W = 380, H = 360, x = GAME_W / 2 - W / 2, y = 80;
+    els.push(fix(this.add.rectangle(x, y, W, H, 0x201608, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.9)));
+    els.push(fix(this.add.rectangle(x, y, W, 30, 0x3a2a10, 1).setOrigin(0, 0)));
+    els.push(fix(this.add.text(x + 12, y + 7, 'Heroes', { fontFamily: 'Georgia, serif', fontSize: '15px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+    const closeBtn = fix(this.add.text(x + W - 22, y + 6, '✕', { fontFamily: 'Georgia, serif', fontSize: '16px', color: '#e9d6a4' }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true }));
+    closeBtn.on('pointerdown', () => { this._uiClick = true; });
+    closeBtn.on('pointerup', () => { this._uiClick = true; this.closeHeroPanel(); });
+    els.push(closeBtn);
+
+    const near = this.settlementNearParty();
+    const nearId = near ? GameWorld.settlementId(near) : null;
+    const living = GameWorld.heroes.living();
+    let cy = y + 40;
+    if (!living.length) {
+      els.push(fix(this.add.text(x + 16, cy, 'No heroes have joined yet.\nThe first arrives around day 8.', { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#9aa0a6', wordWrap: { width: W - 32 } }).setOrigin(0, 0)));
+    }
+    for (const h of living) {
+      const stationedAt = GameWorld.heroStations[h.id];
+      els.push(fix(this.add.text(x + 16, cy, `${h.name} — Lv.${h.level} ${h.type}`, { fontFamily: 'Georgia, serif', fontSize: '13px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0, 0)));
+      const sub = stationedAt ? `Stationed at ${GameWorld.settlementById(stationedAt)?.name || 'a settlement'}` : 'Travelling with your host';
+      els.push(fix(this.add.text(x + 16, cy + 17, sub, { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#cfc1a6' }).setOrigin(0, 0)));
+      // Action button: Station here (if near a settlement, not already stationed) / Recall.
+      const label = stationedAt ? 'Recall' : (nearId ? `Station at ${near!.name}` : 'Move near a town');
+      const enabled = stationedAt ? true : !!nearId;
+      const bw = 150;
+      const btn = fix(this.add.rectangle(x + W - bw / 2 - 14, cy + 14, bw, 26, enabled ? (stationedAt ? 0x6b3a26 : 0x1f5b3a) : 0x39393f).setStrokeStyle(2, 0xf0e6c8, 0.8).setInteractive({ useHandCursor: enabled }));
+      els.push(btn, fix(this.add.text(x + W - bw / 2 - 14, cy + 14, label, { fontFamily: 'Georgia, serif', fontSize: '11px', color: enabled ? '#fff' : '#888', fontStyle: 'bold' }).setOrigin(0.5)));
+      btn.on('pointerdown', () => { this._uiClick = true; });
+      btn.on('pointerup', () => {
+        this._uiClick = true;
+        if (!enabled) return;
+        if (stationedAt) { HeroWorld.recall(h.id); this.flashBanner(`${h.name} rejoins your host.`, 0xc9a14a); }
+        else if (nearId) { HeroWorld.station(h.id, nearId); this.flashBanner(`${h.name} stationed at ${near!.name}.`, 0x2a7a4f); }
+        this.closeHeroPanel(); this.openHeroPanel(); // refresh
+      });
+      cy += 44;
+    }
+    this._heroPanel = els;
+  }
+  closeHeroPanel() { if (this._heroPanel) { this._heroPanel.forEach((o: any) => { try { o.destroy(); } catch (e) { /* ignore */ } }); this._heroPanel = null; } }
 
   // =========================================================================
   // Banner / tutorial / menu
@@ -1789,6 +2052,9 @@ export class ContinentScene extends Phaser.Scene {
     if (this._modal) { try { this._modal(); } catch (e) { /* ignore */ } }
     if (this._expoPanel) { try { this.closeExpeditionPanel(); } catch (e) { /* ignore */ } }
     if (this._settlementOverlay) { try { this._settlementOverlay(); } catch (e) { /* ignore */ } }
+    // (Phase 6) Tear down hero UI overlays so nothing dangles after a scene swap.
+    if (this._heroPanel) { try { this.closeHeroPanel(); } catch (e) { /* ignore */ } }
+    if (this._heroSpeech) { try { this._heroSpeech.forEach((o: any) => o.destroy()); } catch (e) { /* ignore */ } this._heroSpeech = null; }
   }
 
   // The minimap dots are refreshed in update via updateMinimap, but update() does

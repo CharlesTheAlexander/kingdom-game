@@ -28,6 +28,7 @@ import type { WorldState, Faction, Settlement } from './WorldGenerator.js';
 import type { SettlementState } from './SettlementState.js';
 import { makeSettlementState } from './SettlementState.js';
 import { Biome } from '../data/Biomes.js';
+import { Heroes } from './Heroes.js';
 
 /** Supply state, surfaced as a coloured dot in the HUD/minimap. */
 export type SupplyState = 'green' | 'yellow' | 'red';
@@ -216,6 +217,33 @@ class GameWorldState {
    *  the quick-travel menu. Keyed by a stable location id (see ExpeditionSystem). */
   discovered: Record<string, { kind: string; name: string; col: number; row: number; day: number }> = {};
 
+  // --- Phase 6 (Heroes as real characters in the world) -------------------
+  // The hero roster is RE-HOMED to the continent here (it was inert inside the
+  // now-per-settlement IsometricScene). `heroes` is a real Heroes instance whose
+  // "scene" is a small JSON-free adapter (heroHost) so the existing passives /
+  // levels / arrival conditions keep working at the WORLD level. ContinentScene
+  // ticks arrivals from onNewDay and drives dialogue/quests/stationing via
+  // HeroWorld. All NEW hero campaign state below is plain JSON for Phase 12.
+  heroes: Heroes = new Heroes(this.heroHost());
+
+  /** Per-hero campaign state keyed by hero id. `station` = settlement id the hero
+   *  is garrisoned at (null = travelling with the party). Serialization-friendly. */
+  heroStations: Record<string, string | null> = {};
+
+  /** Throttle/bookkeeping for the contextual dialogue system: last game-day a line
+   *  was shown (global cooldown), and a set of one-shot line keys already fired so
+   *  unique story beats don't repeat. Plain JSON. */
+  heroDialogue: { lastShownDay: number; firedOnce: Record<string, boolean> } = { lastShownDay: -99, firedOnce: {} };
+
+  /** Per-hero quest state: status + the target tile. status: 'inactive' (not yet
+   *  triggered) | 'active' (marker on map, travel to it) | 'done'. JSON-friendly. */
+  heroQuests: Record<string, { status: 'inactive' | 'active' | 'done'; col: number; row: number; title: string; targetName: string }> = {};
+
+  /** Phase-6 flags later phases consume (P8 win conditions, P7 diplomacy). Plain
+   *  booleans/strings so they serialize. e.g. fourthWinCondition, hidden 7th
+   *  fortress revealed, friendly-neutral villages, caravan/garrison allies. */
+  heroFlags: Record<string, any> = {};
+
   gold = 500;
 
   /** Continuous day counter (fractional during a day; floor() for display). */
@@ -239,6 +267,40 @@ class GameWorldState {
 
   /** Whether the active campaign has been initialised from a world. */
   started = false;
+
+  // --------------------------------------------------------------------------
+  // Phase 6 — Hero host adapter
+  // --------------------------------------------------------------------------
+  /** The `Heroes` class was written against a per-settlement IsometricScene and
+   *  calls a handful of scene methods (gameDay, logEvent, showToast, refreshPanel,
+   *  buildings/research/reputation/leaders for arrival conditions). At the WORLD
+   *  level we satisfy that contract with this tiny adapter so Heroes keeps working
+   *  unchanged. Arrivals are auto-accepted (no per-settlement worldEvents queue);
+   *  ContinentScene surfaces the join via a banner + dialogue. The notify hook
+   *  routes hero log lines into the shared pendingNotifications queue. */
+  private heroHost(): any {
+    const gw = this;
+    return {
+      get gameDay() { return gw.displayDay(); },
+      // Arrival conditions read these; at world level we map them to GameWorld so
+      // e.g. Caelan (merchant rep) / Tomas (library+research) still gate sensibly.
+      buildings: { countOfType: (_k: string) => 0 },
+      research: { completed: { size: 0 } },
+      reputation: { scores: {} as Record<string, number> },
+      leaders: { kragRespects: () => false },
+      logEvent: (text: string, _color?: string) => { gw.notify(text); },
+      showToast: (_t: string) => { /* surfaced by ContinentScene banner */ },
+      threatWarning: (_t: string) => { /* no-op at world level */ },
+      stats: { note: (_k: string) => {} },
+      population: { addTempMod: (_n: string, _v: number, _d: number) => {} },
+      refreshPanel: () => { /* ContinentScene re-lays icons every frame */ },
+      // worldEvents intentionally ABSENT → Heroes.offer() auto-joins via add().
+    };
+  }
+
+  /** Re-bind the hero roster to a fresh host (used on new campaign / restore so the
+   *  Heroes instance never points at stale state). */
+  rebindHeroes(): void { this.heroes.scene = this.heroHost(); }
 
   // --------------------------------------------------------------------------
   // Derived helpers
@@ -342,6 +404,12 @@ class GameWorldState {
     this.discovered = {};
     this.settlementStates = {};
     this.pendingNotifications = [];
+    // --- Phase 6 hero reset (roster re-homed to the continent) ---
+    this.heroes = new Heroes(this.heroHost());
+    this.heroStations = {};
+    this.heroDialogue = { lastShownDay: -99, firedOnce: {} };
+    this.heroQuests = {};
+    this.heroFlags = {};
     this.spawnAIParties();
     this.spawnMercenaryCamps();
     this.started = true;
@@ -433,7 +501,11 @@ class GameWorldState {
     const candidates = w.settlements.filter(s =>
       wantNeutral ? s.kind === 'neutral' : (s.kind === 'neutral' || s.kind === 'ai_castle'));
     if (candidates.length) {
-      const pick = candidates[(p.col + p.row + candidates.length) % candidates.length];
+      // NOTE: AI party col/row are FRACTIONAL while moving, so the raw index could
+      // be fractional → candidates[2.7] === undefined → a crash. Floor + abs the
+      // index so it is always a valid integer slot. (Phase 6 hardening.)
+      const idx = Math.abs(Math.floor(p.col + p.row + candidates.length)) % candidates.length;
+      const pick = candidates[idx];
       p.destCol = pick.col;
       p.destRow = pick.row;
       p.destLabel = (p.personality === 'merchant' ? 'trading with ' : 'marching on ') + pick.name;
@@ -466,6 +538,13 @@ class GameWorldState {
       discovered: this.discovered,
       // Per-settlement persisted states (Phase 3). Plain JSON; Phase 12 reloads.
       settlementStates: this.settlementStates,
+      // (Phase 6) Hero campaign layer — roster (XP/levels/passives via Heroes
+      // .serialize()) + stations + dialogue throttle + quests + flags. All JSON.
+      heroes: this.heroes.serialize(),
+      heroStations: this.heroStations,
+      heroDialogue: this.heroDialogue,
+      heroQuests: this.heroQuests,
+      heroFlags: this.heroFlags,
       started: this.started,
     };
   }

@@ -69,4 +69,9 @@ if (import.meta.env.DEV) {
   import('./systems/ExpeditionSystem.js').then((es) => {
     (window as any).__ExpeditionSystem = es.ExpeditionSystem;
   });
+  // (Phase 6) Expose the HeroWorld system so the headless audit can drive hero
+  // arrivals, dialogue triggers, interactions, stationing, and the six quests.
+  import('./systems/HeroWorld.js').then((hw) => {
+    (window as any).__HeroWorld = hw.HeroWorld;
+  });
 }
