@@ -24,6 +24,8 @@ export interface BuildingType {
   hp: number;
   desc?: string;
   maxWorkers?: number;
+  workerCost?: number;
+  interval?: number;
   produces?: keyof ResourceState | string;
   rate?: number;
   workerRates?: number[];

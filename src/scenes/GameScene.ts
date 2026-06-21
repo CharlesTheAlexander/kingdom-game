@@ -82,7 +82,7 @@ export const GAME_H = 900;
 
 // Barracks unit training. All three count toward the Soldiers number.
 // (Phase 3 rebalance) slower + more expensive, food now part of every cost.
-const TRAIN_DEFS = {
+const TRAIN_DEFS: Record<string, any> = {
   warrior: { label: 'Warrior', time: 30, cost: { gold: 30, food: 5 } },
   archer: { label: 'Archer', time: 40, cost: { gold: 40, food: 8 } },
   monk: { label: 'Monk', time: 50, cost: { gold: 50, food: 10, stone: 10 } },
@@ -93,6 +93,8 @@ const TRAIN_DEFS = {
 };
 
 export class GameScene extends Phaser.Scene {
+  [key: string]: any;
+
   constructor() {
     super('GameScene');
   }
@@ -975,7 +977,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  panelText(x, y, text, opts = {}) {
+  panelText(x: number, y: number, text: string, opts: any = {}) {
     const t = this.add.text(x, y, text, {
       fontFamily: 'monospace',
       fontSize: opts.size || '14px',
@@ -988,7 +990,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Clean drawn button (solid fill + border + crisp text) for legibility.
-  spriteButton(x, y, w, h, title, subtitle, enabled, onClick, opts = {}) {
+  spriteButton(x: number, y: number, w: number, h: number, title: string, subtitle: string, enabled: boolean, onClick: any, opts: any = {}) {
     let fill = 0x2d6cb0;
     let hover = 0x3d83cf;
     if (!enabled) {

@@ -103,7 +103,7 @@ const DAY_MS = 300000;   // one game day = 5 real minutes (scaled by game speed)
 
 // (Polish Phase 5) Compact a resource value so it never clips its HUD chip:
 // up to 9999 shown in full, 10k–99.9k as "12.3k", 100k+ as "123k".
-export function fmtNum(n) {
+export function fmtNum(n: number): string {
   n = Math.floor(n || 0);
   if (n >= 100000) return Math.round(n / 1000) + 'k';
   if (n >= 10000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
@@ -111,12 +111,14 @@ export function fmtNum(n) {
 }
 
 // (Polish) Clip an over-long name with an ellipsis so labels never overflow.
-export function ellipsize(s, max) {
+export function ellipsize(s: any, max: number): string {
   s = '' + (s || '');
   return s.length > max ? s.slice(0, Math.max(1, max - 1)) + '…' : s;
 }
 
 export class IsometricScene extends GameScene {
+  [key: string]: any;
+
   constructor() {
     // NOTE: GameScene's constructor hardcodes super('GameScene') and ignores its
     // argument, so super('IsometricScene') would NOT take — both scenes would end
@@ -489,7 +491,7 @@ export class IsometricScene extends GameScene {
     const ui = this.uiCamera;
     const list = this.children.list;
     for (let i = 0; i < list.length; i++) {
-      const obj = list[i];
+      const obj: any = list[i];
       if (obj._camRouted) continue;
       obj._camRouted = true;
       if (obj.scrollFactorX === 0) main.ignore(obj); // HUD -> uiCamera only
@@ -680,16 +682,16 @@ export class IsometricScene extends GameScene {
 
   aliasBuilding(newKey, srcKey) {
     if (this.textures.exists(newKey) || !this.textures.exists(srcKey)) return;
-    const src = this.textures.get(srcKey).getSourceImage();
-    const ct = this.textures.createCanvas(newKey, src.width, src.height);
+    const src: any = this.textures.get(srcKey).getSourceImage();
+    const ct = this.textures.createCanvas(newKey, src.width, src.height) as Phaser.Textures.CanvasTexture;
     ct.getContext().drawImage(src, 0, 0);
     ct.refresh();
   }
 
   sliceFrame(sheetKey, idx, newKey) {
     if (this.textures.exists(newKey)) return;
-    const src = this.textures.get(sheetKey).getSourceImage();
-    const ct = this.textures.createCanvas(newKey, 64, 64);
+    const src: any = this.textures.get(sheetKey).getSourceImage();
+    const ct = this.textures.createCanvas(newKey, 64, 64) as Phaser.Textures.CanvasTexture;
     ct.getContext().drawImage(src, idx * 64, 0, 64, 64, 0, 0, 64, 64);
     ct.refresh();
   }
@@ -846,7 +848,7 @@ export class IsometricScene extends GameScene {
     const ctx = tex.getContext();
     this.TERRAIN_KEYS.forEach((k, i) => {
       const x = (i % cols) * cell, y = Math.floor(i / cols) * cell;
-      ctx.drawImage(this.textures.get(k).getSourceImage(), 0, 0, 64, 64, x, y, cell, cell);
+      ctx.drawImage(this.textures.get(k).getSourceImage() as any, 0, 0, 64, 64, x, y, cell, cell);
       tex.add(k, 0, x, y, cell, cell); // frame named by the original tile key
     });
     tex.refresh();
@@ -1562,7 +1564,7 @@ export class IsometricScene extends GameScene {
     ]);
     // Reputation bars at the bottom
     if (this.reputation) {
-      const reps = [['Conqueror', 'conqueror', 0xc0392b], ['Merchant', 'merchant', 0xf1c40f], ['Protector', 'protector', 0x3498db], ['Destroyer', 'destroyer', 0x8e44ad]];
+      const reps: any[] = [['Conqueror', 'conqueror', 0xc0392b], ['Merchant', 'merchant', 0xf1c40f], ['Protector', 'protector', 0x3498db], ['Destroyer', 'destroyer', 0x8e44ad]];
       reps.forEach(([lbl, key, col], i) => {
         const rx = x + 24 + (i % 4) * 180, ry = y + H - 40;
         els.push(fix(this.add.text(rx, ry - 12, lbl, { fontFamily: 'monospace', fontSize: '10px', color: '#cfc1a6' })));
@@ -1718,7 +1720,7 @@ export class IsometricScene extends GameScene {
     els.push(fix(this.add.text(GAME_W / 2, py + 22, 'KINGDOM GAME', { fontFamily: 'monospace', fontSize: '26px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0).setDepth(102)));
     this._menuEls = els;
 
-    const btn = (label, x, y, w, h, onClick, color) => {
+    const btn = (label: any, x: number, y: number, w: number, h: number, onClick: any, color?: number) => {
       const b = fix(this.add.rectangle(x, y, w, h, color || 0x2d6cb0).setOrigin(0, 0).setDepth(102).setStrokeStyle(2, 0xf0e6c8, 0.85).setInteractive({ useHandCursor: true }));
       const t = fix(this.add.text(x + w / 2, y + h / 2, label, { fontFamily: 'monospace', fontSize: '15px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(103));
       b.on('pointerover', () => b.setFillStyle((color || 0x2d6cb0) + 0x111111));
@@ -1727,7 +1729,7 @@ export class IsometricScene extends GameScene {
       els.push(b, t);
       return b;
     };
-    const text = (s, x, y, opts = {}) => { const t = fix(this.add.text(x, y, s, { fontFamily: 'monospace', fontSize: opts.size || '13px', color: opts.color || '#dfe6ee', fontStyle: opts.bold ? 'bold' : 'normal', wordWrap: opts.wrap ? { width: opts.wrap } : undefined }).setOrigin(opts.ox || 0, 0).setDepth(102)); els.push(t); return t; };
+    const text = (s: any, x: number, y: number, opts: any = {}) => { const t = fix(this.add.text(x, y, s, { fontFamily: 'monospace', fontSize: opts.size || '13px', color: opts.color || '#dfe6ee', fontStyle: opts.bold ? 'bold' : 'normal', wordWrap: opts.wrap ? { width: opts.wrap } : undefined }).setOrigin(opts.ox || 0, 0).setDepth(102)); els.push(t); return t; };
 
     if (screen === 'main') {
       const bx = px + 180, bw = 200; let y = py + 80;
@@ -2053,7 +2055,7 @@ export class IsometricScene extends GameScene {
 
   // Visual-only iso diamond perimeter around the build zone, styled per stage
   // (fence → wood → stone), with an optional moat and corner towers.
-  drawWall(type, moat, towers) {
+  drawWall(type: any, moat?: any, towers?: any) {
     if (this.wallGfx) this.wallGfx.destroy();
     const g = this.add.graphics().setDepth(28);
     const z = this.BZ;
@@ -2286,7 +2288,7 @@ export class IsometricScene extends GameScene {
     this.chips = {};
 
     // A chip = bg rect + icon (image or drawn shape) + value + label.
-    const chip = (key, x, y, w, labelTxt, imgKey, draw) => {
+    const chip = (key: any, x: number, y: number, w: number, labelTxt: string, imgKey: any, draw?: any) => {
       const bg = fix(this.add.rectangle(x, y, w, 25, 0x1c2330, 0.92).setOrigin(0, 0).setDepth(40).setStrokeStyle(1, 0x39455a, 0.9));
       const cx = x + 12, cy = y + 12;
       if (imgKey) fix(this.add.image(cx, cy, imgKey).setDisplaySize(18, 18).setDepth(42));
@@ -2419,7 +2421,7 @@ export class IsometricScene extends GameScene {
       this.artifactPopup('All Artifacts Found', '+25 Iron instead');
       return;
     }
-    const a = Phaser.Utils.Array.GetRandom(pool);
+    const a: any = Phaser.Utils.Array.GetRandom(pool);
     this.artifacts.push(a.key);
     a.apply(this);
     this.artifactPopup('Artifact Found: ' + a.name, a.desc);
@@ -2714,7 +2716,7 @@ export class IsometricScene extends GameScene {
     this.panel.add(this.add.rectangle(8, this.PANEL_Y + 8, GAME_W - 16, PANEL_H - 16, 0x241a0e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc9a14a, 0.7).setScrollFactor(0));
     this.panelText(20, this.PANEL_Y + 12, `Market  ·  ${b.workers > 0 ? 'open' : 'needs a worker'}`, { bold: true, color: '#ffe9b0', size: '16px' });
     this.workerControls(b, 20, this.PANEL_Y + 36);
-    const trades = [
+    const trades: any[] = [
       ['20 Wood → 10 Gold', { wood: 20 }, { gold: 10 }],
       ['20 Stone → 10 Gold', { stone: 20 }, { gold: 10 }],
       ['10 Gold → 15 Wood', { gold: 10 }, { wood: 15 }],
@@ -2728,7 +2730,7 @@ export class IsometricScene extends GameScene {
       // (Phase 4) Merchant trait + reputation improve what you receive.
       const mult = (this.traitBonuses ? this.traitBonuses.marketMult : 1) + (this.reputation ? this.reputation.marketBonus() : 0) + ((this._researchMarketMult || 1) - 1);
       this.spriteButton(x, this.PANEL_Y + 30, 132, 40, label.split(' → ')[0] + '→', label.split(' → ')[1], can, () => {
-        this.resources.spend(give); for (const [r, v] of Object.entries(get)) this.resources.add(r, Math.round(v * mult)); if (this.reputation) this.reputation.add('merchant', 3); if (this.stats) this.stats.note('marketTrades'); this.refreshPanel();
+        this.resources.spend(give); for (const [r, v] of Object.entries(get) as [string, number][]) this.resources.add(r, Math.round(v * mult)); if (this.reputation) this.reputation.add('merchant', 3); if (this.stats) this.stats.note('marketTrades'); this.refreshPanel();
       });
       x += 136;
     }
@@ -3236,7 +3238,7 @@ export class IsometricScene extends GameScene {
       this.panel.add(this.add.text(tx + 8, ty + 2, `${this._repExpanded ? '▾' : '▸'} Your Reputation`, { fontFamily: 'monospace', fontSize: '11px', color: '#ffe9b0', fontStyle: 'bold' }).setScrollFactor(0));
       tog.on('pointerdown', (p, lx, ly, ev) => { ev.stopPropagation(); this._repExpanded = !this._repExpanded; this.refreshPanel(); });
       if (this._repExpanded) {
-        const reps = [['Conqueror', 'conqueror', 0xc0392b], ['Merchant', 'merchant', 0xf1c40f], ['Protector', 'protector', 0x3498db], ['Destroyer', 'destroyer', 0x8e44ad]];
+        const reps: any[] = [['Conqueror', 'conqueror', 0xc0392b], ['Merchant', 'merchant', 0xf1c40f], ['Protector', 'protector', 0x3498db], ['Destroyer', 'destroyer', 0x8e44ad]];
         const bw = 308, bh = 86, bx = GAME_W - bw - 12, by = this.PANEL_Y - bh - 8;
         this.panel.add(this.add.rectangle(bx, by, bw, bh, 0x12101a, 0.98).setOrigin(0, 0).setScrollFactor(0).setStrokeStyle(2, 0xc9a14a, 0.9));
         this.panel.add(this.add.text(bx + 10, by + 6, 'YOUR REPUTATION', { fontFamily: 'monospace', fontSize: '12px', color: '#ffe9b0', fontStyle: 'bold' }).setScrollFactor(0));
@@ -3343,7 +3345,7 @@ export class IsometricScene extends GameScene {
   }
 
   // Spread units around the target; carry the target castle for attack orders.
-  commandUnits(tx, ty, attackAI, castle) {
+  commandUnits(tx: any, ty: any, attackAI?: any, castle?: any) {
     const n = this.selectedUnits.length;
     if (n > 0) sfx.play('unit_command'); // (Polish Phase 2)
     this.selectedUnits.forEach((u, i) => {
@@ -3450,11 +3452,11 @@ export class IsometricScene extends GameScene {
 
   createWeather() {
     if (!this.textures.exists('wx_snow')) {
-      const g = this.make.graphics({ x: 0, y: 0, add: false });
+      const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
       g.fillStyle(0xffffff, 1); g.fillCircle(4, 4, 3); g.generateTexture('wx_snow', 8, 8); g.destroy();
     }
     if (!this.textures.exists('wx_rain')) {
-      const g = this.make.graphics({ x: 0, y: 0, add: false });
+      const g = this.make.graphics({ x: 0, y: 0, add: false } as any);
       g.fillStyle(0xbfd4ec, 1); g.fillRect(0, 0, 2, 10); g.generateTexture('wx_rain', 2, 10); g.destroy();
     }
     // Screen-fixed emitters above the world but below the HUD; both start idle.
