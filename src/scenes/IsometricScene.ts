@@ -54,6 +54,7 @@
 import Phaser from 'phaser';
 import { GameScene, GAME_W, GAME_H } from './GameScene.js';
 import { Resources } from '../systems/Resources.js';
+import * as AssetGenerator from '../systems/AssetGenerator.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -142,17 +143,9 @@ export class IsometricScene extends GameScene {
     const FX = `${TS}/Particle FX`;
 
     // --- Isometric terrain tiles (64x64) ---
-    this.load.image('iso_grass', `${IND}/img_6.png`);       // clean grass (base)
-    this.load.image('iso_grass2', `${IND}/img_7.png`);      // clean grass (variant)
-    this.load.image('iso_water', `${IND}/img_71.png`);
-    this.load.image('iso_water2', `${IND}/img_82.png`);
-    this.load.image('iso_water3', `${IND}/img_85.png`);
-    this.load.image('iso_rock', `${IND}/img_4.png`);   // boulder pile
-    this.load.image('iso_mtn', `${IND}/img_5.png`);    // mountain
-    // Forest tiles already have pine trees baked into the tile art.
-    [174, 177, 180, 183, 186, 189, 192, 195].forEach((n, i) =>
-      this.load.image(`iso_forest${i + 1}`, `${IND}/img_${n}.png`)
-    );
+    // (Assets Phase 1) Terrain is now generated procedurally in create() via
+    // AssetGenerator.generateTerrain() into the iso_* keys below — no art-pack
+    // images are loaded for terrain anymore.
 
     // --- Player buildings: texture key == building key (Buildings.js) ---
     // Distinct individual iso tiles for the smaller buildings:
@@ -362,6 +355,7 @@ export class IsometricScene extends GameScene {
 
     this.sliceBuildingTextures();
     this.createAnimations();
+    AssetGenerator.generateTerrain(this); // (Assets Phase 1) procedural terrain into iso_* keys
     this.drawGrid();
     this.scatterDecorations();
     this.nodes.spawnInitial();
@@ -839,7 +833,7 @@ export class IsometricScene extends GameScene {
   // whole 40,000-tile floor can be drawn by ONE Blitter (one batched draw call,
   // per-tile tint for fog/territory) instead of 40,000 separate images.
   buildTerrainAtlas() {
-    this.TERRAIN_KEYS = ['iso_grass', 'iso_grass2', 'iso_water', 'iso_water2', 'iso_water3', 'iso_rock', 'iso_mtn',
+    this.TERRAIN_KEYS = ['iso_grass', 'iso_grass2', 'iso_grass3', 'iso_water', 'iso_water2', 'iso_water3', 'iso_rock', 'iso_mtn',
       'iso_forest1', 'iso_forest2', 'iso_forest3', 'iso_forest4', 'iso_forest5', 'iso_forest6', 'iso_forest7', 'iso_forest8'];
     if (this.textures.exists('terrainAtlas')) return;
     const cols = 8, cell = 64;
@@ -911,7 +905,7 @@ export class IsometricScene extends GameScene {
         if (t === 'water') key = Phaser.Utils.Array.GetRandom(waterKeys);
         else if (t === 'forest') key = Phaser.Utils.Array.GetRandom(forestKeys);
         else if (t === 'rock') key = (this.biomeGrid[r][c] === 'mountains' || Math.random() < 0.5) ? 'iso_mtn' : 'iso_rock';
-        else key = Math.random() < 0.16 ? 'iso_grass2' : 'iso_grass';
+        else { const roll = Math.random(); key = roll < 0.12 ? 'iso_grass2' : roll < 0.18 ? 'iso_grass3' : 'iso_grass'; } // (Assets P1) occasional darker + flowered grass
         this.terrainTiles[r][c] = blitter.create(tl.x, tl.y, key);
       }
     }
