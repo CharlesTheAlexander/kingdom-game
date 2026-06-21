@@ -57,6 +57,8 @@ export class Population {
     if (s._taxHappiness) mods.push({ label: 'Taxes', value: s._taxHappiness });
     // (Completion Phase 4) Grand Hall — a permanent civic happiness boost.
     if (s.greatCouncil && s.greatCouncil.hasGrandHall && s.greatCouncil.hasGrandHall()) mods.push({ label: 'Grand Hall', value: 20 });
+    // (V2 Phase 13) Population-class satisfaction/unrest.
+    if (s.popClasses && s.popClasses.happinessMods) for (const m of s.popClasses.happinessMods()) mods.push(m);
     // (Session-1) Timed event modifiers — keep only the unexpired ones.
     this.tempMods = this.tempMods.filter((m) => m.untilDay > day);
     for (const m of this.tempMods) mods.push({ label: m.label, value: m.value });

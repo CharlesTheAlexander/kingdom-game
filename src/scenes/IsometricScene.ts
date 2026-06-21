@@ -66,6 +66,7 @@ import { Succession } from '../systems/Succession.js';
 import { Espionage, MISSIONS } from '../systems/Espionage.js';
 import { Narrative } from '../systems/Narrative.js';
 import { Weather } from '../systems/Weather.js';
+import { PopulationClasses } from '../systems/PopulationClasses.js';
 import { BuildingManager } from '../systems/Buildings.js';
 import { WaveManager } from '../systems/Waves.js';
 import { PawnManager } from '../systems/Pawns.js';
@@ -303,6 +304,7 @@ export class IsometricScene extends GameScene {
     this.espionage = new Espionage(this); // (V2 Phase 9) spy network
     this.narrative = new Narrative(this); // (V2 Phase 11) story arc + 4th win path
     this.weatherSys = new Weather(this); // (V2 Phase 12) weather gameplay effects
+    this.popClasses = new PopulationClasses(this); // (V2 Phase 13) social classes
     this.banking = new Banking(this); // (Completion Phase 3) Treasury reserves + loans
     this.greatCouncil = new GreatCouncil(this); // (Completion Phase 4) diplomatic endgame
     this.roads = new Roads(this); // (Completion Phase 5) player-built roads
@@ -1492,7 +1494,7 @@ export class IsometricScene extends GameScene {
     const faceG = fix(this.add.graphics().setDepth(61));
     const hapT = fix(this.add.text(x + w - 10, y + 6, '60%', { fontFamily: 'monospace', fontSize: '12px', color: '#dfe6ee', fontStyle: 'bold' }).setOrigin(1, 0).setDepth(61));
     this._popHud = { bg, popT, faceG, hapT, x, y, w, h };
-    bg.on('pointerover', () => this.showTip(x + w / 2, y + h + 96, `Happiness ${this.population.happiness}%`, this.population.breakdown()));
+    bg.on('pointerover', () => this.showTip(x + w / 2, y + h + 96, `Happiness ${this.population.happiness}%`, this.population.breakdown() + (this.popClasses ? '\n\nClasses: ' + this.popClasses.summary() : ''))); // (V2 P13)
     bg.on('pointerout', () => this.hideTip());
     this.updatePopulationHud();
   }
@@ -3971,6 +3973,7 @@ export class IsometricScene extends GameScene {
     if (this.espionage) this.espionage.onNewDay(); // (V2 Phase 9) spy training
     if (this.wildlife && this.wildlife.onNewDay) this.wildlife.onNewDay(); // (V2 Phase 10) ecosystem + goblin camp growth
     if (this.narrative) this.narrative.onNewDay(); // (V2 Phase 11) story beats + Truth path
+    if (this.popClasses) this.popClasses.onNewDay(); // (V2 Phase 13) class economic bonuses
     // (Completion Phase 7) Advance Siege Workshop training.
     for (const b of this.buildings.buildings) { if (b.typeKey === 'siegeworkshop' && b._siegeDays > 0) { b._siegeDays -= 1; if (b._siegeDays <= 0) this.troops.spawnSiege(b); } }
     if (this.winConditions) this.winConditions.onNewDay(); // (Audit FIX 2) check victory paths
