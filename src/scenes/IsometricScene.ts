@@ -358,6 +358,7 @@ export class IsometricScene extends GameScene {
     this.sliceBuildingTextures();
     AssetGenerator.generateUnits(this); // (Assets Phase 4) procedural player-unit spritesheets (override pack keys)
     AssetGenerator.generateEnemyUnits(this); // (Assets Phase 5) enemy faction + wildlife sprites
+    AssetGenerator.generateWorldObjects(this); // (Assets Phase 6) trees, rocks, gold, sheep
     this.createAnimations();
     AssetGenerator.generateTerrain(this); // (Assets Phase 1) procedural terrain into iso_* keys
     this.drawGrid();

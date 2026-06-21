@@ -475,6 +475,69 @@ export function generateEnemyUnits(scene: any) {
   spriteSheet(scene, 'boar_idle', 6, (ctx, t) => beastFig(ctx, t, 'boar'));
 }
 
+// ---- world-object helpers --------------------------------------------------
+// Object spritesheet with custom frame size + numeric frames.
+function objSheet(scene: any, key: string, frames: number, fw: number, fh: number, draw: (ctx: any, t: number, i: number) => void) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const tex = scene.textures.createCanvas(key, frames * fw, fh);
+  const ctx = tex.getContext();
+  for (let i = 0; i < frames; i++) { ctx.save(); ctx.translate(i * fw, 0); draw(ctx, frames > 1 ? i / (frames - 1) : 0, i); ctx.restore(); tex.add(i, 0, i * fw, 0, fw, fh); }
+  tex.refresh();
+}
+// Reskin a single-image texture key, keeping its native pixel size so the
+// existing node scale/oy values still position it correctly.
+function reskinImage(scene: any, key: string, fallbackW: number, fallbackH: number, draw: (ctx: any, w: number, h: number) => void) {
+  let w = fallbackW, h = fallbackH;
+  if (scene.textures.exists(key)) { const src: any = scene.textures.get(key).getSourceImage(); if (src && src.width) { w = src.width; h = src.height; } scene.textures.remove(key); }
+  const tex = scene.textures.createCanvas(key, w, h);
+  draw(tex.getContext(), w, h);
+  tex.refresh();
+}
+
+// ---- PHASE 6: world objects ------------------------------------------------
+export function generateWorldObjects(scene: any) {
+  // Oak (tree1) — round canopy. 128x256 frame, trunk base at bottom-centre.
+  objSheet(scene, 'tree1', 1, 128, 256, (ctx) => {
+    fillRect2(ctx, 56, 150, 16, 102, 0x5c3a1e); fillRect2(ctx, 52, 232, 24, 20, 0x4a2e16); // trunk
+    for (const [x, y, r, c] of [[64, 110, 46, 0x1f5a22], [40, 130, 34, 0x1a4a1c], [88, 130, 34, 0x1a4a1c], [64, 80, 36, 0x256a28]] as any[]) disc(ctx, x, y, r, c);
+    disc(ctx, 50, 92, 16, 0x2f7a30); // highlight
+  });
+  // Pine (tree2) — three triangle layers. 128x256.
+  objSheet(scene, 'tree2', 1, 128, 256, (ctx) => {
+    fillRect2(ctx, 58, 180, 12, 72, 0x5c3a1e);
+    const tri = (cy: number, w: number, c: number) => { ctx.fillStyle = css(c); ctx.beginPath(); ctx.moveTo(64, cy - 60); ctx.lineTo(64 + w, cy); ctx.lineTo(64 - w, cy); ctx.closePath(); ctx.fill(); };
+    tri(190, 50, 0x18441a); tri(140, 44, 0x1d5020); tri(96, 36, 0x236526);
+  });
+  // Sheep (food node) — 128x128, 6 frames with a gentle graze bob.
+  objSheet(scene, 'sheep_idle', 6, 128, 128, (ctx, t) => {
+    const b = Math.sin(t * Math.PI * 2) * 2;
+    fillRect2(ctx, 50, 96 + b, 6, 16, 0x2a2a2a); fillRect2(ctx, 74, 96 + b, 6, 16, 0x2a2a2a); // legs
+    for (const [x, y] of [[64, 78], [48, 82], [80, 82], [56, 70], [72, 70]] as any[]) disc(ctx, x, y + b, 16, 0xf0eee6); // fluffy body
+    disc(ctx, 88, 84 + b, 9, 0x2a2a2a); // head
+  });
+  // Gold deposit (gold node).
+  reskinImage(scene, 'gold_stone', 96, 96, (ctx, w, h) => {
+    const cx = w / 2, by = h * 0.82;
+    ctx.fillStyle = css(0x6f6f68); ctx.beginPath(); ctx.ellipse(cx, by, w * 0.4, h * 0.26, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = css(0xe8c84a); ctx.lineWidth = Math.max(2, w * 0.04);
+    ctx.beginPath(); ctx.moveTo(cx - w * 0.25, by); ctx.lineTo(cx - w * 0.05, by - h * 0.12); ctx.moveTo(cx + w * 0.05, by - h * 0.05); ctx.lineTo(cx + w * 0.22, by - h * 0.16); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.fillRect(cx - w * 0.18, by - h * 0.12, 3, 3); // glint
+  });
+  // Stone rocks (rock1-4) — gray boulders with a light face + crack.
+  for (const k of ['rock1', 'rock2', 'rock3', 'rock4']) reskinImage(scene, k, 64, 56, (ctx, w, h) => {
+    const cx = w / 2, by = h * 0.82;
+    ctx.fillStyle = css(0x7d7d74); ctx.beginPath(); ctx.moveTo(cx - w * 0.4, by); ctx.lineTo(cx - w * 0.22, by - h * 0.42); ctx.lineTo(cx + w * 0.12, by - h * 0.5); ctx.lineTo(cx + w * 0.4, by - h * 0.18); ctx.lineTo(cx + w * 0.34, by); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = css(0x95958c); ctx.beginPath(); ctx.moveTo(cx - w * 0.22, by - h * 0.42); ctx.lineTo(cx + w * 0.12, by - h * 0.5); ctx.lineTo(cx - w * 0.02, by - h * 0.28); ctx.closePath(); ctx.fill(); // light face
+    ctx.strokeStyle = css(0x55554f); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx, by - h * 0.4); ctx.lineTo(cx + w * 0.06, by - h * 0.16); ctx.stroke();
+  });
+  // Iron deposit (Phase 6 of the completion plan uses this) — rust-veined rock.
+  reskinImage(scene, 'iron_node', 80, 72, (ctx, w, h) => {
+    const cx = w / 2, by = h * 0.82;
+    ctx.fillStyle = css(0x55555c); ctx.beginPath(); ctx.ellipse(cx, by - h * 0.18, w * 0.4, h * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = css(0xb5651d); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx - w * 0.22, by - h * 0.1); ctx.lineTo(cx + w * 0.05, by - h * 0.3); ctx.moveTo(cx - w * 0.02, by - h * 0.08); ctx.lineTo(cx + w * 0.2, by - h * 0.26); ctx.stroke();
+  });
+}
+
 // Master entry — phases are added here as they are built.
 export function generateAll(scene: any) {
   generateTerrain(scene);
@@ -482,4 +545,5 @@ export function generateAll(scene: any) {
   generateAIBuildings(scene);
   generateUnits(scene);
   generateEnemyUnits(scene);
+  generateWorldObjects(scene);
 }
