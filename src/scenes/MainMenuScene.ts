@@ -15,6 +15,15 @@ export class MainMenuScene extends Phaser.Scene {
   constructor() { super('MainMenuScene'); }
 
   create() {
+    // INPUT (audit fix): drive all menu interaction through SCENE-LEVEL pointer
+    // events + manual bounds tests, not Phaser per-object `setInteractive`. The
+    // menu's interactive targets were getting stuck in Phaser's input
+    // `_pendingInsertion` queue (never flushed into the live hit-test list), so
+    // every click silently missed (the infamous "click twice to start"). Scene-
+    // level pointerdown/up/move fire reliably, so the registry below is
+    // deterministic. See registerClick()/hitClick()/wireMenuInput().
+    this.wireMenuInput();
+
     // (Polish Phase 10) Atmospheric dusk sky gradient — deep navy up top warming to
     // a faint amber haze near the horizon, so the drifting world reads against a sky.
     this.add.rectangle(0, 0, GAME_W, GAME_H, 0x0b0f17, 1).setOrigin(0, 0);
@@ -141,6 +150,51 @@ export class MainMenuScene extends Phaser.Scene {
   // (Polish Phase 10) Medieval "carved tablet" menu button: a layered stone slab
   // with a gold rim, hover glow, and a pressed (inset) state. Handlers/flow are
   // unchanged — `fn` is still called on pointerdown exactly as before.
+  // ---- scene-level click registry (see note in create) --------------------
+  // Each region is centre-based {cx,cy,w,h}. `modal:true` regions (e.g. a panel
+  // backdrop) block everything registered before them, so menu buttons under an
+  // open panel can't be clicked through it. `tag` lets a panel bulk-remove its
+  // own regions on close.
+  wireMenuInput() {
+    this._clicks = [];
+    this._hoverRegion = null;
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      const r = this.hitClick(p.x, p.y);
+      if (r !== this._hoverRegion) {
+        if (this._hoverRegion && this._hoverRegion.onOut) this._hoverRegion.onOut();
+        this._hoverRegion = r;
+        if (r && r.onOver) r.onOver();
+        try { this.input.manager.canvas.style.cursor = (r && r.onClick) ? 'pointer' : 'default'; } catch (e) {}
+      }
+    });
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      const r = this.hitClick(p.x, p.y);
+      if (r && r.onClick) r.onClick();
+    });
+  }
+  registerClick(cx: number, cy: number, w: number, h: number, onClick: (() => void) | null,
+                opts: { onOver?: () => void; onOut?: () => void; modal?: boolean; tag?: string } = {}) {
+    const region: any = { cx, cy, w, h, onClick, onOver: opts.onOver, onOut: opts.onOut, modal: !!opts.modal, tag: opts.tag || null };
+    this._clicks.push(region);
+    return region;
+  }
+  clearClicks(tag: string) {
+    if (this._hoverRegion && this._hoverRegion.tag === tag) this._hoverRegion = null;
+    this._clicks = this._clicks.filter((r: any) => r.tag !== tag);
+  }
+  // Topmost region under (px,py). Regions below an active modal are blocked; a
+  // modal with nothing above it swallows the click (returns itself, no-op).
+  hitClick(px: number, py: number) {
+    let modalIdx = -1;
+    for (let i = 0; i < this._clicks.length; i++) if (this._clicks[i].modal) modalIdx = i;
+    for (let i = this._clicks.length - 1; i >= 0; i--) {
+      if (i < modalIdx) break;
+      const r = this._clicks[i];
+      if (px >= r.cx - r.w / 2 && px <= r.cx + r.w / 2 && py >= r.cy - r.h / 2 && py <= r.cy + r.h / 2) return r;
+    }
+    return modalIdx >= 0 ? this._clicks[modalIdx] : null;
+  }
+
   menuButton(cx: number, cy: number, w: number, h: number, label: string, fn: () => void, enabled: boolean) {
     const c = this.add.container(cx, cy).setDepth(11);
     // Drop shadow, dark stone base, lighter top bevel, inner inset, gold rim.
@@ -154,14 +208,15 @@ export class MainMenuScene extends Phaser.Scene {
     const glow = this.add.rectangle(0, 0, w + 6, h + 6, 0xffd27a, 0.0).setStrokeStyle(3, 0xffd27a, 0.0).setBlendMode(Phaser.BlendModes.ADD);
     c.add([shadow, base, bevel, inset, glow, t]);
     if (!enabled) return c;
-    base.setInteractive(new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true } as any);
-    base.on('pointerover', () => { this.tweens.add({ targets: c, scaleX: 1.04, scaleY: 1.04, duration: 120 }); glow.setStrokeStyle(3, 0xffd27a, 0.9); base.setFillStyle(0x3a2c18, 1); try { sfx.unlock(); sfx.play('building_select'); } catch (e) {} });
-    base.on('pointerout', () => { this.tweens.add({ targets: c, scaleX: 1, scaleY: 1, duration: 120 }); glow.setStrokeStyle(3, 0xffd27a, 0.0); base.setFillStyle(0x2a2114, 1); c.y = cy; });
-    base.on('pointerup', () => { c.y = cy; inset.setFillStyle(0x1f1810, 0.9); });
-    base.on('pointerdown', () => {
-      c.y = cy + 2; inset.setFillStyle(0x140f08, 1); // pressed: inset darkens, tablet sinks
+    // Route through the scene-level click registry (see wireMenuInput).
+    this.registerClick(cx, cy, w, h, () => {
+      c.y = cy + 2; inset.setFillStyle(0x140f08, 1);            // pressed: sink + darken
       try { sfx.unlock(); sfx.play('ui_click'); } catch (e) {}
+      this.time.delayedCall(90, () => { c.y = cy; inset.setFillStyle(0x1f1810, 0.9); });
       fn();
+    }, {
+      onOver: () => { this.tweens.add({ targets: c, scaleX: 1.04, scaleY: 1.04, duration: 120 }); glow.setStrokeStyle(3, 0xffd27a, 0.9); base.setFillStyle(0x3a2c18, 1); try { sfx.unlock(); sfx.play('building_select'); } catch (e) {} },
+      onOut: () => { this.tweens.add({ targets: c, scaleX: 1, scaleY: 1, duration: 120 }); glow.setStrokeStyle(3, 0xffd27a, 0.0); base.setFillStyle(0x2a2114, 1); c.y = cy; },
     });
     return c;
   }
@@ -248,16 +303,18 @@ export class MainMenuScene extends Phaser.Scene {
   }
 
   // ---- load / settings / credits sub-panels -------------------------------
-  closePanel() { if (this.panel) { this.panel.forEach((o: any) => o.destroy()); this.panel = null; } }
+  closePanel() { if (this.panel) { this.panel.forEach((o: any) => o.destroy()); this.panel = null; } this.clearClicks('panel'); }
   panelBase(title: string) {
     this.closePanel();
     const W = 480, H = 320, x = (GAME_W - W) / 2, yy = (GAME_H - H) / 2, els: any[] = [];
-    els.push(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.6).setOrigin(0, 0).setDepth(20).setInteractive());
+    els.push(this.add.rectangle(0, 0, GAME_W, GAME_H, 0x05070b, 0.6).setOrigin(0, 0).setDepth(20));
     els.push(this.add.rectangle(x, yy, W, H, 0x161b26, 0.99).setOrigin(0, 0).setDepth(21).setStrokeStyle(3, 0xc9a14a, 0.9));
     els.push(this.add.text(GAME_W / 2, yy + 18, title, { fontFamily: 'monospace', fontSize: '22px', color: '#ffe9b0', fontStyle: 'bold' }).setOrigin(0.5, 0).setDepth(22));
-    const close = this.add.text(x + W - 16, yy + 14, '✕', { fontFamily: 'monospace', fontSize: '18px', color: '#cbb787' }).setOrigin(1, 0).setDepth(22).setInteractive({ useHandCursor: true });
-    close.on('pointerdown', () => this.closePanel());
+    const close = this.add.text(x + W - 16, yy + 14, '✕', { fontFamily: 'monospace', fontSize: '18px', color: '#cbb787' }).setOrigin(1, 0).setDepth(22);
     els.push(close);
+    // Modal backdrop swallows clicks to the menu beneath; ✕ closes the panel.
+    this.registerClick(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, null, { modal: true, tag: 'panel' });
+    this.registerClick(x + W - 22, yy + 22, 36, 36, () => this.closePanel(), { tag: 'panel' });
     this.panel = els;
     return { x, y: yy, W, H, els };
   }
@@ -273,15 +330,15 @@ export class MainMenuScene extends Phaser.Scene {
       els.push(this.add.text(x + 40, sy + 12, `Slot ${i}${i === 0 ? ' (auto)' : ''}`, { fontFamily: 'monospace', fontSize: '14px', color: '#f0e6d0', fontStyle: 'bold' }).setDepth(23));
       els.push(this.add.text(x + 40, sy + 36, label, { fontFamily: 'monospace', fontSize: '12px', color: '#b9c6d6' }).setDepth(23));
       if (has) {
-        const lb = this.add.rectangle(x + W - 110, sy + 32, 76, 30, 0x2d6cb0).setDepth(23).setStrokeStyle(1, 0xf0e6c8, 0.8).setInteractive({ useHandCursor: true });
+        const lb = this.add.rectangle(x + W - 110, sy + 32, 76, 30, 0x2d6cb0).setDepth(23).setStrokeStyle(1, 0xf0e6c8, 0.8);
         els.push(lb); els.push(this.add.text(x + W - 110, sy + 32, 'Load', { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(24));
         // (Phase 12) Real slot restore: regenerate the world from the saved seed
         // and re-apply the full campaign, then resume on the continent. Falls back
         // to the legacy king-record path if the slot is an old-format save.
-        lb.on('pointerdown', () => {
+        this.registerClick(x + W - 110, sy + 32, 76, 30, () => {
           if (SaveManager.isWorldSave(i)) { const r = SaveManager.loadGame(i); if (r.ok) { this.closePanel(); this.enterContinent(); return; } this.toast(r.error || 'Load failed'); return; }
           if (SaveManager.preparePending(i).ok) this.continueGame();
-        });
+        }, { tag: 'panel' });
       }
     });
   }
@@ -295,19 +352,21 @@ export class MainMenuScene extends Phaser.Scene {
     const track = this.add.rectangle(trackX, trackY, trackW, 8, 0x2a3242).setOrigin(0, 0.5).setDepth(22);
     els.push(track);
     const fill = this.add.rectangle(trackX, trackY, trackW * cfg.volume, 8, 0xc9a14a).setOrigin(0, 0.5).setDepth(23); els.push(fill);
-    const knob = this.add.circle(trackX + trackW * cfg.volume, trackY, 9, 0xf0e6d0).setDepth(24).setInteractive({ useHandCursor: true, draggable: true }); els.push(knob);
-    this.input.setDraggable(knob);
-    knob.on('drag', (_p: any, dx: number) => {
-      const v = Phaser.Math.Clamp((dx - trackX) / trackW, 0, 1); knob.x = trackX + trackW * v; fill.width = trackW * v;
-      cfg.volume = v; this.saveSettings(cfg); try { sfx.setVolume(v); } catch (e) {}
-    });
+    const knob = this.add.circle(trackX + trackW * cfg.volume, trackY, 9, 0xf0e6d0).setDepth(24); els.push(knob);
+    // Click anywhere on the track to set volume (the scene-level registry doesn't
+    // do drags, and click-to-set is simpler/clearer anyway).
+    this.registerClick(trackX + trackW / 2, trackY, trackW, 26, () => {
+      const v = Phaser.Math.Clamp((this.input.activePointer.x - trackX) / trackW, 0, 1);
+      knob.x = trackX + trackW * v; fill.width = trackW * v;
+      cfg.volume = v; this.saveSettings(cfg); try { sfx.setVolume(v); sfx.play('ui_click'); } catch (e) {}
+    }, { tag: 'panel' });
     // Toggles.
     const toggle = (ty: number, label: string, key: string) => {
       els.push(this.add.text(x + 30, ty, label, { fontFamily: 'monospace', fontSize: '14px', color: '#dfe6ee' }).setDepth(22));
-      const box = this.add.rectangle(x + W - 60, ty + 6, 40, 22, cfg[key] ? 0x2e8b57 : 0x39393f).setDepth(22).setStrokeStyle(1, 0xf0e6c8, 0.7).setInteractive({ useHandCursor: true });
+      const box = this.add.rectangle(x + W - 60, ty + 6, 40, 22, cfg[key] ? 0x2e8b57 : 0x39393f).setDepth(22).setStrokeStyle(1, 0xf0e6c8, 0.7);
       const lbl = this.add.text(x + W - 60, ty + 6, cfg[key] ? 'ON' : 'OFF', { fontFamily: 'monospace', fontSize: '11px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(23);
       els.push(box, lbl);
-      box.on('pointerdown', () => { cfg[key] = !cfg[key]; this.saveSettings(cfg); box.setFillStyle(cfg[key] ? 0x2e8b57 : 0x39393f); lbl.setText(cfg[key] ? 'ON' : 'OFF'); });
+      this.registerClick(x + W - 60, ty + 6, 44, 26, () => { cfg[key] = !cfg[key]; this.saveSettings(cfg); box.setFillStyle(cfg[key] ? 0x2e8b57 : 0x39393f); lbl.setText(cfg[key] ? 'ON' : 'OFF'); try { sfx.play('ui_click'); } catch (e) {} }, { tag: 'panel' });
     };
     toggle(y + 140, 'Show Tooltips', 'tooltips');
     toggle(y + 180, 'Frequent Auto-save', 'autosaveFast');
