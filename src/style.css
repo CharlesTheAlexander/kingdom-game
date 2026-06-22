@@ -12,12 +12,14 @@ body {
   overflow: hidden;
 }
 
+/* The Phaser canvas is centred by the engine itself (Scale.CENTER_BOTH, which
+   sets the canvas margins). #app must NOT also centre it — a flexbox here stacked
+   on top of Phaser's margin, double-shifting the canvas right (asymmetric letterbox
+   + misaligned King-Creation HTML inputs). Keep #app a plain full-window block. */
 #app {
   width: 100vw;
   height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow: hidden;
 }
 
 canvas {

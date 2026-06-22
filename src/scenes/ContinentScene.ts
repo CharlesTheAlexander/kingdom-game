@@ -44,9 +44,10 @@ import { generateHeroPortraits, generatePortraits } from '../systems/AssetGenera
 //   keys that left the view are hidden and returned to the pool. ChunkManager
 //   owns texture lifecycle (load/evict); we own the sprite lifecycle.
 //
-// * TIME. Continuous: 1 game day = DAY_MS (300000 ms = 5 real min), matching the
-//   legacy IsometricScene. The world never pauses; an onNewDay() hook fires once
-//   per whole day for resources/AI/events. Travelling consumes supply daily.
+// * TIME. Continuous: 1 game day = DAY_MS (10000 ms = 10 real sec). The world
+//   never pauses; an onNewDay() hook fires once per whole day for resources/AI/
+//   events. Travelling consumes supply daily. (Audit-tuned from the legacy 5-min
+//   day, which left the travel-based continent feeling frozen.)
 //
 // * MOVEMENT. Click a passable tile → A* (ContinentPathfinder) using per-biome
 //   movementCost. The party advances along the path each frame, its pixels-per-
@@ -66,8 +67,15 @@ import { generateHeroPortraits, generatePortraits } from '../systems/AssetGenera
 //   continent at the battle location.
 // ============================================================================
 
-const DAY_MS = 300000;          // 1 game day = 5 real minutes (matches legacy)
-const DEFAULT_ZOOM = 0.4;
+// Continent pacing (Audit fix): the legacy 5-min/day clock made the world feel
+// FROZEN — at 9 tiles/day the party crawled ~0.05 screen-px/sec and the day
+// counter took 5 real minutes to tick, so a 1500-tile world was untraversable
+// (~14 real hours to cross). A continent you TRAVEL needs a watchable clock and a
+// party that visibly moves: 10 sec/day + 100 tiles/day ⇒ ~20 screen-px/sec at the
+// default zoom and a believable ~2.5 min cross-continent march. Time-gated content
+// (hero arrivals, late-game stages) now actually surfaces within a session.
+const DAY_MS = 10000;           // 1 game day = 10 real seconds
+const DEFAULT_ZOOM = 0.5;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 1.5;
 const FOG_CELL = 8;             // tiles per fog cell
@@ -75,9 +83,11 @@ const FOG_REVEAL = 14;          // tiles of reveal radius around the player
 const SETTLE_RANGE = 2;         // tiles: settlement interaction range
 const ENEMY_WARN_RANGE = 3;     // tiles: "enemy approaching" banner
 const ENEMY_FIGHT_RANGE = 1.2;  // tiles: collision → battle
-// Base travel: tiles/sec on cost-1 terrain at full simulation. Tuned so a
-// cross-region march of tens of tiles takes a believable handful of days.
-const BASE_TILES_PER_DAY = 9;   // plains tiles covered per game day
+// Base travel: tiles covered per game day on cost-1 (plains) terrain. Combined
+// with DAY_MS=10s this yields ~20 screen-px/sec at the default zoom — the party
+// visibly glides along its route, and crossing the whole 1500-tile continent is a
+// ~15-day (~2.5 real-min) journey. Per-biome movementCost still slows forest/marsh.
+const BASE_TILES_PER_DAY = 100; // plains tiles covered per game day
 const HUD_DEPTH = 1000;
 
 export class ContinentScene extends Phaser.Scene {
