@@ -79,7 +79,9 @@ const DEFAULT_ZOOM = 0.5;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 1.5;
 const FOG_CELL = 8;             // tiles per fog cell
-const FOG_REVEAL = 14;          // tiles of reveal radius around the player
+const FOG_REVEAL = 18;          // tiles of reveal radius around the player (audit:
+                               // widened from 14 so the home region reads on arrival
+                               // instead of a tiny lit patch in a black void)
 const SETTLE_RANGE = 2;         // tiles: settlement interaction range
 const ENEMY_WARN_RANGE = 3;     // tiles: "enemy approaching" banner
 const ENEMY_FIGHT_RANGE = 1.2;  // tiles: collision → battle
@@ -1453,7 +1455,9 @@ export class ContinentScene extends Phaser.Scene {
         img.data[o + 3] = 0; // explored → transparent
       } else {
         img.data[o] = 8; img.data[o + 1] = 11; img.data[o + 2] = 18;
-        img.data[o + 3] = 220; // unexplored → near-opaque dark
+        img.data[o + 3] = 200; // unexplored → dark shroud (audit: 220→200 so the
+                               // land's silhouette is faintly sensed under the fog
+                               // rather than reading as an empty black void)
       }
     }
     ctx.putImageData(img, 0, 0);
