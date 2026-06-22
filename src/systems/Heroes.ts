@@ -15,6 +15,11 @@ const DEFS: Record<string, HeroDef> = {
   mira: { id: 'mira', name: 'Mira Swiftarrow', title: 'of the Silver Bow', type: 'ranger', hp: 95, backstory: 'Found in stasis beneath a forest ruin, she woke as if no centuries had passed.', passive: 'Archers +20% range, fog reveals 40% faster', active: "Hunter's Mark — marked enemies take double damage" },
   tomas: { id: 'tomas', name: 'Elder Tomas', title: 'the Last Archivist', type: 'scholar', hp: 75, backstory: 'He remembers the empire that fell. He intends not to repeat its mistakes.', passive: 'All research 25% faster', active: 'Ancient Knowledge — instantly finish current research' },
   ravel: { id: 'ravel', name: 'Commander Ravel', title: 'the Renegade', type: 'renegade', hp: 120, backstory: 'Krag sent him as an insult. He stayed because, for the first time, he was given respect.', passive: 'Army morale never drops below 20', active: "Veteran's Rally — Elite units act again" },
+  // (Phase 11) THE 7TH HERO — "The Ancient". A unique warrior sealed in a ruin
+  // since the Old Empire, freed only when the kingdom's PRESTIGE reaches 300
+  // (GameWorld.releaseAncientHero offers him). The strongest hero on the roster:
+  // a fearless warrior whose presence steels the whole host.
+  ancient: { id: 'ancient', name: 'The Ancient', title: 'Unsealed', type: 'warrior', hp: 200, backstory: 'A champion of the Old Empire, sealed in stasis beneath a ruin for a thousand years. Your kingdom\'s fame woke him; he fights for a realm worthy of legend once more.', passive: 'Entire army +20% battle morale; never routs', active: 'Aeons of War — the host strikes with the fury of an empire reborn' },
 };
 
 const XP_THRESH = [0, 30, 80, 150, 250]; // index = level-1

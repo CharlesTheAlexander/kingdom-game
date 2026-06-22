@@ -323,5 +323,44 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       VERIFY: tsc clean, build clean, headless 0 console errors/0 warnings, FPS 50–53. Shots: p10_win_destroyer,
       p10_win_protector, p10_win_empire (+protector_detail). All 4 win paths + 7 ending variants asserted; protector-join
       & conqueror-tribute reactions fired. Deferred (per spec): P11 economy/prestige/monuments, P12 save rewrite.
-- [ ] P11 — Economy mid-game reinvestment (equipment, prestige, monuments)
+- [x] P11 — Economy mid-game reinvestment (equipment, prestige, monuments)
+      A — ARMY EQUIPMENT TIERS: `GameWorld.equipmentTier` 0..3 (Basic/Iron/Steel/Legendary), army-WIDE (not per-unit).
+      `craftEquipment(tier)` (+ canCraftEquipment) spends from EQUIPMENT_RECIPES (Iron 40iron+60g; Steel 80iron+30planks
+      +120g; Legendary 150iron+50planks+200g + 1 artifact OR 1 legendaryEquipment) — must craft in order; Iron/Steel
+      need a home Blacksmith, Legendary reuses the Phase-8 Legendary Forge (not duplicated). EFFECT: equipmentDamageMult()
+      = 1/1.15/1.30/1.50 folded into BattleScene.playerCmdMul() so every player strike gets +15/30/50%. VISUAL: applyEquipmentTint()
+      gives player units a progressive armour sheen (Iron steel-grey / Steel silver / Legendary unique gold glow + additive
+      aura ring); _equipTint reapplied after the hit-flash, aura follows in sync()/destroyed on die. Tier/mult/monumentMorale
+      passed via cfg (GameWorld fallback) so headless tests can pin values.
+      B — SETTLEMENT INVESTMENT: `invest(settlementId,kind)` (+ canInvest) from INVEST_DEFS — Infrastructure (200g →
+      +10% all production, read via investProductionMult → Buildings.produce _investProdMult); Fortification (150g+50stone
+      → +3 permanent garrison, +50% wall-HP flag); Population (100g+50food → +5 pop now + 10-day +50% growth window read by
+      Population.onNewDay _investGrowthUntil); Trade (150g → +5 gold/day via ContinentScene.onNewDay investGoldPerDay,
+      caravan +20% flag). Flags stored on SettlementState.invest{} + investGrowthUntil (serialize-friendly). UI: an "Invest"
+      panel (IsometricScene renderInvestPanel, opened from the Castle category) + flush/pullWorldResources sync the live
+      stockpile to the SettlementState the GameWorld cost checks read.
+      C — PRESTIGE: `GameWorld.prestige` (monotonic) via the single addPrestige(n,reason,once) entry point. SOURCES wired:
+      Grand Hall built +50 (IsometricScene placement), large battle win +10/+20 scaled (ContinentScene.onBattleComplete),
+      Stage 9 +200 (LateGame.fireStage9), ruin explored +20 (ExpeditionSystem.grantRuinReward; artifact/relic also banks
+      heroFlags.artifacts toward Legendary gear), hero Lv5 +30/hero (grantHeroBattleXP). EFFECTS: 50+ neutral prices +10%
+      (prestigePriceBonus); 100+ "fame spreads" + 200+ "pilgrims" one-shot beats (checkPrestigeThresholds); 300+ releases
+      the unique 7TH HERO "The Ancient" (Heroes DEFS: 200hp warrior, army +20% morale/never routs — releaseAncientHero
+      offers→auto-joins the world roster); 500+ counts toward LEGACY (WinConsequences waives the happiness gate). Shown in
+      the Realm panel + on the end screen.
+      D — MONUMENTS (new building category, home settlement): Victory Arch (500g+100stone →+50 prestige), Great Statue
+      (800g+150stone+50iron →+100 prestige +15 battle morale, monumentMoraleBonus seeds BattleScene morale), Imperial
+      Palace (1500g+200stone+100planks →+200 prestige, lateGameFlags.imperialPalace + Imperial-path link). Added to
+      BuildingTypes (monument:true, reuse hallofheroes/castle_castle art) + a Monuments panel; placement charges via
+      GameWorld.buildMonument (purse gold + home stockpile) not local resources.spend. Stored in GameWorld.monuments[].
+      E — RESEARCH IMPERIAL BRANCH (Research.ts branch 3, gated stageGate:7 via GameWorld.kingdomStage in available()):
+      Imperial Roads (free roads — Roads.buildPath _researchFreeRoads + continent party movement +50% via
+      lateGameFlags.imperialRoads in advanceParty), Imperial Treasury (Banking interest 2%→4% via _researchBankRate),
+      Imperial Legion (Elite units +1 level → Troops.spawnElite +20% hp/dmg "Legion" via _researchEliteBonus). 4-column
+      research panel with branch labels + stage-lock notes.
+      All new state plain-JSON in serializable() (equipmentTier/prestige/prestigeFlags/monuments + per-settlement invest
+      flags ride settlementStates) for P12; reset on new campaign.
+      VERIFY: tsc clean, build clean, headless audit 40/40 pass, 0 console errors/0 warnings, FPS 51. Shots:
+      p11_equipment_battle (tier-1 tint + +15% dmg), p11_invest, p11_prestige_panel, p11_monument, p11_monument_placed
+      (full UI placement +50 prestige), p11_legendary_battle (tier-3 gold glow + aura). DEFERRED to P12: save rewrite;
+      Imperial Palace literally swapping the live castle sprite (flag + own building sprite only for now).
 - [ ] P12 — Full integration + save system update

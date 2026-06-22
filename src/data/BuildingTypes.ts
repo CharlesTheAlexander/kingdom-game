@@ -170,6 +170,27 @@ export const BuildingTypes: Record<string, BuildingType> = {
     footprint: 2, placeable: true, stageUnlock: 9, tex: 'library', // reuse Library art (no dedicated sprite)
     desc: 'Scribes keep the Chronicle of the Kingdom — a record of every great deed. (Read it in the Realm panel.)',
   },
+  // (Phase 11) MONUMENTS — late-game gold sinks raised in the home settlement.
+  // Each is built ONCE and grants prestige (and, for the Great Statue, standing
+  // battle morale). Costs + effects are authoritative on GameWorld.MONUMENT_DEFS;
+  // the building defs here only drive the sprite/footprint/placement so the home
+  // view can plant them. They reuse existing art (no dedicated monument sprites).
+  // Marked `monument:true` so the placement flow charges via GameWorld.buildMonument.
+  victoryarch: {
+    key: 'victoryarch', name: 'Victory Arch', cost: { gold: 500, stone: 100 }, maxWorkers: 0, hp: 250,
+    footprint: 2, placeable: true, monument: true, tex: 'hallofheroes',
+    desc: 'A triumphal arch. 500 gold + 100 stone → +50 prestige.',
+  },
+  greatstatue: {
+    key: 'greatstatue', name: 'Great Statue', cost: { gold: 800, stone: 150, iron: 50 }, maxWorkers: 0, hp: 300,
+    footprint: 2, placeable: true, monument: true, stageUnlock: 7, tex: 'hallofheroes',
+    desc: 'A colossal statue. 800g + 150 stone + 50 iron → +100 prestige, +15 battle morale.',
+  },
+  imperialpalace: {
+    key: 'imperialpalace', name: 'Imperial Palace', cost: { gold: 1500, stone: 200, planks: 100 }, maxWorkers: 0, hp: 400,
+    footprint: 2, placeable: true, monument: true, stageUnlock: 9, tex: 'castle_castle',
+    desc: 'Replaces the keep with an imperial seat. 1500g + 200 stone + 100 planks → +200 prestige; unlocks the Imperial Proclamation.',
+  },
 };
 
 // Order shown in the build menu. (Phase 4 Decision 1) 'wall' removed — walls now

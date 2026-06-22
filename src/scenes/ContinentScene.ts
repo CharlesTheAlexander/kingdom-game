@@ -453,7 +453,9 @@ export class ContinentScene extends Phaser.Scene {
     let travelled = 0;
     let budgetDays = (delta / DAY_MS); // game-days available this frame
     // Convert to a tile budget on cost-1 terrain.
-    let tileBudget = budgetDays * BASE_TILES_PER_DAY;
+    // (Phase 11) Imperial Roads research grants +50% party movement on the continent.
+    const moveMult = GameWorld.lateGameFlags.imperialRoads ? 1.5 : 1;
+    let tileBudget = budgetDays * BASE_TILES_PER_DAY * moveMult;
 
     while (tileBudget > 0 && this.path.length) {
       const next = this.path[0];
@@ -500,6 +502,10 @@ export class ContinentScene extends Phaser.Scene {
     // Passive economy: a small daily income (placeholder; real economy lives in
     // the per-settlement view, Phase 3+). Kept tiny so numbers stay legible.
     GameWorld.gold += 5;
+    // (Phase 11) Trade investment: +5 gold/day per settlement that took it.
+    for (const id of Object.keys(GameWorld.settlementStates)) {
+      GameWorld.gold += GameWorld.investGoldPerDay(id);
+    }
     // AI parties re-evaluate objectives occasionally.
     for (const ai of GameWorld.aiParties) {
       if (Math.random() < 0.15) GameWorld.pickAIObjective(ai);
@@ -2063,6 +2069,10 @@ export class ContinentScene extends Phaser.Scene {
       const i = GameWorld.aiParties.indexOf(ai);
       if (i >= 0) GameWorld.aiParties.splice(i, 1);
       this.flashBanner('Victory! The enemy host is broken.', 0x2a7a4f);
+      // (Phase 11) Prestige source — winning a LARGE battle. Scaled by the enemy
+      // host size: +10 base for a sizeable foe (~20+), more for an army (~40+).
+      const foeSize = ai.armyEstimate || 0;
+      if (foeSize >= 20) GameWorld.addPrestige(foeSize >= 40 ? 20 : 10, 'a great victory in the field');
       // (Phase 6) Grant hero XP to party heroes + fire a victory/first-victory line.
       this.grantHeroBattleXP(true, (res.kills as number) || 0);
       GameWorld.heroFlags.battlesWon = (GameWorld.heroFlags.battlesWon || 0) + 1;
@@ -2114,8 +2124,11 @@ export class ContinentScene extends Phaser.Scene {
   grantHeroBattleXP(won: boolean, kills: number) {
     const H = GameWorld.heroes;
     for (const h of HeroWorld.partyHeroes()) {
+      const before = h.level || 1;
       H.grantXP(h, 10 + kills * 5);
       if (won) h.battlesWon = (h.battlesWon || 0) + 1;
+      // (Phase 11) Prestige source — a hero reaching Lv5 grants +30 (once per hero).
+      if ((h.level || 1) >= 5 && before < 5) GameWorld.addPrestige(30, `${h.name} reached the height of their legend`, 'hero_lv5_' + h.id);
     }
     H.applyPassives();
   }
@@ -2460,6 +2473,15 @@ export class ContinentScene extends Phaser.Scene {
 
     els.push(fix(this.add.text(x + W - 14, y + 9, `Gold ${GameWorld.gold}`, { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#e0b84a' }).setOrigin(1, 0)));
 
+    // (Phase 11) Prestige + army equipment readout — the at-a-glance fame/power line.
+    head('Kingdom');
+    const pres = GameWorld.prestige;
+    const presNote = pres >= 500 ? ' (counts toward Legacy)' : pres >= 300 ? ' (The Ancient has answered)' : pres >= 200 ? ' (pilgrims seek you)' : pres >= 100 ? ' (your fame spreads)' : pres >= 50 ? ' (better neutral prices)' : '';
+    note(`Prestige: ${pres}${presNote}`, pres >= 100 ? '#ffe08a' : '#cfc1a6');
+    note(`Army equipment: ${GameWorld.equipmentTierName()} (+${Math.round((GameWorld.equipmentDamageMult() - 1) * 100)}% damage).`, GameWorld.equipmentTier >= 3 ? '#ffe08a' : '#cfc1a6');
+    if (GameWorld.monuments.length) note(`Monuments: ${GameWorld.monuments.map(k => GameWorld.MONUMENT_DEFS[k]?.name || k).join(', ')}.`, '#cfc1a6');
+    cy += 2;
+
     if (stage < 8) {
       head('Late-game unlocks');
       note('Grow your home castle to a Medium Castle (stage 8) to unlock the Grand Tournament, the Legendary Forge, an extra army, and Emissaries.', '#9aa0a6');
@@ -2644,6 +2666,8 @@ export class ContinentScene extends Phaser.Scene {
     els.push(fix(this.add.text(GAME_W / 2, y + 22, 'VICTORY', { fontFamily: 'Georgia, serif', fontSize: '42px', color: dark ? '#e74c3c' : '#e9c46a', fontStyle: 'bold', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5, 0)));
     els.push(fix(this.add.text(GAME_W / 2, y + 76, data.title, { fontFamily: 'Georgia, serif', fontSize: '20px', color: dark ? '#ffb0a8' : '#ffe9b0', fontStyle: 'bold italic', align: 'center', wordWrap: { width: W - 80 } }).setOrigin(0.5, 0)));
     els.push(fix(this.add.text(GAME_W / 2, y + 108, `The Kingdom of ${GameWorld.king.kingdom} under ${GameWorld.king.ruler}`, { fontFamily: 'Georgia, serif', fontSize: '12px', color: '#cfc1a6' }).setOrigin(0.5, 0)));
+    // (Phase 11) Prestige is part of the kingdom's legacy — shown on the end screen.
+    els.push(fix(this.add.text(GAME_W / 2, y + 124, `Prestige ${GameWorld.prestige}  ·  ${GameWorld.equipmentTierName()} arms${GameWorld.monuments.length ? '  ·  ' + GameWorld.monuments.length + ' monument' + (GameWorld.monuments.length > 1 ? 's' : '') : ''}`, { fontFamily: 'Georgia, serif', fontSize: '11px', color: '#e0b84a' }).setOrigin(0.5, 0)));
 
     // Ending prose.
     els.push(fix(this.add.text(GAME_W / 2, y + 132, data.prose, { fontFamily: 'Georgia, serif', fontSize: '13px', color: dark ? '#e0c0b0' : '#e6d8b8', fontStyle: 'italic', align: 'center', wordWrap: { width: W - 80 }, lineSpacing: 3 }).setOrigin(0.5, 0)));

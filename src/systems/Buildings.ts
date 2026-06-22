@@ -143,6 +143,8 @@ export class Building {
     if (scene && scene.population && this.type.maxWorkers > 0) rate *= scene.population.prodMult;
     // (Completion Phase 4) Continental Peace production bonus.
     if (scene && scene._councilProdMult && this.type.maxWorkers > 0) rate *= scene._councilProdMult;
+    // (Phase 11) Infrastructure investment: +10% ALL production in this settlement.
+    if (scene && scene._investProdMult && scene._investProdMult !== 1) rate *= scene._investProdMult;
     // (Expansion Phase 3) seasonal farm modifier (autumn +25%, summer -10%).
     if (scene && this.typeKey === 'farm' && scene._seasonFarmMult) rate *= scene._seasonFarmMult;
     // (Expansion Phase 5) research: Advanced Farming / Mining Techniques.

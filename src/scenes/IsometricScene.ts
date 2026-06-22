@@ -804,6 +804,35 @@ export class IsometricScene extends GameScene {
     st.lastVisitedDay = GameWorld.day;
   }
 
+  // (Phase 11) Sync the live scene stockpile INTO this settlement's persisted
+  // SettlementState.resources so GameWorld's monument/equipment cost checks (which
+  // read the SettlementState) see current values. Mirrors the resource set the
+  // home stockpile tracks (wood/stone/food/iron/planks/cutStone).
+  flushResourcesToWorld() {
+    const st = this._settle; if (!st) return;
+    const r = this.resources;
+    st.resources.wood = Math.round(r.wood || 0);
+    st.resources.stone = Math.round(r.stone || 0);
+    st.resources.food = Math.round(r.food || 0);
+    st.resources.iron = Math.round(r.iron || 0);
+    st.resources.planks = Math.round(r.planks || 0);
+    st.resources.cutStone = Math.round(r.cutStone || 0);
+  }
+
+  // (Phase 11) Pull the SettlementState stockpile back into the live scene economy
+  // after a GameWorld-level spend (monument / equipment craft), so the on-screen
+  // resource bar reflects what was just deducted.
+  pullWorldResources() {
+    const st = this._settle; if (!st) return;
+    const r = this.resources;
+    r.wood = st.resources.wood || 0;
+    r.stone = st.resources.stone || 0;
+    r.food = st.resources.food || 0;
+    r.iron = st.resources.iron || 0;
+    if (st.resources.planks != null) r.planks = st.resources.planks;
+    if (st.resources.cutStone != null) r.cutStone = st.resources.cutStone;
+  }
+
   // Restore saved buildings/resources/tier on entry (after the castle is placed).
   // First visit just keeps the defaults set by makeSettlementState.
   restoreSettlementState() {
@@ -838,6 +867,11 @@ export class IsometricScene extends GameScene {
       const b = this.buildings.grid[t.row] && this.buildings.grid[t.row][t.col];
       if (b && b.slots) b.slots.push({ type: t.what, timeLeft: t.timeLeft });
     }
+    // (Phase 11) Apply this settlement's INVEST flags to the live scene: the
+    // Infrastructure +10% production multiplier the building producer reads, plus
+    // the Population growth window (read by Population.onNewDay).
+    this._investProdMult = GameWorld.investProductionMult(this._settlementId);
+    this._investGrowthUntil = (this._settle && (this._settle as any).investGrowthUntil) || 0;
     this.refreshPanel && this.refreshPanel();
     this.updateSettlementHud();
   }
@@ -1942,12 +1976,24 @@ export class IsometricScene extends GameScene {
         return;
       }
     }
-    const check = this.buildings.canPlace(typeKey, this.resources, this.maxBuildings());
-    if (!check.ok) {
-      this.showToast(check.reason);
-      return;
+    // (Phase 11) MONUMENTS charge via GameWorld (gold from the campaign purse +
+    // materials from the home stockpile) and apply their prestige/morale effects
+    // there — so they bypass the local resources.spend + canPlace cost check.
+    if (def.monument) {
+      this.flushResourcesToWorld(); // make sure GameWorld sees current home stockpile
+      const can = GameWorld.canBuildMonument(typeKey);
+      if (!can.ok) { this.showToast(can.reason || 'Cannot build that here'); return; }
+      const res = GameWorld.buildMonument(typeKey);
+      if (!res.ok) { this.showToast(res.reason || 'Cannot build that here'); return; }
+      this.pullWorldResources(); // reflect the spent stockpile back into the live scene
+    } else {
+      const check = this.buildings.canPlace(typeKey, this.resources, this.maxBuildings());
+      if (!check.ok) {
+        this.showToast(check.reason);
+        return;
+      }
+      this.resources.spend(def.cost);
     }
-    this.resources.spend(def.cost);
     const b = this.buildings.place(typeKey, tile.col, tile.row);
     if (b) {
       this.decorateBuilding(b);
@@ -1956,6 +2002,9 @@ export class IsometricScene extends GameScene {
       this.territoryPulse(); // (Phase 8) always pulse so placement is felt
       if (typeKey === 'watchtower') this.revealAround(b.col, b.row, def.revealRadius || 8);
       if (this.territory) this.territory.recompute();
+      // (Phase 11) Building a Grand Hall is a prestige source (+50, once).
+      if (typeKey === 'grandhall') GameWorld.addPrestige(50, 'a Grand Hall now graces your seat', 'prestige_grandhall');
+      if (def.monument) this.showToast(`${def.name} raised — +${GameWorld.MONUMENT_DEFS[typeKey]?.prestige || 0} prestige`);
       this.placementType = null; // (Phase 5) auto-exit placement mode after placing
       this.clearGhost();
       if (this._weather === 'snow') this.updateSnowCaps(true); // (Phase 4) snow-cap new winter builds
@@ -3805,8 +3854,128 @@ export class IsometricScene extends GameScene {
     else if (this.panelMode === 'cat_food') this.renderCategoryBuild('FOOD', ['farm', 'tavern', 'house']);
     else if (this.panelMode === 'cat_industry') this.renderCategoryBuild('INDUSTRY', ['lumberyard', 'mine', 'sawmill', 'stonecutter', 'blacksmith', 'market', 'library', 'watchtower', 'treasury', 'siegeworkshop', 'hallofheroes', 'grandhall']);
     else if (this.panelMode === 'cat_military') this.renderMilitaryPanel();
+    else if (this.panelMode === 'cat_invest') this.renderInvestPanel(); // (Phase 11)
+    else if (this.panelMode === 'cat_monuments') this.renderMonumentsPanel(); // (Phase 11)
     else if (this.panelMode === 'build') this.renderDefaultPanel();
     // (Phase 3) 'none' → no panel (just the category bar). Map filled the screen.
+  }
+
+  // ==========================================================================
+  // (Phase 11) INVEST PANEL — army equipment tiers + per-settlement investment.
+  // Shown from the Castle category's "Invest" button. All gold/material spends +
+  // effects funnel through GameWorld (craftEquipment / invest) so the headless
+  // audit and the UI drive the same code; the bottom resource bar shows GameWorld
+  // gold, so investment costs read live. Monuments get their own panel button.
+  // ==========================================================================
+  renderInvestPanel() {
+    this.paintBottomPanel({ stone: true });
+    this.flushResourcesToWorld(); // GameWorld cost checks read the SettlementState stockpile
+    const sid = this._settlementId;
+    const isHome = !!(this._settle && this._settle.faction === 'player');
+    this.panelText(14, this.PANEL_Y + 8, `INVEST — ${this._settle ? this._settle.name : 'Settlement'}   ·   Gold ${fmtNum(GameWorld.gold)}   ·   Prestige ${GameWorld.prestige}`, { color: '#c9a84c', bold: true });
+
+    // --- ARMY EQUIPMENT TIERS (home only — crafted at the Blacksmith/Forge) ---
+    let y = this.PANEL_Y + 30;
+    this.panelText(14, y, `Army Equipment: ${GameWorld.equipmentTierName()} (+${Math.round((GameWorld.equipmentDamageMult() - 1) * 100)}% damage)`, { color: '#e8e0cc', size: '12px' });
+    if (isHome) {
+      const next = GameWorld.equipmentTier + 1;
+      const r = GameWorld.equipmentRecipe(next);
+      if (r) {
+        const can = GameWorld.canCraftEquipment(next);
+        const costParts = [`${r.iron} iron`];
+        if (r.planks) costParts.push(`${r.planks} planks`);
+        costParts.push(`${r.gold}g`);
+        if (r.artifact) costParts.push('1 artifact');
+        const label = `Forge ${r.name}`;
+        this.spriteButton(14, y + 18, 200, 34, label, costParts.join(' · '), can.ok, () => {
+          const res = GameWorld.craftEquipment(next);
+          if (res.ok) { this.pullWorldResources(); this.showToast(`Army re-equipped: ${GameWorld.equipmentTierName()} (+${Math.round((GameWorld.equipmentDamageMult() - 1) * 100)}% dmg)`); }
+          else this.showToast(res.reason || 'Cannot craft');
+          this.refreshPanel();
+        }, { gold: can.ok });
+        if (!can.ok && can.reason) this.panelText(224, y + 28, can.reason, { color: '#ff9a8a', size: '10px' });
+      } else {
+        this.panelText(14, y + 18, 'Army fully equipped — Legendary gear forged.', { color: '#ffe08a', size: '11px' });
+      }
+    } else {
+      this.panelText(14, y + 18, 'Equipment is forged at your home castle Blacksmith.', { color: '#9aa0a6', size: '11px' });
+    }
+
+    // --- SETTLEMENT INVESTMENT (any settlement the player can act in) ----------
+    y = this.PANEL_Y + 78;
+    this.panelText(14, y, 'Settlement Investment (permanent):', { color: '#e8e0cc', size: '12px' });
+    const kinds = ['infrastructure', 'fortification', 'population', 'trade'];
+    const bw = 168, gap = 8;
+    kinds.forEach((k, i) => {
+      const def = GameWorld.INVEST_DEFS[k];
+      if (!def) return;
+      const x = 14 + i * (bw + gap);
+      const has = GameWorld.hasInvestment(sid, k);
+      const can = GameWorld.canInvest(sid, k);
+      const costParts = [`${def.gold}g`];
+      if (def.stone) costParts.push(`${def.stone} stone`);
+      if (def.food) costParts.push(`${def.food} food`);
+      const label = has ? `✓ ${def.name}` : def.name;
+      this.spriteButton(x, y + 18, bw, 50, label, has ? 'built' : costParts.join(' · '), !has && can.ok, () => {
+        const res = GameWorld.invest(sid, k);
+        if (res.ok) { this.pullWorldResources(); this.syncInvestEffects(); this.showToast(`${def.name} built in ${this._settle ? this._settle.name : 'settlement'}`); }
+        else this.showToast(res.reason || 'Cannot invest');
+        this.refreshPanel();
+      }, { gold: !has && can.ok, active: has });
+      this.panelText(x, y + 70, def.desc, { color: '#aeb9c6', size: '9px' });
+    });
+
+    // Monuments shortcut (home only).
+    if (isHome) this.spriteButton(GAME_W - 150, this.PANEL_Y + 30, 138, 30, 'Monuments →', '', true, () => { this.panelMode = 'cat_monuments'; this.refreshPanel(); });
+  }
+
+  // (Phase 11) Apply a just-taken investment's effects to the LIVE scene where
+  // they show immediately (population pop count, happiness already on state).
+  syncInvestEffects() {
+    const st = this._settle as any; if (!st) return;
+    this._investProdMult = GameWorld.investProductionMult(this._settlementId); // Infrastructure +10%
+    this._investGrowthUntil = st.investGrowthUntil || 0; // Population +50% growth window
+    if (this.population && typeof st.population === 'number') this.population.count = Math.max(this.population.count || 0, st.population);
+    this.updatePopulationHud && this.updatePopulationHud();
+  }
+
+  // ==========================================================================
+  // (Phase 11) MONUMENTS PANEL — late-game gold sinks raised at the home castle.
+  // Each "Build" enters placement mode (the standard placement flow charges via
+  // GameWorld.buildMonument + applies prestige). Shows cost, prestige, and which
+  // are already raised.
+  // ==========================================================================
+  renderMonumentsPanel() {
+    this.paintBottomPanel({ stone: true });
+    this.flushResourcesToWorld();
+    const isHome = !!(this._settle && this._settle.faction === 'player');
+    this.panelText(14, this.PANEL_Y + 8, `MONUMENTS — Prestige ${GameWorld.prestige}   ·   Gold ${fmtNum(GameWorld.gold)}`, { color: '#c9a84c', bold: true });
+    if (!isHome) {
+      this.panelText(14, this.PANEL_Y + 34, 'Monuments are raised only at your home castle.', { color: '#9aa0a6' });
+      this.spriteButton(GAME_W - 150, this.PANEL_Y + 8, 138, 26, '← Back', '', true, () => { this.panelMode = 'cat_invest'; this.refreshPanel(); });
+      return;
+    }
+    const keys = ['victoryarch', 'greatstatue', 'imperialpalace'];
+    const bw = 220, gap = 10;
+    keys.forEach((k, i) => {
+      const def = GameWorld.MONUMENT_DEFS[k];
+      const x = 14 + i * (bw + gap), y = this.PANEL_Y + 30;
+      const has = GameWorld.hasMonument(k);
+      const can = GameWorld.canBuildMonument(k);
+      const costParts = [`${def.gold}g`];
+      if (def.stone) costParts.push(`${def.stone} stone`);
+      if (def.iron) costParts.push(`${def.iron} iron`);
+      if (def.planks) costParts.push(`${def.planks} planks`);
+      const sub = has ? 'raised' : `${costParts.join(' · ')}  → +${def.prestige} prestige${def.morale ? `, +${def.morale} morale` : ''}`;
+      const label = has ? `✓ ${def.name}` : (this.placementType === k ? `Placing ${def.name}…` : def.name);
+      this.spriteButton(x, y, bw, 50, label, sub, !has && can.ok, () => {
+        this.placementType = k; this.selectedBuilding = null; this.clearSelection(); this.hideTip();
+        this.showToast(`Place ${def.name} — click a tile in your castle`);
+        this.refreshPanel();
+      }, { gold: !has && can.ok, active: has || this.placementType === k });
+      if (!has && !can.ok && can.reason) this.panelText(x, y + 54, can.reason, { color: '#ff9a8a', size: '9px' });
+    });
+    this.spriteButton(GAME_W - 150, this.PANEL_Y + 8, 138, 26, '← Back', '', true, () => { this.placementType = null; this.clearGhost(); this.panelMode = 'cat_invest'; this.refreshPanel(); });
   }
 
   // (Expansion) March/attack a selected army toward a right-clicked point.
@@ -3930,6 +4099,8 @@ export class IsometricScene extends GameScene {
     }
     // House build button (population housing lives under the kingdom core).
     if (this.buildingUnlocked('house')) this.buildPaletteButton(14, this.PANEL_Y + 64, 92, 44, 'house', this.buildings.canPlace('house', this.resources, this.maxBuildings()).ok);
+    // (Phase 11) Invest panel — army equipment, settlement investment, monuments.
+    this.spriteButton(114, this.PANEL_Y + 64, 110, 44, 'Invest', 'equip · upgrade · monuments', true, () => { this.panelMode = 'cat_invest'; this.refreshPanel(); }, { gold: true });
     // (Completion Phase 8) Reinforce the castle (+50 max HP, up to 5 times).
     if (c) {
       const f = c._fortify || 0;
@@ -4647,6 +4818,7 @@ export class IsometricScene extends GameScene {
   tabActive(mode) {
     if (mode === 'cat_military') return ['cat_military', 'expedition', 'artifacts', 'ruins'].includes(this.panelMode);
     if (mode === 'armies') return ['armies', 'armyform', 'kingdoms', 'caravans'].includes(this.panelMode);
+    if (mode === 'cat_castle') return ['cat_castle', 'cat_invest', 'cat_monuments'].includes(this.panelMode); // (Phase 11)
     return this.panelMode === mode && !this.selectedBuilding;
   }
 

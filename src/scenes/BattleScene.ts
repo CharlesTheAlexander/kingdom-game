@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { GAME_W, GAME_H } from './GameScene.js';
 import { registerUnitAnimations, playLoop, playOnce } from '../systems/Animations.js';
 import { sfx } from '../audio/SoundEngine.js';
+import { GameWorld } from '../systems/GameWorld.js'; // (Phase 11) army equipment tier + monument morale
 
 // (Polish Phase 1) idle texture -> { walk, attack } animation keys for battle units.
 const ANIM_SET: Record<string, any> = {
@@ -124,7 +125,9 @@ class BUnit {
       if (c !== this.count) { this.count = c; if (this.label) this.label.setText(`x${this.count}`); }
     }
     this.spr.setTintFill(0xff5555);
-    this.scene.time.delayedCall(60, () => { if (this.alive) this.spr.clearTint(); });
+    // (Phase 11) Restore the equipment sheen (if any) after the hit-flash, else
+    // just clear the tint as before.
+    this.scene.time.delayedCall(60, () => { if (this.alive) { if (this._equipTint) this.spr.setTint(this._equipTint); else this.spr.clearTint(); } });
     this.scene.dmgNumber(this.x, this.y - 24, Math.round(a), this.side === 'player' ? '#ff6b6b' : '#ffffff');
     this.scene.impactAt(this.x, this.y - 12); // (Feel pass) blood/impact specks
     if (a >= 22) this.scene.cameras.main.shake(90, 0.004 + Math.min(0.006, a / 4000)); // (Feel pass) big-hit shake
@@ -140,6 +143,7 @@ class BUnit {
     if (this.label) this.label.destroy();
     if (this.vetStar) this.vetStar.destroy();
     if (this.crown) this.crown.destroy(); // (V2 P5)
+    if (this._equipAura) { this._equipAura.destroy(); this._equipAura = null; } // (Phase 11)
     if (this._selRing) { this._selRing.destroy(); this._selRing = null; } // (Loop 1)
     this.scene.tweens.add({ targets: this.shadow, alpha: 0, duration: 500, onComplete: () => this.shadow.destroy() });
     this.spr.setTintFill(0xff3333);
@@ -154,6 +158,7 @@ class BUnit {
     if (this._selRing) { this._selRing.x = this.x; this._selRing.y = this.y; } // (Loop 1) follow selection
     if (this.vetStar) { this.vetStar.x = this.x + (this.block ? this.hpW / 2 : 9); this.vetStar.y = this.y - 36; } // (V2 P4)
     if (this.crown) { this.crown.x = this.x; this.crown.y = this.y - 46; } // (V2 P5) commander crown
+    if (this._equipAura) { this._equipAura.x = this.x; this._equipAura.y = this.y + 6; } // (Phase 11) legendary aura follows
     this.hpBg.x = this.x; this.hpBg.y = this.y - 30;
     this.hpFill.x = this.x - this.hpW / 2; this.hpFill.y = this.y - 30;
   }
@@ -309,14 +314,23 @@ export class BattleScene extends Phaser.Scene {
     this.phase = 'pre';
     this.timer = PRE_BATTLE;
     this.battleTime = 0;
+    // (Phase 11) ARMY EQUIPMENT TIER — the army-wide damage bonus + visual tier.
+    // Prefer an explicit cfg override (lets the headless audit/tests pin a value),
+    // else read the live GameWorld. Folded into playerCmdMul + the unit tint.
+    this._equipTier = (this.cfg.equipmentTier != null) ? this.cfg.equipmentTier : (GameWorld.equipmentTier || 0);
+    this._equipDmgMult = (this.cfg.equipmentDmgMult != null) ? this.cfg.equipmentDmgMult : GameWorld.equipmentDamageMult();
     this.morale = { player: 70, enemy: 70 };
     if (this.cfg.taverMoraleBonus) this.morale.player += 10;
+    // (Phase 11) Standing battle-morale bonus from monuments (the Great Statue's +15).
+    const monMorale = (this.cfg.monumentMorale != null) ? this.cfg.monumentMorale : GameWorld.monumentMoraleBonus();
+    if (monMorale) this.morale.player = Math.min(100, this.morale.player + monMorale);
     this.selected = [];
     this.activeCmd = null;
 
     this.scatterObstacles(terrain);
     this.spawnArmy('player', this.cfg.playerArmy || [], 0xffffff);
     this.spawnArmy('enemy', this.cfg.enemyArmy || [], null);
+    this.applyEquipmentTint(); // (Phase 11) progressive armour sheen by tier
     this.spawnCommander(); // (V2 P5) the King/Queen leads the host
     this.spawnArmyBanners(); // (Visual P9) planted waving banner at each host
     this.spawnLeaves();      // (Visual P9) drifting forest leaves
@@ -409,6 +423,10 @@ export class BattleScene extends Phaser.Scene {
   playerCmdMul() {
     let m = this._cmdDead ? 0.7 : (this.commander && this.commander.alive ? 1.1 : 1);
     if (this._cryUntil && this.battleTime < this._cryUntil) m *= 1.3;
+    // (Phase 11) Army-wide EQUIPMENT TIER damage bonus (+15%/+30%/+50%). Folded
+    // into the player command multiplier so every player strike benefits. Read
+    // from the cfg snapshot taken at battle launch (falls back to GameWorld).
+    m *= (this._equipDmgMult || 1);
     return m;
   }
   enemyCmdMul() { return (this._hexUntil && this.battleTime < this._hexUntil) ? 0.75 : 1; }
@@ -860,6 +878,30 @@ export class BattleScene extends Phaser.Scene {
         this.units.push(u);
       } else {
         for (let i = 0; i < grp.count; i++) this.units.push(new BUnit(this, side, grp.type, x, GAME_H * 0.54, tex, { vet }));
+      }
+    }
+  }
+
+  // (Phase 11) Apply a progressive armour SHEEN to the player's units by the
+  // army's equipment tier: Iron = a cold steel-grey, Steel = a bright silver,
+  // Legendary = a unique radiant gold glow (with an additive aura ring). Stored
+  // as `_equipTint` on each unit so it survives the hit-flash clearTint (BUnit
+  // .takeDamage reapplies it). Tier 0 (Basic) leaves the base sprite untouched.
+  applyEquipmentTint() {
+    const tier = this._equipTier || 0;
+    if (tier <= 0) return;
+    const TINT = [0, 0xbfc8d6, 0xe8eef7, 0xffe9a8]; // [-, Iron, Steel, Legendary]
+    const tint = TINT[Math.max(0, Math.min(3, tier))];
+    this._equipTintColor = tint;
+    for (const u of this.units) {
+      if (u.side !== 'player' || u.isCommander || !u.spr) continue;
+      u._equipTint = tint;
+      u.spr.setTint(tint);
+      if (tier >= 3) {
+        // Legendary — a unique radiant glow: an additive aura ring beneath the unit.
+        const aura = this.add.ellipse(u.x, u.y + 6, (u.blockW || 30) * 1.3, 22, 0xffd24a, 0.30).setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
+        this.tweens.add({ targets: aura, alpha: { from: 0.30, to: 0.12 }, scaleX: 1.15, scaleY: 1.15, yoyo: true, repeat: -1, duration: 900 });
+        u._equipAura = aura;
       }
     }
   }

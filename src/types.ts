@@ -48,6 +48,10 @@ export interface BuildingType {
   wall?: boolean;
   noCap?: boolean;
   anywhere?: boolean;
+  /** (Phase 11) A MONUMENT — a one-time late-game gold sink raised in the home
+   *  settlement. Its cost/effects (prestige, morale) are authoritative on
+   *  GameWorld.MONUMENT_DEFS; the placement flow charges via GameWorld.buildMonument. */
+  monument?: boolean;
 }
 
 // ---- Live game objects -----------------------------------------------------

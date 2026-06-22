@@ -111,6 +111,14 @@ export interface SettlementState {
   /** (Phase 8) A timed happiness bonus (e.g. the +30 for 5 days after a Grand
    *  Tournament). Plain JSON; the per-settlement view applies/expires it. */
   tempHappy?: { value: number; untilDay: number };
+  /** (Phase 11) Permanent INVESTMENT flags keyed by kind
+   *  ('infrastructure'|'fortification'|'population'|'trade'). Set by
+   *  GameWorld.invest(); read to apply the production mult / +gold-day / etc.
+   *  Plain JSON so Phase 12 serializes it with the rest of the state. */
+  invest?: Record<string, boolean>;
+  /** (Phase 11) Game-day until which the Population investment's +50% growth
+   *  window is active (set when invest('population') is taken). */
+  investGrowthUntil?: number;
   /** GameWorld.day when the player last left (for "while you were away"). */
   lastVisitedDay: number;
   /** true once the player has actually entered (so we only init defaults once). */

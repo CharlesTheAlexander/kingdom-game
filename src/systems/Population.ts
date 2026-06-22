@@ -81,7 +81,9 @@ export class Population {
     // pop-50 target by day 80. Happy kingdoms now grow ~+1/1.5-days.
     const growthPaused = s._growthPauseUntil && day < s._growthPauseUntil; // (Phase 3) plague
     if (this.happiness >= 30 && food > 0 && this.count < cap && !growthPaused) {
-      const rate = this.happiness >= 70 ? 2 : this.happiness >= 50 ? 1.5 : 1;
+      let rate = this.happiness >= 70 ? 2 : this.happiness >= 50 ? 1.5 : 1;
+      // (Phase 11) Population investment: +50% growth during its 10-day window.
+      if (s._investGrowthUntil && day < s._investGrowthUntil) rate *= 1.5;
       this._growthAcc += rate;
       if (this._growthAcc >= 3) { const add = Math.floor(this._growthAcc / 3); this._growthAcc -= add * 3; this.count = Math.min(cap, this.count + add); }
     } else {

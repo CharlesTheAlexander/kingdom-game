@@ -245,6 +245,12 @@ export class ExpeditionSystem {
 
     // Apply the reward. Gold → campaign gold. Resources → nearest player town.
     GameWorld.gold += reward.gold;
+    // (Phase 11) Exploring a ruin is a prestige source (+20). An artifact/relic
+    // also banks a spendable artifact (heroFlags.artifacts) toward Legendary gear.
+    GameWorld.addPrestige(20, 'an ancient ruin yields its secrets');
+    if (reward.kind === 'artifact' || reward.kind === 'relic') {
+      GameWorld.heroFlags.artifacts = (GameWorld.heroFlags.artifacts || 0) + 1;
+    }
     const r = reward.resources;
     if (r.wood || r.stone || r.iron) {
       const town = this.nearestPlayerSettlement(ruin.col, ruin.row);

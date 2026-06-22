@@ -31,12 +31,14 @@ export class Roads {
     const s = this.scene;
     const fresh = this.line(c0, r0, c1, r1).filter((t) => !this.has(t.c, t.r));
     if (!fresh.length) { s.showToast && s.showToast('Road already there'); return false; }
-    const cost = fresh.length * 5;
-    if (s.resources.wood < cost) { s.showToast && s.showToast(`Need ${cost} wood for ${fresh.length} road tiles`); return false; }
-    s.resources.wood -= cost;
+    // (Phase 11) Imperial Roads research makes road building FREE.
+    const free = !!s._researchFreeRoads;
+    const cost = free ? 0 : fresh.length * 5;
+    if (!free && s.resources.wood < cost) { s.showToast && s.showToast(`Need ${cost} wood for ${fresh.length} road tiles`); return false; }
+    if (cost) s.resources.wood -= cost;
     for (const t of fresh) this.tiles.add(this.key(t.c, t.r));
     this.redraw();
-    s.showToast && s.showToast(`Road built — ${fresh.length} tiles (${cost} wood)`);
+    s.showToast && s.showToast(`Road built — ${fresh.length} tiles${free ? ' (Imperial Roads — free)' : ` (${cost} wood)`}`);
     s.logEvent && s.logEvent(`Built a road (${fresh.length} tiles)`, 'info');
     this.tryAutoCaravan(c0, r0, c1, r1);
     return true;

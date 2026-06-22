@@ -475,11 +475,15 @@ export class TroopManager {
   }
 
   // (Loop 3, Feature #3) Elite Warrior — a Barracks Lv4+ veteran (+50% HP & dmg).
+  // (Phase 11) Imperial Legion research grants Elites +1 effective level: a flat
+  // +20% HP/dmg on top (the scene sets _researchEliteBonus when that tech completes).
   spawnElite(home) {
     const hx = home.x + Phaser.Math.Between(-22, 22);
     const hy = home.y + Phaser.Math.Between(20, 40);
-    const w = new Warrior(this.scene, hx, hy, hx, hy, { hp: 75, dps: 18, scale: 46 / 192, tint: 0xc8e0a0, label: 'Elite' });
+    const legion = this.scene._researchEliteBonus ? 1.2 : 1;
+    const w = new Warrior(this.scene, hx, hy, hx, hy, { hp: Math.round(75 * legion), dps: Math.round(18 * legion), scale: 46 / 192, tint: legion > 1 ? 0xd6c060 : 0xc8e0a0, label: legion > 1 ? 'Legion' : 'Elite' });
     w.elite = true;
+    if (legion > 1) w.legion = true;
     this.warriors.push(w);
     return w;
   }

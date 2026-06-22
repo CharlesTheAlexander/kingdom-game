@@ -25,7 +25,7 @@
 // ============================================================================
 
 import type { WorldState, Faction, Settlement } from './WorldGenerator.js';
-import type { SettlementState } from './SettlementState.js';
+import type { SettlementState, GarrisonStack } from './SettlementState.js';
 import { makeSettlementState } from './SettlementState.js';
 import { Biome } from '../data/Biomes.js';
 import { Heroes } from './Heroes.js';
@@ -410,6 +410,38 @@ class GameWorldState {
   /** (Phase 10) One-shot guards for the ongoing world-reaction effects (so e.g. a
    *  given neutral settlement only joins once for high Protector). Plain JSON. */
   reactionFlags: Record<string, any> = {};
+
+  // --- Phase 11 (Economy reinvestment — give mid/late-game gold sinks) --------
+  // Everything below is plain JSON (numbers / strings / small records / arrays
+  // of strings) so Phase 12's SaveManager serializes it verbatim alongside the
+  // rest of the campaign layer. The heavy logic lives in thin methods on this
+  // singleton (craftEquipment / invest / addPrestige / buildMonument) so both
+  // the UI (IsometricScene / ContinentScene) and the headless audit drive the
+  // SAME code paths.
+
+  /** ARMY-WIDE equipment tier 0..3 = Basic / Iron / Steel / Legendary. Crafted at
+   *  the Blacksmith (Iron/Steel) or Legendary Forge (Legendary). Applies an
+   *  army-wide damage multiplier in BattleScene + a progressive armour sheen on
+   *  the player's units. ONE value for the whole army (not per-unit). */
+  equipmentTier = 0;
+
+  /** KINGDOM PRESTIGE — earned from Grand Hall, big battle wins, the Great
+   *  Council, reaching Stage 9, exploring ruins, and heroes reaching Lv5. Drives
+   *  late-game world reactions (better neutral prices at 50+, the fame event at
+   *  100+, pilgrims at 200+, the unique 7th hero "The Ancient" at 300+) and at
+   *  500+ counts toward the Legacy win score. Monotonic; never spent. */
+  prestige = 0;
+
+  /** One-shot guards for prestige sources + threshold events so a re-read never
+   *  double-awards (e.g. the +50 Grand-Hall bonus, per-hero Lv5 +30, the 100/200
+   *  /300 threshold beats, the 7th-hero release). Plain JSON. */
+  prestigeFlags: Record<string, any> = {};
+
+  /** MONUMENTS the player has raised in the home settlement (late-game gold
+   *  sinks). Stored as building typeKeys ('victoryarch' | 'greatstatue' |
+   *  'imperialpalace') so each is built once; their effects (prestige, battle
+   *  morale, the Imperial Palace's stage-9 link) are applied on construction. */
+  monuments: string[] = [];
 
   gold = 500;
 
@@ -1115,6 +1147,317 @@ class GameWorldState {
     return { ok: true };
   }
 
+  // ==========================================================================
+  // Phase 11 — ARMY EQUIPMENT TIERS (army-wide upgrade at the Blacksmith / Forge)
+  // ==========================================================================
+  // One tier for the WHOLE army (not per-unit): 0 Basic / 1 Iron / 2 Steel /
+  // 3 Legendary. Each tier is crafted by paying a one-time cost (iron/planks from
+  // the home stockpile + gold from the purse, and an artifact OR a unit of
+  // legendaryEquipment for the top tier). The effect is a flat army-wide damage
+  // multiplier (+15% / +30% / +50%) read by BattleScene, plus a progressive
+  // armour sheen on the player's units (legendary = a unique glow). Tiers must be
+  // crafted in order (can't skip to Legendary).
+
+  /** Recipe table indexed by target tier (1..3). gold from the purse; iron/planks
+   *  from the home stockpile; `artifact` true = also consume 1 artifact OR 1
+   *  legendaryEquipment for the top tier. */
+  static readonly EQUIPMENT_RECIPES: Record<number, { iron: number; planks: number; gold: number; artifact?: boolean; name: string; mult: number }> = {
+    1: { iron: 40, planks: 0, gold: 60, name: 'Iron', mult: 1.15 },
+    2: { iron: 80, planks: 30, gold: 120, name: 'Steel', mult: 1.30 },
+    3: { iron: 150, planks: 50, gold: 200, artifact: true, name: 'Legendary', mult: 1.50 },
+  };
+
+  /** The recipe for an equipment tier (1..3), or null. Instance accessor so the
+   *  UI doesn't reach through `.constructor` for the static table. */
+  equipmentRecipe(tier: number): { iron: number; planks: number; gold: number; artifact?: boolean; name: string; mult: number } | null {
+    return GameWorldState.EQUIPMENT_RECIPES[tier] || null;
+  }
+
+  /** Display name of the current army equipment tier. */
+  equipmentTierName(): string {
+    return ['Basic', 'Iron', 'Steel', 'Legendary'][Math.max(0, Math.min(3, this.equipmentTier))];
+  }
+
+  /** The army-wide DAMAGE multiplier from the current equipment tier (1.0 / 1.15
+   *  / 1.30 / 1.50). BattleScene folds this into the player's per-strike power. */
+  equipmentDamageMult(): number {
+    return [1, 1.15, 1.30, 1.50][Math.max(0, Math.min(3, this.equipmentTier))];
+  }
+
+  /** Count of recoverable artifacts available to spend on a Legendary craft.
+   *  Artifacts are recorded as a count flag (ruin/relic finds) on heroFlags so
+   *  this stays decoupled from the per-settlement artifact UI; the Legendary
+   *  Forge's legendaryEquipment stock also counts. */
+  artifactStock(): number { return Math.max(0, Math.floor(this.heroFlags.artifacts || 0)); }
+
+  /** Can a given equipment tier be crafted right now? Must be the NEXT tier up
+   *  (no skipping), with the recipe affordable. Iron/Steel need a Blacksmith at
+   *  home; Legendary needs the Legendary Forge (Phase 8) — reuses it, doesn't
+   *  duplicate it. Returns {ok, reason}. */
+  canCraftEquipment(tier: number): { ok: boolean; reason?: string } {
+    const r = GameWorldState.EQUIPMENT_RECIPES[tier];
+    if (!r) return { ok: false, reason: 'No such equipment tier.' };
+    if (tier !== this.equipmentTier + 1) {
+      if (tier <= this.equipmentTier) return { ok: false, reason: `Army already at ${this.equipmentTierName()} tier.` };
+      return { ok: false, reason: `Craft the ${GameWorldState.EQUIPMENT_RECIPES[this.equipmentTier + 1]?.name || 'previous'} tier first.` };
+    }
+    const home = this.homeState();
+    if (!home) return { ok: false, reason: 'No home castle.' };
+    const hasSmith = home.buildings.some(b => b.typeKey === 'blacksmith');
+    if (!hasSmith) return { ok: false, reason: 'Build a Blacksmith first.' };
+    if (tier === 3 && !this.hasLegendaryForge()) return { ok: false, reason: 'Legendary gear needs a Legendary Forge.' };
+    if ((home.resources.iron || 0) < r.iron) return { ok: false, reason: `Need ${r.iron} iron.` };
+    if (r.planks && (home.resources.planks || 0) < r.planks) return { ok: false, reason: `Need ${r.planks} planks.` };
+    if (this.gold < r.gold) return { ok: false, reason: `Need ${r.gold} gold.` };
+    if (r.artifact && this.artifactStock() < 1 && this.legendaryEquipmentStock() < 1) return { ok: false, reason: 'Need 1 artifact or 1 Legendary Equipment.' };
+    return { ok: true };
+  }
+
+  /** Craft the army-wide equipment of `tier` (1..3): spend the recipe, raise the
+   *  tier. The new tier's damage multiplier + visual sheen apply on the next
+   *  battle. Returns {ok, reason}. The single entry point used by the UI + audit. */
+  craftEquipment(tier: number): { ok: boolean; reason?: string } {
+    const c = this.canCraftEquipment(tier);
+    if (!c.ok) return c;
+    const r = GameWorldState.EQUIPMENT_RECIPES[tier];
+    const home = this.homeState()!;
+    home.resources.iron -= r.iron;
+    if (r.planks) home.resources.planks = (home.resources.planks || 0) - r.planks;
+    this.gold -= r.gold;
+    if (r.artifact) {
+      // Prefer spending a loose artifact; fall back to Legendary Equipment stock.
+      if (this.artifactStock() >= 1) this.heroFlags.artifacts = this.artifactStock() - 1;
+      else home.resources.legendaryEquipment = (home.resources.legendaryEquipment || 0) - 1;
+    }
+    this.equipmentTier = tier;
+    const pct = Math.round((r.mult - 1) * 100);
+    this.notify(`Your army is re-equipped with ${r.name} gear (+${pct}% damage).`, tier === 3 ? 0xffe08a : 0xc9d3df);
+    this.recordChronicle(`The host is rearmed in ${r.name} steel — every blade strikes ${pct}% harder.`);
+    return { ok: true };
+  }
+
+  // ==========================================================================
+  // Phase 11 — SETTLEMENT INVESTMENT (permanent per-settlement upgrades)
+  // ==========================================================================
+  // Each investment is a one-time gold/resource sink that sets a flag on the
+  // settlement's SettlementState (so it serializes for Phase 12) and applies a
+  // permanent (or timed) effect. The per-settlement view reads invest.* to apply
+  // the production multiplier, daily gold, growth, etc. `invest(settlementId,kind)`
+  // is the single entry point used by the UI + the headless audit.
+
+  /** Investment definitions: cost (gold from purse; stone/food from the local
+   *  stockpile) + a short label. */
+  static readonly INVEST_DEFS: Record<string, { gold: number; stone?: number; food?: number; name: string; desc: string }> = {
+    infrastructure: { gold: 200, name: 'Infrastructure', desc: '+10% all production here (permanent).' },
+    fortification: { gold: 150, stone: 50, name: 'Fortification', desc: '+50% auto-wall HP, +3 permanent garrison.' },
+    population: { gold: 100, food: 50, name: 'Population', desc: '+5 pop now, +50% growth for 10 days.' },
+    trade: { gold: 150, name: 'Trade', desc: '+5 gold/day, caravan income +20% (permanent).' },
+  };
+
+  /** Instance accessor for the investment definition table (so the UI reads it
+   *  off the singleton instead of reaching through `.constructor`). */
+  get INVEST_DEFS() { return GameWorldState.INVEST_DEFS; }
+  /** Instance accessor for the monument definition table. */
+  get MONUMENT_DEFS() { return GameWorldState.MONUMENT_DEFS; }
+
+  /** Has a settlement already taken a given investment? */
+  hasInvestment(settlementId: string | null, kind: string): boolean {
+    const st = this.settlementState(settlementId) as any;
+    return !!(st && st.invest && st.invest[kind]);
+  }
+
+  /** The permanent local-production multiplier from a settlement's investments
+   *  (currently the Infrastructure +10%). Read by the per-settlement economy. */
+  investProductionMult(settlementId: string | null): number {
+    return this.hasInvestment(settlementId, 'infrastructure') ? 1.1 : 1;
+  }
+
+  /** Bonus gold/day a settlement's Trade investment yields (permanent). */
+  investGoldPerDay(settlementId: string | null): number {
+    return this.hasInvestment(settlementId, 'trade') ? 5 : 0;
+  }
+
+  /** Can a settlement take a given investment? Not already taken, and affordable
+   *  (gold from the purse, stone/food from THAT settlement's stockpile). */
+  canInvest(settlementId: string | null, kind: string): { ok: boolean; reason?: string } {
+    const def = GameWorldState.INVEST_DEFS[kind];
+    if (!def) return { ok: false, reason: 'Unknown investment.' };
+    const st = this.settlementState(settlementId);
+    if (!st) return { ok: false, reason: 'Unknown settlement.' };
+    if (this.hasInvestment(settlementId, kind)) return { ok: false, reason: `${def.name} already built here.` };
+    if (this.gold < def.gold) return { ok: false, reason: `Need ${def.gold} gold.` };
+    if (def.stone && (st.resources.stone || 0) < def.stone) return { ok: false, reason: `Need ${def.stone} stone here.` };
+    if (def.food && (st.resources.food || 0) < def.food) return { ok: false, reason: `Need ${def.food} food here.` };
+    return { ok: true };
+  }
+
+  /** Make a permanent investment in a settlement: spend the cost, set the flag on
+   *  its SettlementState, and apply the immediate effect. Returns {ok, reason}.
+   *  - infrastructure → flag only (production mult read via investProductionMult).
+   *  - fortification  → flag (+50% wall HP) + 3 permanent garrison warriors.
+   *  - population     → immediate +5 pop + a 10-day +50% growth window.
+   *  - trade          → flag (+5 gold/day + caravan income +20%, both read live). */
+  invest(settlementId: string | null, kind: string): { ok: boolean; reason?: string } {
+    const c = this.canInvest(settlementId, kind);
+    if (!c.ok) return c;
+    const def = GameWorldState.INVEST_DEFS[kind];
+    const st = this.settlementState(settlementId)! as any;
+    this.gold -= def.gold;
+    if (def.stone) st.resources.stone = (st.resources.stone || 0) - def.stone;
+    if (def.food) st.resources.food = (st.resources.food || 0) - def.food;
+    if (!st.invest) st.invest = {};
+    st.invest[kind] = true;
+    // Apply the immediate, state-stored effects.
+    if (kind === 'fortification') {
+      const g = st.garrison.find((x: GarrisonStack) => x.type === 'warrior');
+      if (g) g.count += 3; else st.garrison.push({ type: 'warrior', count: 3 });
+    } else if (kind === 'population') {
+      st.population = (st.population || 0) + 5;
+      st.investGrowthUntil = this.displayDay() + 10; // +50% growth window for the local view
+    }
+    this.notify(`${def.name} built in ${st.name}.`, 0x2a7a4f);
+    this.recordChronicle(`${def.name} is established in ${st.name}.`, `invest_${settlementId}_${kind}`);
+    return { ok: true };
+  }
+
+  // ==========================================================================
+  // Phase 11 — PRESTIGE SYSTEM (a kingdom-fame meter + its world effects)
+  // ==========================================================================
+  // Prestige is a single monotonic number earned from notable deeds. addPrestige
+  // is the single entry point every source funnels through; it also fires the
+  // one-shot threshold beats (100 fame event, 200 pilgrims, 300 → release the
+  // 7th hero "The Ancient"). 50+ improves neutral prices; 500+ feeds the Legacy
+  // win score (read by WinConsequences). All guards are JSON for Phase 12.
+
+  /** Add prestige from a world deed and fire any newly-crossed threshold beats.
+   *  `once` (a stable key) makes a source award exactly once (e.g. Grand Hall,
+   *  per-hero Lv5, Stage 9). Returns the prestige actually granted (0 if guarded). */
+  addPrestige(amount: number, reason = '', once?: string): number {
+    if (amount <= 0) return 0;
+    if (once) {
+      this.prestigeFlags.once = this.prestigeFlags.once || {};
+      if (this.prestigeFlags.once[once]) return 0;
+      this.prestigeFlags.once[once] = true;
+    }
+    const before = this.prestige;
+    this.prestige += amount;
+    if (reason) this.notify(`Prestige +${amount}: ${reason} (total ${this.prestige}).`, 0xd6c04a);
+    this.checkPrestigeThresholds(before, this.prestige);
+    return amount;
+  }
+
+  /** Fire the one-shot prestige threshold beats when the meter crosses 100 / 200
+   *  / 300. 50+ (better neutral prices) and 500+ (Legacy score) are read live
+   *  where they apply, so they need no event here. */
+  private checkPrestigeThresholds(before: number, after: number): void {
+    const crossed = (t: number) => before < t && after >= t;
+    if (crossed(100)) {
+      this.notify('Your fame spreads across the continent — minstrels sing of your kingdom.', 0xffe08a);
+      this.recordChronicle('Word of the kingdom\'s glory spreads to every corner of the continent.', 'prestige_100');
+    }
+    if (crossed(200)) {
+      this.notify('Pilgrims now seek out your territory, drawn by your renown.', 0xffe08a);
+      this.recordChronicle('Pilgrims and seekers journey to your lands, drawn by their fame.', 'prestige_200');
+    }
+    if (crossed(300)) this.releaseAncientHero();
+  }
+
+  /** At 300+ prestige, release the unique 7th hero "The Ancient" from a ruin —
+   *  offered once. Heroes.offer() with no worldEvents host auto-joins (world-level
+   *  roster), so this both unlocks AND grants the hero. Safe to call repeatedly. */
+  releaseAncientHero(): void {
+    if (this.prestige < 300) return;
+    if (this.prestigeFlags.ancientReleased) return;
+    if (this.heroes.byId('ancient') || this.heroes.offered?.['ancient']) { this.prestigeFlags.ancientReleased = true; return; }
+    this.prestigeFlags.ancientReleased = true;
+    this.heroes.offer('ancient');
+    this.notify('Your renown stirs an ancient power — The Ancient is freed from a forgotten ruin and pledges to you.', 0xffe08a);
+    this.recordChronicle('Drawn by the kingdom\'s fame, The Ancient rises from a sealed ruin to serve the realm.', 'ancient_join');
+  }
+
+  /** True once the 7th hero "The Ancient" is available (released at 300 prestige). */
+  ancientHeroAvailable(): boolean { return !!this.prestigeFlags.ancientReleased; }
+
+  /** Neutral-settlement price improvement from prestige (≥50 → 10% better trade
+   *  prices). Read by the market/trade UIs. Returns a multiplier on the player's
+   *  favour (1.10 = 10% better). */
+  prestigePriceBonus(): number { return this.prestige >= 50 ? 1.1 : 1; }
+
+  /** Prestige contribution to the Legacy win score (≥500 → counts). Read by
+   *  WinConsequences. Returns a small bonus only past the 500 milestone. */
+  prestigeLegacyBonus(): number { return this.prestige >= 500 ? 1 : 0; }
+
+  // ==========================================================================
+  // Phase 11 — MONUMENTS (late-game gold sinks built in the home settlement)
+  // ==========================================================================
+  // A new building CATEGORY raised at the home castle. Each is a deliberately
+  // large gold/stone sink that grants prestige (and, for the Great Statue, a
+  // standing battle-morale bonus; the Imperial Palace links to the stage-9
+  // Imperial path). Built once each — recorded in `monuments` by typeKey. The
+  // per-settlement view places the building; this method applies the EFFECTS.
+
+  /** Monument definitions: cost + prestige + extra effects. Costs: gold from the
+   *  purse; stone/iron/planks from the home stockpile. */
+  static readonly MONUMENT_DEFS: Record<string, { gold: number; stone?: number; iron?: number; planks?: number; prestige: number; morale?: number; name: string }> = {
+    victoryarch: { gold: 500, stone: 100, prestige: 50, name: 'Victory Arch' },
+    greatstatue: { gold: 800, stone: 150, iron: 50, prestige: 100, morale: 15, name: 'Great Statue' },
+    imperialpalace: { gold: 1500, stone: 200, planks: 100, prestige: 200, name: 'Imperial Palace' },
+  };
+
+  /** Has a given monument been raised? */
+  hasMonument(key: string): boolean { return this.monuments.includes(key); }
+
+  /** The standing battle-morale bonus from monuments (the Great Statue's +15).
+   *  Read by BattleScene when seeding the player's starting morale. */
+  monumentMoraleBonus(): number {
+    let m = 0;
+    for (const k of this.monuments) m += (GameWorldState.MONUMENT_DEFS[k]?.morale || 0);
+    return m;
+  }
+
+  /** Can a monument be built? Stage gate (Victory Arch any time at the home
+   *  castle; Great Statue ≥ stage 7; Imperial Palace ≥ stage 9), not already
+   *  built, and affordable (gold from purse, materials from the home stockpile). */
+  canBuildMonument(key: string): { ok: boolean; reason?: string } {
+    const def = GameWorldState.MONUMENT_DEFS[key];
+    if (!def) return { ok: false, reason: 'Unknown monument.' };
+    if (this.hasMonument(key)) return { ok: false, reason: `${def.name} already stands.` };
+    const home = this.homeState();
+    if (!home) return { ok: false, reason: 'No home castle.' };
+    if (key === 'greatstatue' && this.kingdomStage() < 7) return { ok: false, reason: 'Requires a Small Castle (stage 7).' };
+    if (key === 'imperialpalace' && this.kingdomStage() < 9) return { ok: false, reason: 'Requires a Large Castle (stage 9).' };
+    if (this.gold < def.gold) return { ok: false, reason: `Need ${def.gold} gold.` };
+    if (def.stone && (home.resources.stone || 0) < def.stone) return { ok: false, reason: `Need ${def.stone} stone.` };
+    if (def.iron && (home.resources.iron || 0) < def.iron) return { ok: false, reason: `Need ${def.iron} iron.` };
+    if (def.planks && (home.resources.planks || 0) < def.planks) return { ok: false, reason: `Need ${def.planks} planks.` };
+    return { ok: true };
+  }
+
+  /** Build a monument: spend the cost, record it, and apply its effects (prestige
+   *  + any standing bonus; the Imperial Palace also unlocks the Imperial
+   *  Proclamation path link by recording itself). Returns {ok, reason}. The
+   *  per-settlement view raises the building sprite separately. */
+  buildMonument(key: string): { ok: boolean; reason?: string } {
+    const c = this.canBuildMonument(key);
+    if (!c.ok) return c;
+    const def = GameWorldState.MONUMENT_DEFS[key];
+    const home = this.homeState()!;
+    this.gold -= def.gold;
+    if (def.stone) home.resources.stone = (home.resources.stone || 0) - def.stone;
+    if (def.iron) home.resources.iron = (home.resources.iron || 0) - def.iron;
+    if (def.planks) home.resources.planks = (home.resources.planks || 0) - def.planks;
+    this.monuments.push(key);
+    this.addPrestige(def.prestige, `the ${def.name} is raised`);
+    if (key === 'imperialpalace') {
+      // Replaces the Castle visual + flags the Imperial path link (stage-9
+      // Proclamation is already gated; the palace makes it a destination build).
+      this.lateGameFlags.imperialPalace = true;
+      this.notify('The Imperial Palace dwarfs the old keep — your seat is fit for an Empire.', 0xffe08a);
+    }
+    this.recordChronicle(`The ${def.name} is raised at ${this.king.kingdom} — a monument to endure for ages.`, `monument_${key}`);
+    return { ok: true };
+  }
+
   /** Integer day for display. */
   displayDay(): number { return Math.max(1, Math.floor(this.day)); }
 
@@ -1243,6 +1586,11 @@ class GameWorldState {
     this.wonPath = null;
     this.legacyHappyDays = 0;
     this.reactionFlags = {};
+    // --- Phase 11 reset (economy reinvestment; all plain JSON for Phase 12) ---
+    this.equipmentTier = 0;
+    this.prestige = 0;
+    this.prestigeFlags = {};
+    this.monuments = [];
     this.spawnAIParties();
     this.spawnMercenaryCamps();
     this.started = true;
@@ -1415,6 +1763,14 @@ class GameWorldState {
       wonPath: this.wonPath,
       legacyHappyDays: this.legacyHappyDays,
       reactionFlags: this.reactionFlags,
+      // (Phase 11) Economy-reinvestment layer — army equipment tier, kingdom
+      // prestige (+ its one-shot guards), and the raised monuments. The per-
+      // settlement INVEST flags live on each SettlementState (already serialized
+      // via settlementStates above), so they ride along automatically.
+      equipmentTier: this.equipmentTier,
+      prestige: this.prestige,
+      prestigeFlags: this.prestigeFlags,
+      monuments: this.monuments,
       started: this.started,
     };
   }

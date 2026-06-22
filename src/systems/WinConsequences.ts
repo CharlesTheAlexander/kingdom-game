@@ -156,10 +156,13 @@ export class WinConsequences {
     // Diplomacy: all surviving AI factions allied / at very high relations.
     if (this.allFactionsAllied()) return 'Diplomacy';
     // Legacy: stage 9 + population + research + sustained happiness.
+    // (Phase 11) PRESTIGE counts toward the Legacy score: 500+ prestige is fame
+    // enough to stand in for the sustained-happiness streak (the realm is already
+    // celebrated across the continent), so the happiness gate is waived past it.
     if (GameWorld.kingdomStage() >= LEGACY_STAGE &&
         this.homePopulation() >= LEGACY_POPULATION &&
         this.homeResearchTechs() >= LEGACY_RESEARCH &&
-        GameWorld.legacyHappyDays >= LEGACY_HAPPY_DAYS) return 'Legacy';
+        (GameWorld.legacyHappyDays >= LEGACY_HAPPY_DAYS || GameWorld.prestige >= 500)) return 'Legacy';
     return null;
   }
 

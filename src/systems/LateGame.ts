@@ -208,6 +208,8 @@ export class LateGame {
     }
     GameWorld.notify('The continent watches you with awe and fear.', 0xffe08a);
     GameWorld.recordChronicle('The Large Castle is complete. The whole continent watches the kingdom with awe and fear.');
+    // (Phase 11) Reaching Stage 9 is the single largest prestige source (+200).
+    GameWorld.addPrestige(200, 'your realm reaches its zenith — a Large Castle', 'prestige_stage9');
     // Signal the scene to pop the three leader-speech bubbles next onNewDay frame.
     GameWorld.lateGameFlags._stage9SpeechPending = true;
     return [{ text: 'Your Large Castle is complete — the continent watches with awe and fear.', color: 0xffe08a }];

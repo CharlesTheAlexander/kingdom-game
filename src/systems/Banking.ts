@@ -25,7 +25,10 @@ export class Banking {
   }
 
   hasTreasury(): boolean { return this.scene.buildings.countOfType('treasury') > 0; }
-  weeklyInterest(): number { return Math.round(this.reserves * 0.02); }
+  // (Phase 11) Imperial Treasury research raises the weekly interest 2% → 4%
+  // (the scene sets _researchBankRate when that tech completes).
+  interestRate(): number { return this.scene._researchBankRate || 0.02; }
+  weeklyInterest(): number { return Math.round(this.reserves * this.interestRate()); }
 
   log(t: string) { this.history.unshift({ text: t, day: this.scene.gameDay }); if (this.history.length > 5) this.history.pop(); }
 
