@@ -1,9 +1,17 @@
 // SaveManager.js — (Expansion Phase 1) complete save / load.
 //
-// Captures the full gameplay state as a JSON snapshot and reconstructs it on
-// load. Loading uses a "pending snapshot + scene.restart()" handshake: the
-// scene rebuilds from a clean slate (deterministic terrain) and then applySave()
-// overwrites the dynamic state. Three slots in localStorage: slot 0 = auto-save.
+// (Phase 12 — Bannerlord rebuild) The CANONICAL save path is now the world-level
+// `saveGame()` / `loadGame()` pair below: a save is `{ v:2, meta, gameWorld:
+// GameWorld.serializable() }`. Load regenerates the deterministic 1500×1500 world
+// from the persisted seed, then `GameWorld.restoreFrom()` re-applies the mutable
+// campaign layer (player party/position/supply, gold, day, every SettlementState,
+// all continent parties, heroes, diplomacy + leader memory + honor, reputation,
+// prestige/monuments/equipment, bridges/ferries/intel, late-game flags, chronicle).
+// The legacy single-world capture()/applySave() below is RETAINED (guarded) only
+// for the old per-settlement IsometricScene paths and never throws.
+
+import { GameWorld } from './GameWorld.js';
+import { generateWorld } from './WorldGenerator.js';
 
 const KEY = (slot: number) => `kingdom_save_slot_${slot}`;
 const VERSION = 1;
@@ -258,4 +266,73 @@ export function applySave(scene: any, data: any) {
 
   if (scene.refreshPanel) scene.refreshPanel();
   if (scene.updateHud) scene.updateHud();
+}
+
+// ============================================================================
+// (Phase 12) WORLD-LEVEL SAVE / LOAD — the canonical path for the Bannerlord
+// rebuild. A save persists only the seed + the mutable campaign layer; load
+// regenerates the deterministic world from the seed and re-applies the layer.
+// ============================================================================
+
+const WVERSION = 2;
+
+// Compact metadata for the load menu, read from GameWorld (no scene needed).
+function worldMeta(): any {
+  let kingdom = 'Kingdom', tier = 1, day = 1;
+  try {
+    kingdom = (GameWorld.king && GameWorld.king.kingdom) || 'Kingdom';
+    day = Math.floor(GameWorld.day || 1);
+    tier = GameWorld.kingdomStage ? GameWorld.kingdomStage() : 1;
+  } catch (e) {}
+  return { kingdom, tier: `Stage ${tier}`, day, savedAt: Date.now() };
+}
+
+// Write the current GameWorld campaign to a slot. Never throws (quota/corruption
+// safe); returns {ok,error}. slot 0 is the auto-save.
+export function saveGame(slot: number): { ok: boolean; error?: string } {
+  try {
+    if (!GameWorld.world) return { ok: false, error: 'No campaign to save.' };
+    const payload = { v: WVERSION, meta: worldMeta(), gameWorld: GameWorld.serializable() };
+    const str = JSON.stringify(payload);
+    localStorage.setItem(KEY(slot), str);
+    return { ok: true };
+  } catch (e) {
+    console.error('[SaveGame] write failed (slot ' + slot + ')', e);
+    return { ok: false, error: 'Could not save (storage full?).' };
+  }
+}
+
+// Is a given slot a v2 (world) save?
+export function isWorldSave(slot: number): boolean {
+  try {
+    const str = localStorage.getItem(KEY(slot));
+    if (!str) return false;
+    const raw = JSON.parse(str);
+    return !!(raw && raw.v === WVERSION && raw.gameWorld);
+  } catch (e) { return false; }
+}
+
+// Read a v2 slot, regenerate the world from its seed, and restore GameWorld.
+// Returns {ok,error}. After this, start/resume ContinentScene to resume play.
+export function loadGame(slot: number): { ok: boolean; error?: string } {
+  let raw: any = null;
+  try { const str = localStorage.getItem(KEY(slot)); raw = str ? JSON.parse(str) : null; } catch (e) {
+    return { ok: false, error: 'Save is corrupted.' };
+  }
+  if (!raw || raw.v !== WVERSION || !raw.gameWorld) return { ok: false, error: 'Empty or incompatible slot.' };
+  try {
+    const gw = raw.gameWorld;
+    const world = generateWorld(gw.seed == null ? undefined : gw.seed);
+    GameWorld.restoreFrom(world, gw);
+    return { ok: true };
+  } catch (e) {
+    console.error('[LoadGame] restore failed (slot ' + slot + ')', e);
+    return { ok: false, error: 'Could not load this save.' };
+  }
+}
+
+// True if any slot holds a v2 world save.
+export function hasWorldSave(): boolean {
+  for (let i = 0; i < 3; i++) if (isWorldSave(i)) return true;
+  return false;
 }

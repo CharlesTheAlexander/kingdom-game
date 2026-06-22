@@ -92,4 +92,8 @@ if (import.meta.env.DEV) {
   import('./systems/WinConsequences.js').then((wc) => {
     (window as any).__WinConsequences = wc.WinConsequences;
   });
+  // (Phase 12) Expose the world-level save system for the integration audit.
+  import('./systems/SaveManager.js').then((sm) => {
+    (window as any).__save = sm;
+  });
 }

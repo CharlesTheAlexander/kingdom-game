@@ -5,6 +5,7 @@ import type { AIParty } from '../systems/GameWorld.js';
 import { generateWorld } from '../systems/WorldGenerator.js';
 import type { Settlement } from '../systems/WorldGenerator.js';
 import { ChunkManager, PX_PER_TILE } from '../systems/ChunkManager.js';
+import * as SaveManager from '../systems/SaveManager.js'; // (Phase 12) auto-save / quick-save
 import { ContinentPathfinder } from '../systems/ContinentPathfinder.js';
 import type { PathStep } from '../systems/ContinentPathfinder.js';
 import { biomeData } from '../data/Biomes.js';
@@ -304,6 +305,7 @@ export class ContinentScene extends Phaser.Scene {
     // Keyboard: F follow toggle; +/- zoom; Esc → menu (with confirm-less escape).
     this.input.keyboard?.on('keydown-F', () => { this.followParty = true; });
     this.input.keyboard?.on('keydown-M', () => this.toggleMinimap());
+    this.input.keyboard?.on('keydown-S', () => this.quickSave()); // (Phase 12) quick-save
   }
 
   setZoom(z: number) {
@@ -569,7 +571,15 @@ export class ContinentScene extends Phaser.Scene {
     // reputation-shaped end screen (once).
     const wonPath = WinConsequences.onNewDay();
     if (wonPath) this.showWinScreen(wonPath);
+    // (Phase 12) Auto-save to slot 0 every few days so progress is never lost.
+    if (Math.floor(GameWorld.day) - (this._lastAutoSaveDay || 0) >= 3) {
+      this._lastAutoSaveDay = Math.floor(GameWorld.day);
+      SaveManager.saveGame(0);
+    }
   }
+
+  // (Phase 12) Quick-save to slot 1 (the 'S' key) + a programmatic entry.
+  quickSave(): void { const r = SaveManager.saveGame(1); try { GameWorld.notify(r.ok ? 'Game saved (slot 1)' : (r.error || 'Save failed'), r.ok ? 0x7cfc7c : 0xff6b6b); } catch (e) {} }
 
   // =========================================================================
   // AI parties — move toward their objective tiles (cheap step-toward, fog-gated
@@ -1930,6 +1940,7 @@ export class ContinentScene extends Phaser.Scene {
     if (this._closing || this._enteringSettlement) return;
     const id = GameWorld.settlementId(s);
     GameWorld.currentSettlementId = id;
+    SaveManager.saveGame(0); // (Phase 12) auto-save on entering a settlement
     this._enteringSettlement = true;
     // Detach chunk images before sleeping so a later texture eviction can't leave
     // a dangling frame under the canvas renderer while we are away.
@@ -1955,6 +1966,7 @@ export class ContinentScene extends Phaser.Scene {
     this.revealAroundPlayer();
     this.rebuildFog();
     this.updateHud();
+    SaveManager.saveGame(0); // (Phase 12) auto-save on returning from a settlement
     this.cameras.main.fadeIn(260, 12, 18, 26);
   }
 

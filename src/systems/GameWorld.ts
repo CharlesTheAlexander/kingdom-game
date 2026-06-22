@@ -1702,6 +1702,11 @@ class GameWorldState {
   serializable(): any {
     return {
       seed: this.world ? this.world.seed : null,
+      // (Phase 12) The full settlement list — base settlements ARE deterministic
+      // from the seed, but mercenary camps and player-FOUNDED colonies are added
+      // at runtime, so we persist the whole list and re-apply it onto the
+      // seed-regenerated world on load (cheap; settlements are small JSON).
+      settlements: this.world ? this.world.settlements : [],
       king: this.king,
       player: this.player,
       aiParties: this.aiParties,
@@ -1773,6 +1778,86 @@ class GameWorldState {
       monuments: this.monuments,
       started: this.started,
     };
+  }
+
+  /**
+   * (Phase 12) Restore a saved campaign onto this singleton. `world` is a freshly
+   * `generateWorld(data.seed)`-ed WorldState (the 11MB typed arrays are rebuilt
+   * deterministically from the seed by the caller — only the mutable campaign
+   * layer is persisted). We then overwrite the regenerated settlement list with
+   * the saved one (so founded colonies + mercenary camps survive), apply every
+   * mutable field, and rebuild the host-backed system instances (Heroes /
+   * Diplomacy / FactionLeaders / Reputation) on fresh hosts then restore() their
+   * serialized state — mirroring startNewCampaign field-for-field.
+   */
+  restoreFrom(world: WorldState, data: any): void {
+    this.world = world;
+    if (data.settlements && Array.isArray(data.settlements)) this.world.settlements = data.settlements;
+    if (data.king) this.king = { ...this.king, ...data.king };
+    const pf = world.factions.find(f => f.personality === 'player');
+    if (pf) this.playerColor = pf.color;
+    this.player = data.player || this.player;
+    this.gold = data.gold ?? 500;
+    this.day = data.day ?? 1;
+    this.currentSettlementId = data.currentSettlementId ?? null;
+    this.pendingBattle = null;
+    this.aiParties = data.aiParties || [];
+    this.pioneers = data.pioneers || [];
+    this.pioneerCounter = data.pioneerCounter || 0;
+    // Phase 5
+    this.workers = data.workers || [];
+    this.workerCounter = data.workerCounter || 0;
+    this.exploredRuins = data.exploredRuins || {};
+    this.clearedCamps = data.clearedCamps || {};
+    this.relationDeltas = data.relationDeltas || {};
+    this.discovered = data.discovered || {};
+    this.settlementStates = data.settlementStates || {};
+    this.pendingNotifications = [];
+    // Phase 6 — heroes (rebuild on a fresh host, then restore the roster JSON)
+    this.heroes = new Heroes(this.heroHost());
+    if (data.heroes && this.heroes.restore) { try { this.heroes.restore(data.heroes); } catch (e) {} }
+    this.heroStations = data.heroStations || {};
+    this.heroDialogue = data.heroDialogue || { lastShownDay: -99, firedOnce: {} };
+    this.heroQuests = data.heroQuests || {};
+    this.heroFlags = data.heroFlags || {};
+    // Phase 7 — diplomacy (fresh instances on the world host, then restore)
+    this.diplomacy = null;
+    this.leaders = null;
+    this.leaderMemory = data.leaderMemory || {};
+    this.honor = data.honor || 0;
+    this.diploFlags = data.diploFlags || {};
+    this.initDiplomacy();
+    if (data.diplomacy && this.diplomacy && this.diplomacy.restore) { try { this.diplomacy.restore(data.diplomacy); } catch (e) {} }
+    if (data.leaders && this.leaders && this.leaders.restore) { try { this.leaders.restore(data.leaders); } catch (e) {} }
+    // Phase 8 — late game
+    this.armyCap = data.armyCap || 1;
+    this.tournament = data.tournament || { active: false, endDay: 0, col: 0, row: 0, held: 0 };
+    this.emissaries = data.emissaries || [];
+    this.emissaryCounter = data.emissaryCounter || 0;
+    this.embassies = data.embassies || {};
+    this.imperialProclaimed = !!data.imperialProclaimed;
+    this.imperialEndingUnlocked = !!data.imperialEndingUnlocked;
+    this.chronicle = data.chronicle || [];
+    this.highestStageSeen = data.highestStageSeen || 1;
+    this.lateGameFlags = data.lateGameFlags || {};
+    // Phase 9 — battle intel + rivers
+    this.intelFlags = data.intelFlags || {};
+    this.bridgeState = data.bridgeState || {};
+    this.ferryDocks = data.ferryDocks || [];
+    this.ferryCounter = data.ferryCounter || 0;
+    // Phase 10 — reputation + win consequences (fresh host, then restore scores)
+    this.reputation = new Reputation(this.repHost());
+    if (data.reputation && this.reputation.restore) { try { this.reputation.restore(data.reputation); } catch (e) {} }
+    this.winTriggered = !!data.winTriggered;
+    this.wonPath = data.wonPath || null;
+    this.legacyHappyDays = data.legacyHappyDays || 0;
+    this.reactionFlags = data.reactionFlags || {};
+    // Phase 11 — economy
+    this.equipmentTier = data.equipmentTier || 0;
+    this.prestige = data.prestige || 0;
+    this.prestigeFlags = data.prestigeFlags || {};
+    this.monuments = data.monuments || [];
+    this.started = true;
   }
 }
 

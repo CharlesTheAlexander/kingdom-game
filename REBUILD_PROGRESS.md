@@ -363,4 +363,5 @@ Rule: every phase must `npm run build` clean + boot with ZERO console errors bef
       p11_equipment_battle (tier-1 tint + +15% dmg), p11_invest, p11_prestige_panel, p11_monument, p11_monument_placed
       (full UI placement +50 prestige), p11_legendary_battle (tier-3 gold glow + aura). DEFERRED to P12: save rewrite;
       Imperial Palace literally swapping the live castle sprite (flag + own building sprite only for now).
-- [ ] P12 — Full integration + save system update
+- [x] P12 — Full integration + save system update
+      SaveManager.saveGame/loadGame (v2): persist seed + mutable layer; load regenerates world from seed + GameWorld.restoreFrom() reapplies everything (incl. founded colonies, heroes, diplomacy/memory/honor, reputation, prestige/monuments/equipment, bridges/ferries/intel, chronicle). Auto-save slot0 (every 3 days + settlement enter/leave), S quick-save slot1, menu Continue/Load use loadGame. Verified: real UI flow reaches continent; save->wipe->load restores all values + Newhaven colony; 0 console errors; FPS 45-60.

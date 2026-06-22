@@ -925,3 +925,34 @@ its code location.
 headless playthrough (upgraded menu → New Kingdom → 6 buildings → 30-day
 `onNewDay` loop returns `ok` → battle / continent / council all transition
 cleanly) at **34–46 FPS** with **zero console errors and zero warnings**.
+
+---
+
+## SECTION: THE BANNERLORD-STYLE REBUILD (12 Phases) ✅
+
+A ground-up architecture rebuild on branch `bannerlord-rebuild`. The game's core
+loop moved from a single 200×200 world to a **Bannerlord model**: **ContinentScene**
+is the primary loop — the player is a party travelling a procedurally generated
+**1500×1500** continent (top-down, chunked rendering, continuous time, supply, A*
+movement, AI parties, battles); **IsometricScene** became a **per-settlement view**
+(each settlement has its own `SettlementState` + biome-themed local map, entered from
+the continent, left back to it, with the world clock never stopping); **GameWorld**
+(`src/systems/GameWorld.ts`) is the shared campaign-state singleton.
+
+Phases: (1) World generation — seeded Perlin/value-noise, 12 biomes, rivers, resources,
+faction/settlement placement, chunked renderer. (2) Continent primary loop + KingCreation
++ GameWorld. (3) Per-settlement IsometricScene. (4) Pioneer system (found colonies
+anywhere). (5) Living expeditions (ruins/camps/workers/mercs/caravans as continent
+journeys). (6) Hero world integration (travel/station, ~20–32 dialogue lines each,
+quests, 7th hero). (7) Diplomatic narrative (leader memory, history dialogue, honor).
+(8) Late game stages 8–9 (tournament, legendary forge, emissaries, imperial proclamation,
+chronicle). (9) Battle fog of war (intel-gated reveal) + strategic rivers (bridges/ferries).
+(10) Win consequences (reputation-shaped endings + ongoing world reactions). (11) Economy
+reinvestment (equipment tiers, settlement investment, prestige, monuments, imperial research).
+(12) Full integration + a v2 save system: persist seed + the mutable campaign layer,
+load = regenerate world from seed + `GameWorld.restoreFrom()` (founded colonies, heroes,
+diplomacy/memory/honor, reputation, prestige/monuments/equipment, bridges/ferries/intel,
+chronicle all survive); auto-save + quick-save + menu Continue/Load.
+
+Every phase: `tsc --noEmit` clean, `npm run build` clean, boots with **zero console
+errors**, FPS 30+ (45–60 typical). See `REBUILD_COMPLETE_REPORT.md` and `REBUILD_PROGRESS.md`.

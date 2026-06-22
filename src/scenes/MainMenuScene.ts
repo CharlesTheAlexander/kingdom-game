@@ -217,9 +217,16 @@ export class MainMenuScene extends Phaser.Scene {
   }
 
   continueGame() {
-    // Phase 2: a full save/load round-trip is Phase 12. For now "Continue" lands
-    // on the continent with a campaign initialised from the saved king record
-    // (or defaults), so the player always resumes on the primary loop.
+    // (Phase 12) Prefer a real slot restore: load the most recent world save
+    // (auto-save slot 0 first, then 1/2), regenerating the world from its seed and
+    // restoring the full campaign. Fall back to a fresh campaign from the king
+    // record only if no compatible save exists.
+    for (const slot of [0, 1, 2]) {
+      if (SaveManager.isWorldSave(slot)) {
+        const r = SaveManager.loadGame(slot);
+        if (r.ok) { this.enterContinent(); return; }
+      }
+    }
     let king: any = null;
     try { king = JSON.parse(localStorage.getItem('kg_king') || 'null'); } catch (e) {}
     if (!king) { this.toast('No kingdom to continue.'); return; }
@@ -268,9 +275,13 @@ export class MainMenuScene extends Phaser.Scene {
       if (has) {
         const lb = this.add.rectangle(x + W - 110, sy + 32, 76, 30, 0x2d6cb0).setDepth(23).setStrokeStyle(1, 0xf0e6c8, 0.8).setInteractive({ useHandCursor: true });
         els.push(lb); els.push(this.add.text(x + W - 110, sy + 32, 'Load', { fontFamily: 'monospace', fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(24));
-        // (Phase 2) Loading a slot resumes the campaign on the continent. A full
-        // slot-state restore is Phase 12; for now we rebuild from the king record.
-        lb.on('pointerdown', () => { if (SaveManager.preparePending(i).ok) this.continueGame(); });
+        // (Phase 12) Real slot restore: regenerate the world from the saved seed
+        // and re-apply the full campaign, then resume on the continent. Falls back
+        // to the legacy king-record path if the slot is an old-format save.
+        lb.on('pointerdown', () => {
+          if (SaveManager.isWorldSave(i)) { const r = SaveManager.loadGame(i); if (r.ok) { this.closePanel(); this.enterContinent(); return; } this.toast(r.error || 'Load failed'); return; }
+          if (SaveManager.preparePending(i).ok) this.continueGame();
+        });
       }
     });
   }
