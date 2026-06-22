@@ -17,7 +17,7 @@
  *   - Wildlife.js ........... wolves / goblins / boars (Phase 2 threat layer)
  *   - Territory.js .......... territory wash + soft border + basic fog of war
  *   - Pathfinding.js ........ A* enemies path around buildings (iso tiles)
- *   - AudioManager.js ....... audio roadmap placeholder
+ *   - SoundEngine.js ........ procedural SFX/ambience (the live audio system)
  *
  * WHAT THIS FILE OVERRIDES FOR ISOMETRIC:
  *   - Coordinates: tileTopLeft / tileCenter / screenToTile / pointerToTile using
